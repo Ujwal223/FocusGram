@@ -10,7 +10,7 @@ class SettingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final settings = context.watch<SettingsService>();
+    // Watching services ensures the UI rebuilds when settings or session state change.
     final sm = context.watch<SessionManager>();
 
     return Scaffold(
@@ -45,7 +45,7 @@ class SettingsPage extends StatelessWidget {
             title: 'Distraction Management',
             subtitle: 'Blur explore and reel controls',
             icon: Icons.visibility_off_outlined,
-            destination: _DistractionSettingsPage(settings: settings),
+            destination: const _DistractionSettingsPage(),
           ),
           _buildSettingsTile(
             context: context,
@@ -149,11 +149,11 @@ class SettingsPage extends StatelessWidget {
 }
 
 class _DistractionSettingsPage extends StatelessWidget {
-  final SettingsService settings;
-  const _DistractionSettingsPage({required this.settings});
+  const _DistractionSettingsPage();
 
   @override
   Widget build(BuildContext context) {
+    final settings = context.watch<SettingsService>();
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(

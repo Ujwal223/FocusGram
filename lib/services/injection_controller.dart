@@ -278,6 +278,10 @@ class InjectionController {
     (function() {
       function lockReelScroll(reelContainer) {
         if (reelContainer.dataset.scrollLocked) return;
+        
+        // If session is active, don't lock
+        if (window.__focusgramSessionActive === true) return;
+
         reelContainer.dataset.scrollLocked = 'true';
         
         let startY = 0;
@@ -321,6 +325,7 @@ class InjectionController {
   /// JS to disable swipe-to-next behavior inside the isolated Reel player.
   static const String disableReelSwipeJS = '''
     (function disableSwipeNavigation() {
+      if (window.__focusgramSessionActive === true) return;
       let startX = 0;
       document.addEventListener('touchstart', e => { startX = e.touches[0].clientX; }, {passive: true});
       document.addEventListener('touchmove', e => {
@@ -329,6 +334,10 @@ class InjectionController {
       }, {passive: false});
     })();
   ''';
+
+  /// JS to update the session state variable in the page context.
+  static String buildSessionStateJS(bool active) =>
+      'window.__focusgramSessionActive = $active;';
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
@@ -345,9 +354,11 @@ class InjectionController {
     if (blurExplore) css.write(_blurExploreCSS);
 
     return '''
+      ${buildSessionStateJS(sessionActive)}
       ${_buildMutationObserver(css.toString())}
       $_periodicNavRemoverJS
       $_dismissAppBannerJS
+      $reelsMutationObserverJS
     ''';
   }
 }

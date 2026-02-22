@@ -210,6 +210,12 @@ class _FrictionSliderTileState extends State<_FrictionSliderTile> {
   }
 
   @override
+  void didUpdateWidget(_FrictionSliderTile old) {
+    super.didUpdateWidget(old);
+    if (!_pendingConfirm) _draftValue = widget.value;
+  }
+
+  @override
   Widget build(BuildContext context) {
     final divisions = ((widget.max - widget.min) / widget.divisor).round();
 

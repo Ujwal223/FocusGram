@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../services/session_manager.dart';
 import '../services/settings_service.dart';
@@ -29,6 +30,7 @@ class _MainWebViewPageState extends State<MainWebViewPage>
   // Watchdog for app-session expiry
   Timer? _watchdog;
   bool _extensionDialogShown = false;
+  bool _lastSessionActive = false;
 
   @override
   void initState() {
@@ -36,12 +38,28 @@ class _MainWebViewPageState extends State<MainWebViewPage>
     WidgetsBinding.instance.addObserver(this);
     _initWebView();
     _startWatchdog();
+
+    // Listen to session changes to update JS context immediately
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<SessionManager>().addListener(_onSessionChanged);
+      _lastSessionActive = context.read<SessionManager>().isSessionActive;
+    });
+  }
+
+  void _onSessionChanged() {
+    if (!mounted) return;
+    final sm = context.read<SessionManager>();
+    if (_lastSessionActive != sm.isSessionActive) {
+      _lastSessionActive = sm.isSessionActive;
+      _applyInjections();
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _watchdog?.cancel();
+    context.read<SessionManager>().removeListener(_onSessionChanged);
     super.dispose();
   }
 
@@ -154,6 +172,15 @@ class _MainWebViewPageState extends State<MainWebViewPage>
             );
           },
           onNavigationRequest: (request) {
+            // Handle external links (non-Instagram/Facebook)
+            final uri = Uri.tryParse(request.url);
+            if (uri != null &&
+                !uri.host.contains('instagram.com') &&
+                !uri.host.contains('facebook.com')) {
+              launchUrl(uri, mode: LaunchMode.externalApplication);
+              return NavigationDecision.prevent;
+            }
+
             final decision = NavigationGuard.evaluate(url: request.url);
 
             if (decision.blocked) {
@@ -255,7 +282,11 @@ class _MainWebViewPageState extends State<MainWebViewPage>
         await _navigateTo('/explore/');
         break;
       case 2:
-        _openSessionModal();
+        if (context.read<SessionManager>().isSessionActive) {
+          await _navigateTo('/reels/');
+        } else {
+          _openSessionModal();
+        }
         break;
       case 3:
         await _navigateTo('/direct/inbox/');
@@ -393,11 +424,21 @@ class _EdgePanelState extends State<_EdgePanel> {
     // Hits will pass through the Stack to the WebView except on our children.
     return Stack(
       children: [
+        // ── Tap-to-close Backdrop (only when expanded) ──
+        if (_isExpanded)
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: _toggleExpansion,
+              behavior: HitTestBehavior.opaque,
+              child: Container(color: Colors.black.withValues(alpha: 0.15)),
+            ),
+          ),
+
         // ── The Handle (Minimized State) ──
         if (!_isExpanded)
           Positioned(
             left: 0,
-            top: MediaQuery.of(context).size.height * 0.35,
+            top: MediaQuery.of(context).size.height * 0.35 + 30, // Added margin
             child: Material(
               color: Colors.transparent,
               child: Column(
@@ -480,7 +521,7 @@ class _EdgePanelState extends State<_EdgePanel> {
           duration: const Duration(milliseconds: 350),
           curve: Curves.easeOutQuart,
           left: _isExpanded ? 0 : -220,
-          top: MediaQuery.of(context).size.height * 0.25,
+          top: MediaQuery.of(context).size.height * 0.25 + 30, // Added margin
           child: GestureDetector(
             onHorizontalDragUpdate: (details) {
               if (details.delta.dx < -10) _toggleExpansion();
