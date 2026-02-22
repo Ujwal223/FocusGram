@@ -71,6 +71,13 @@ class InjectionController {
     }
   ''';
 
+  /// CSS that adds bottom padding so feed content doesn't hide behind our bar.
+  static const String _bottomPaddingCSS = '''
+    body, #react-root > div {
+      padding-bottom: 64px !important;
+    }
+  ''';
+
   /// CSS to blur Explore feed posts/reels (keeps stories visible).
   static const String _blurExploreCSS = '''
     /* Blur Explore grid posts and reel cards (not stories row) */
@@ -250,6 +257,27 @@ class InjectionController {
     })();
   ''';
 
+  /// JS to disable vertical swipe gestures that drive reel-to-reel transition.
+  static const String reelSwipeBlockerJS = '''
+    (function() {
+      let _touchStartY = 0;
+      document.addEventListener('touchstart', function(e) {
+        _touchStartY = e.touches[0].clientY;
+      }, { passive: true });
+
+      document.addEventListener('touchmove', function(e) {
+        const deltaY = e.touches[0].clientY - _touchStartY;
+        // If swiping UP (negative delta), block it to prevent next reel load
+        if (deltaY < -10) {
+          if (e.cancelable) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }
+      }, { passive: false });
+    })();
+  ''';
+
   // ── Reel scroll-lock ────────────────────────────────────────────────────────
 
   /// JS that prevents the user from scrolling to a different reel.
@@ -329,6 +357,7 @@ class InjectionController {
   }) {
     final StringBuffer css = StringBuffer();
     css.write(_hideInstagramNavCSS);
+    css.write(_bottomPaddingCSS); // Ensure content isn't behind our bar
     if (!sessionActive) css.write(_hideReelsCSS);
     if (blurExplore) css.write(_blurExploreCSS);
 

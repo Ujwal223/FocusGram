@@ -9,7 +9,6 @@ import '../services/injection_controller.dart';
 import '../services/navigation_guard.dart';
 import 'session_modal.dart';
 import 'settings_page.dart';
-import 'reel_player_overlay.dart';
 
 class MainWebViewPage extends StatefulWidget {
   const MainWebViewPage({super.key});
@@ -116,8 +115,6 @@ class _MainWebViewPageState extends State<MainWebViewPage> {
   }
 
   void _initWebView() {
-    final sessionManager = context.read<SessionManager>();
-
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setUserAgent(InjectionController.iOSUserAgent)
@@ -134,23 +131,20 @@ class _MainWebViewPageState extends State<MainWebViewPage> {
             if (mounted) setState(() => _isLoading = false);
             _applyInjections();
             _updateCurrentTab(url);
-            // Cache username whenever we finish loading any page
             _cacheUsername();
+            // Inject swipe-blocker when on a specific reel page
+            if (NavigationGuard.isSpecificReel(url)) {
+              _controller.runJavaScript(InjectionController.reelSwipeBlockerJS);
+            }
           },
           onNavigationRequest: (request) {
-            final isDmReel = NavigationGuard.isDmReelLink(request.url);
-
-            final decision = NavigationGuard.evaluate(
-              url: request.url,
-              sessionActive: sessionManager.isSessionActive,
-              isDmReelException: isDmReel,
-            );
+            final decision = NavigationGuard.evaluate(url: request.url);
 
             if (decision.blocked) {
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(decision.reason ?? 'Blocked'),
+                    content: Text(decision.reason ?? 'Navigation blocked'),
                     backgroundColor: Colors.red.shade900,
                     behavior: SnackBarBehavior.floating,
                     margin: const EdgeInsets.fromLTRB(16, 0, 16, 80),
@@ -159,22 +153,6 @@ class _MainWebViewPageState extends State<MainWebViewPage> {
                 );
               }
               return NavigationDecision.prevent;
-            }
-
-            // Open DM reel in isolated player
-            if (isDmReel && !sessionManager.isSessionActive) {
-              final canonicalUrl = NavigationGuard.canonicalizeDmReelUrl(
-                request.url,
-              );
-              if (canonicalUrl != null) {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => ReelPlayerOverlay(url: canonicalUrl),
-                  ),
-                );
-                return NavigationDecision.prevent;
-              }
             }
 
             return NavigationDecision.navigate;
@@ -290,39 +268,49 @@ class _MainWebViewPageState extends State<MainWebViewPage> {
 
   @override
   Widget build(BuildContext context) {
+    final topPad = MediaQuery.of(context).padding.top;
+    const barHeight = 60.0;
+
     return Scaffold(
       backgroundColor: Colors.black,
-      body: SafeArea(
-        bottom: false,
-        child: Column(
-          children: [
-            // Status Bar — always on top
-            _StatusBar(),
-
-            // WebView
-            Expanded(
-              child: Stack(
-                children: [
-                  WebViewWidget(controller: _controller),
-                  // Thin loading bar (not full-screen spinner)
-                  if (_isLoading)
-                    const LinearProgressIndicator(
-                      backgroundColor: Colors.transparent,
-                      color: Colors.blue,
-                      minHeight: 2,
-                    ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-      bottomNavigationBar: _FocusGramNavBar(
-        currentIndex: _currentIndex,
-        onTap: _onTabTapped,
-      ),
       floatingActionButton: _SessionFAB(onTap: _openSessionModal),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      body: Stack(
+        children: [
+          // ── WebView: full screen (behind everything) ────────────────
+          Positioned.fill(child: WebViewWidget(controller: _controller)),
+
+          // ── Thin loading indicator at very top ──────────────────────
+          if (_isLoading)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: const LinearProgressIndicator(
+                backgroundColor: Colors.transparent,
+                color: Colors.blue,
+                minHeight: 2,
+              ),
+            ),
+
+          // ── Status bar overlaid at top (below system status bar) ────
+          Positioned(top: topPad, left: 0, right: 0, child: _StatusBar()),
+
+          // ── Our bottom bar overlaid on top of Instagram's bar ───────
+          // Making it taller than Instagram's native bar (~50dp) means
+          // theirs is fully hidden behind ours — no CSS needed as fallback.
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: _FocusGramNavBar(
+              currentIndex: _currentIndex,
+              onTap: _onTabTapped,
+              height: barHeight,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -426,8 +414,13 @@ class _StatusBar extends StatelessWidget {
 class _FocusGramNavBar extends StatelessWidget {
   final int currentIndex;
   final Future<void> Function(int) onTap;
+  final double height;
 
-  const _FocusGramNavBar({required this.currentIndex, required this.onTap});
+  const _FocusGramNavBar({
+    required this.currentIndex,
+    required this.onTap,
+    this.height = 52,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -444,7 +437,7 @@ class _FocusGramNavBar extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: SizedBox(
-          height: 52,
+          height: height,
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: items.asMap().entries.map((entry) {
