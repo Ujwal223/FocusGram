@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/session_manager.dart';
 import '../services/settings_service.dart';
+import 'guardrails_page.dart';
+import 'about_page.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
@@ -30,100 +32,29 @@ class SettingsPage extends StatelessWidget {
           // ── Stats row ───────────────────────────────────────────
           _buildStatsRow(sm),
 
-          // ── Consumption Limits ──────────────────────────────────
-          _buildSectionHeader('Reel Consumption Limits'),
-          _buildFrictionSliderTile(
+          // ── Settings Subsections ──────────────────────────────
+          _buildSettingsTile(
             context: context,
-            sm: sm,
-            title: 'Daily Reel Limit',
-            subtitle: '${sm.dailyLimitSeconds ~/ 60} min / day',
-            value: (sm.dailyLimitSeconds ~/ 60).toDouble(),
-            min: 5,
-            max: 120,
-            divisor: 5,
-            warningText:
-                'Increasing your daily limit may make it easier to mindlessly scroll. Are you sure?',
-            onConfirmed: (v) => sm.setDailyLimitMinutes(v.toInt()),
+            title: 'Guardrails',
+            subtitle: 'Daily limit, cooldown, and scheduled blocking',
+            icon: Icons.shield_outlined,
+            destination: const GuardrailsPage(),
           ),
-          _buildFrictionSliderTile(
+          _buildSettingsTile(
             context: context,
-            sm: sm,
-            title: 'Session Cooldown',
-            subtitle: '${sm.cooldownSeconds ~/ 60} min between sessions',
-            value: (sm.cooldownSeconds ~/ 60).toDouble(),
-            min: 5,
-            max: 180,
-            divisor: 5,
-            warningText:
-                'Reducing the cooldown makes it easier to start new reel sessions. Are you sure?',
-            onConfirmed: (v) => sm.setCooldownMinutes(v.toInt()),
+            title: 'Distraction Management',
+            subtitle: 'Blur explore and reel controls',
+            icon: Icons.visibility_off_outlined,
+            destination: _DistractionSettingsPage(settings: settings),
+          ),
+          _buildSettingsTile(
+            context: context,
+            title: 'About',
+            subtitle: 'Developer info and GitHub',
+            icon: Icons.info_outline,
+            destination: const AboutPage(),
           ),
 
-          // ── Distraction Management ──────────────────────────────
-          _buildSectionHeader('Distraction Management'),
-          SwitchListTile(
-            title: const Text(
-              'Blur Explore feed',
-              style: TextStyle(color: Colors.white),
-            ),
-            subtitle: const Text(
-              'Blurs posts and reels in Explore by default',
-              style: TextStyle(color: Colors.white54, fontSize: 13),
-            ),
-            value: settings.blurExplore,
-            onChanged: (v) => settings.setBlurExplore(v),
-            activeThumbColor: Colors.blue,
-          ),
-
-          // ── Friction & Discipline ───────────────────────────────
-          _buildSectionHeader('Friction & Discipline'),
-          SwitchListTile(
-            title: const Text(
-              'Mindfulness Gate',
-              style: TextStyle(color: Colors.white),
-            ),
-            subtitle: const Text(
-              'Show breathing exercise before opening Instagram',
-              style: TextStyle(color: Colors.white54, fontSize: 13),
-            ),
-            value: settings.showBreathGate,
-            onChanged: (v) => settings.setShowBreathGate(v),
-            activeThumbColor: Colors.blue,
-          ),
-          SwitchListTile(
-            title: const Text(
-              'Long-press to start Reel session',
-              style: TextStyle(color: Colors.white),
-            ),
-            subtitle: const Text(
-              'Requires 2s hold on the play button',
-              style: TextStyle(color: Colors.white54, fontSize: 13),
-            ),
-            value: settings.requireLongPress,
-            onChanged: (v) => settings.setRequireLongPress(v),
-            activeThumbColor: Colors.blue,
-          ),
-
-          const Divider(color: Colors.white10, height: 40),
-
-          // ── Danger zone ─────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: ElevatedButton(
-              onPressed: () => _confirmReset(context, sm),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red.withAlpha(
-                  (255 * 0.08).round(),
-                ), // Changed from withOpacity
-                foregroundColor: Colors.redAccent,
-                side: const BorderSide(color: Colors.redAccent, width: 0.5),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              child: const Text('Reset Daily Usage Counter'),
-            ),
-          ),
           const SizedBox(height: 40),
           const Center(
             child: Text(
@@ -133,6 +64,32 @@ class SettingsPage extends StatelessWidget {
           ),
           const SizedBox(height: 24),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSettingsTile({
+    required BuildContext context,
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Widget destination,
+  }) {
+    return ListTile(
+      leading: Icon(icon, color: Colors.blue),
+      title: Text(title, style: const TextStyle(color: Colors.white)),
+      subtitle: Text(
+        subtitle,
+        style: const TextStyle(color: Colors.white54, fontSize: 13),
+      ),
+      trailing: const Icon(
+        Icons.arrow_forward_ios,
+        color: Colors.white24,
+        size: 14,
+      ),
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => destination),
       ),
     );
   }
@@ -189,75 +146,80 @@ class SettingsPage extends StatelessWidget {
 
   Widget _dividerCell() =>
       Container(width: 1, height: 36, color: Colors.white10);
+}
 
-  Widget _buildSectionHeader(String title) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
-      child: Text(
-        title.toUpperCase(),
-        style: const TextStyle(
-          color: Colors.blue,
-          fontSize: 11,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 1.3,
+class _DistractionSettingsPage extends StatelessWidget {
+  final SettingsService settings;
+  const _DistractionSettingsPage({required this.settings});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        title: const Text(
+          'Distraction Management',
+          style: TextStyle(fontSize: 17),
+        ),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, size: 18),
+          onPressed: () => Navigator.pop(context),
         ),
       ),
-    );
-  }
-
-  /// A slider tile that shows a friction dialog before accepting a larger value.
-  Widget _buildFrictionSliderTile({
-    required BuildContext context,
-    required SessionManager sm,
-    required String title,
-    required String subtitle,
-    required double value,
-    required double min,
-    required double max,
-    required int divisor,
-    required String warningText,
-    required Future<void> Function(double) onConfirmed,
-  }) {
-    return _FrictionSliderTile(
-      title: title,
-      subtitle: subtitle,
-      value: value,
-      min: min,
-      max: max,
-      divisor: divisor,
-      warningText: warningText,
-      onConfirmed: onConfirmed,
-    );
-  }
-
-  void _confirmReset(BuildContext context, SessionManager sm) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A1A),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
-          'Reset Counter?',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: const Text(
-          'This will reset your daily reel usage to zero minutes.',
-          style: TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              sm.resetDailyCounter();
-              Navigator.pop(ctx);
-            },
-            child: const Text(
-              'Reset',
-              style: TextStyle(color: Colors.redAccent),
+      body: ListView(
+        children: [
+          SwitchListTile(
+            title: const Text(
+              'Blur Explore feed',
+              style: TextStyle(color: Colors.white),
             ),
+            subtitle: const Text(
+              'Blurs posts and reels in Explore by default',
+              style: TextStyle(color: Colors.white54, fontSize: 13),
+            ),
+            value: settings.blurExplore,
+            onChanged: (v) => settings.setBlurExplore(v),
+            activeThumbColor: Colors.blue,
+          ),
+          SwitchListTile(
+            title: const Text(
+              'Mindfulness Gate',
+              style: TextStyle(color: Colors.white),
+            ),
+            subtitle: const Text(
+              'Show breathing exercise before opening',
+              style: TextStyle(color: Colors.white54, fontSize: 13),
+            ),
+            value: settings.showBreathGate,
+            onChanged: (v) => settings.setShowBreathGate(v),
+            activeThumbColor: Colors.blue,
+          ),
+          SwitchListTile(
+            title: const Text(
+              'Long-press for Session',
+              style: TextStyle(color: Colors.white),
+            ),
+            subtitle: const Text(
+              'Requires 2s hold to start a Reel session',
+              style: TextStyle(color: Colors.white54, fontSize: 13),
+            ),
+            value: settings.requireLongPress,
+            onChanged: (v) => settings.setRequireLongPress(v),
+            activeThumbColor: Colors.blue,
+          ),
+          SwitchListTile(
+            title: const Text(
+              'Strict Changes (Word Challenge)',
+              style: TextStyle(color: Colors.white),
+            ),
+            subtitle: const Text(
+              'Requires 15-word typing challenge before lax changes',
+              style: TextStyle(color: Colors.white54, fontSize: 13),
+            ),
+            value: settings.requireWordChallenge,
+            onChanged: (v) => settings.setRequireWordChallenge(v),
+            activeThumbColor: Colors.blue,
           ),
         ],
       ),

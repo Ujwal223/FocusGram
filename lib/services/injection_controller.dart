@@ -9,9 +9,9 @@
 class InjectionController {
   /// iOS Safari user-agent — reduces login friction with Instagram.
   static const String iOSUserAgent =
-      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) '
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
       'AppleWebKit/605.1.15 (KHTML, like Gecko) '
-      'Version/17.5 Mobile/15E148 Safari/604.1';
+      'Version/17.0 Mobile/15E148 Safari/604.1';
 
   // ── CSS injection ───────────────────────────────────────────────────────────
 
@@ -72,9 +72,25 @@ class InjectionController {
   ''';
 
   /// CSS that adds bottom padding so feed content doesn't hide behind our bar.
+  /// Added more selectors to cover dynamic drawers like Notes and Reactions.
   static const String _bottomPaddingCSS = '''
-    body, #react-root > div {
-      padding-bottom: 64px !important;
+    body, #react-root > div, [role="presentation"] > div {
+      padding-bottom: 72px !important;
+    }
+    /* Special handling for dynamic bottom drawers */
+    div[style*="bottom: 0px"], div[style*="bottom: 0"] {
+      padding-bottom: 72px !important;
+    }
+  ''';
+
+  /// CSS to push IG content down so it doesn't hide behind our status bar.
+  static const String _topPaddingCSS = '''
+    header, #react-root > div > div > div:first-child {
+      margin-top: 44px !important;
+    }
+    /* Shift fixed headers down */
+    div[style*="position: fixed"][style*="top: 0"] {
+       top: 44px !important;
     }
   ''';
 
@@ -257,84 +273,50 @@ class InjectionController {
     })();
   ''';
 
-  /// JS to disable vertical swipe gestures that drive reel-to-reel transition.
-  static const String reelSwipeBlockerJS = '''
+  /// MutationObserver to watch for Reel players and lock their scrolling.
+  static const String reelsMutationObserverJS = '''
     (function() {
-      let _touchStartY = 0;
-      document.addEventListener('touchstart', function(e) {
-        _touchStartY = e.touches[0].clientY;
-      }, { passive: true });
-
-      document.addEventListener('touchmove', function(e) {
-        const deltaY = e.touches[0].clientY - _touchStartY;
-        // If swiping UP (negative delta), block it to prevent next reel load
-        if (deltaY < -10) {
-          if (e.cancelable) {
-            e.preventDefault();
-            e.stopPropagation();
-          }
-        }
-      }, { passive: false });
-    })();
-  ''';
-
-  // ── Reel scroll-lock ────────────────────────────────────────────────────────
-
-  /// JS that prevents the user from scrolling to a different reel.
-  /// Intercepts history changes — if a /reel/ URL changes, navigate back.
-  static String reelScrollLockJS(String canonicalUrl) {
-    final escapedUrl = _escapeJsString(canonicalUrl);
-    return '''
-      (function lockReel() {
-        const LOCKED_URL = $escapedUrl;
-        function extractReelId(url) {
-          const m = url.match(/\\/reel\\/([^\\/\\?#]+)/);
-          return m ? m[1] : null;
-        }
-        const lockedId = extractReelId(LOCKED_URL);
-        if (!lockedId) return;
-
-        // Override pushState and replaceState
-        const _pushState = history.pushState.bind(history);
-        const _replaceState = history.replaceState.bind(history);
-
-        function checkAndRevert(newUrl) {
-          const newId = extractReelId(newUrl || window.location.href);
-          if (newId && newId !== lockedId) {
-            // Different reel — go back to ours
-            setTimeout(function() {
-              window.location.replace(LOCKED_URL);
-            }, 50);
-          }
-        }
-
-        history.pushState = function(state, title, url) {
-          _pushState(state, title, url);
-          checkAndRevert(url);
-        };
-        history.replaceState = function(state, title, url) {
-          _replaceState(state, title, url);
-          checkAndRevert(url);
-        };
-
-        window.addEventListener('popstate', function() {
-          checkAndRevert(window.location.href);
-        });
-
-        // Also disable vertical swipe gestures that drive reel-to-reel
+      function lockReelScroll(reelContainer) {
+        if (reelContainer.dataset.scrollLocked) return;
+        reelContainer.dataset.scrollLocked = 'true';
+        
         let startY = 0;
-        document.addEventListener('touchstart', function(e) {
+
+        reelContainer.addEventListener('touchstart', (e) => {
           startY = e.touches[0].clientY;
         }, { passive: true });
-        document.addEventListener('touchmove', function(e) {
-          const dy = e.touches[0].clientY - startY;
-          if (Math.abs(dy) > 20) {
-            e.preventDefault();
+
+        reelContainer.addEventListener('touchmove', (e) => {
+          const deltaY = e.touches[0].clientY - startY;
+          // Block upward swipe (next reel), allow downward (go back)
+          if (deltaY < -10) {
+            if (e.cancelable) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
           }
         }, { passive: false });
-      })();
-    ''';
-  }
+      }
+
+      // Watch for reel player being injected into DOM
+      const observer = new MutationObserver(() => {
+        // Instagram's reel player containers — multiple selectors for resilience
+        const reelContainers = document.querySelectorAll(
+          '[class*="reel"], [class*="Reel"], video'
+        );
+        reelContainers.forEach((el) => {
+          // If it's a video or a reel container, wrap it
+          lockReelScroll(el);
+          // Also try parent if it's a video
+          if (el.tagName === 'VIDEO' && el.parentElement) {
+            lockReelScroll(el.parentElement);
+          }
+        });
+      });
+
+      observer.observe(document.body, { childList: true, subtree: true });
+    })();
+  ''';
 
   /// JS to disable swipe-to-next behavior inside the isolated Reel player.
   static const String disableReelSwipeJS = '''
@@ -357,7 +339,8 @@ class InjectionController {
   }) {
     final StringBuffer css = StringBuffer();
     css.write(_hideInstagramNavCSS);
-    css.write(_bottomPaddingCSS); // Ensure content isn't behind our bar
+    css.write(_bottomPaddingCSS);
+    css.write(_topPaddingCSS);
     if (!sessionActive) css.write(_hideReelsCSS);
     if (blurExplore) css.write(_blurExploreCSS);
 

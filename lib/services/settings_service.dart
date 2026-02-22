@@ -7,6 +7,7 @@ class SettingsService extends ChangeNotifier {
   static const _keyBlurReels = 'set_blur_reels';
   static const _keyRequireLongPress = 'set_require_long_press';
   static const _keyShowBreathGate = 'set_show_breath_gate';
+  static const _keyRequireWordChallenge = 'set_require_word_challenge';
 
   SharedPreferences? _prefs;
 
@@ -14,11 +15,14 @@ class SettingsService extends ChangeNotifier {
   bool _blurReels = false; // If false: hide reels in feed (after session ends)
   bool _requireLongPress = true; // Long-press FAB to start session
   bool _showBreathGate = true; // Show breathing gate on every open
+  bool _requireWordChallenge =
+      true; // Random word sequence challenge before changes
 
   bool get blurExplore => _blurExplore;
   bool get blurReels => _blurReels;
   bool get requireLongPress => _requireLongPress;
   bool get showBreathGate => _showBreathGate;
+  bool get requireWordChallenge => _requireWordChallenge;
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
@@ -26,6 +30,7 @@ class SettingsService extends ChangeNotifier {
     _blurReels = _prefs!.getBool(_keyBlurReels) ?? false;
     _requireLongPress = _prefs!.getBool(_keyRequireLongPress) ?? true;
     _showBreathGate = _prefs!.getBool(_keyShowBreathGate) ?? true;
+    _requireWordChallenge = _prefs!.getBool(_keyRequireWordChallenge) ?? true;
     notifyListeners();
   }
 
@@ -50,6 +55,12 @@ class SettingsService extends ChangeNotifier {
   Future<void> setShowBreathGate(bool v) async {
     _showBreathGate = v;
     await _prefs?.setBool(_keyShowBreathGate, v);
+    notifyListeners();
+  }
+
+  Future<void> setRequireWordChallenge(bool v) async {
+    _requireWordChallenge = v;
+    await _prefs?.setBool(_keyRequireWordChallenge, v);
     notifyListeners();
   }
 }

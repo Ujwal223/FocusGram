@@ -32,9 +32,9 @@ class _ReelPlayerOverlayState extends State<ReelPlayerOverlay> {
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageFinished: (url) {
-            // Apply scroll-lock: prevents swiping to next reel in the feed
+            // Apply scroll-lock via MutationObserver: prevents swiping to next reel
             _controller.runJavaScript(
-              InjectionController.reelScrollLockJS(widget.url),
+              InjectionController.reelsMutationObserverJS,
             );
             // Also hide Instagram's bottom nav inside this overlay
             _controller.runJavaScript(

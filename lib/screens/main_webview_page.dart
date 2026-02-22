@@ -17,7 +17,8 @@ class MainWebViewPage extends StatefulWidget {
   State<MainWebViewPage> createState() => _MainWebViewPageState();
 }
 
-class _MainWebViewPageState extends State<MainWebViewPage> {
+class _MainWebViewPageState extends State<MainWebViewPage>
+    with WidgetsBindingObserver {
   late final WebViewController _controller;
   int _currentIndex = 0;
   bool _isLoading = true;
@@ -32,14 +33,29 @@ class _MainWebViewPageState extends State<MainWebViewPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initWebView();
     _startWatchdog();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _watchdog?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!mounted) return;
+    final sm = context.read<SessionManager>();
+    if (state == AppLifecycleState.resumed) {
+      sm.setAppForeground(true);
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      sm.setAppForeground(false);
+    }
   }
 
   void _startWatchdog() {
@@ -132,10 +148,10 @@ class _MainWebViewPageState extends State<MainWebViewPage> {
             _applyInjections();
             _updateCurrentTab(url);
             _cacheUsername();
-            // Inject swipe-blocker when on a specific reel page
-            if (NavigationGuard.isSpecificReel(url)) {
-              _controller.runJavaScript(InjectionController.reelSwipeBlockerJS);
-            }
+            // Inject MutationObserver to lock reel scrolling resiliently
+            _controller.runJavaScript(
+              InjectionController.reelsMutationObserverJS,
+            );
           },
           onNavigationRequest: (request) {
             final decision = NavigationGuard.evaluate(url: request.url);
@@ -234,17 +250,12 @@ class _MainWebViewPageState extends State<MainWebViewPage> {
         await _navigateTo('/');
         break;
       case 1:
-        await _navigateTo('/explore/search/');
+        // Search tab - user reported "dark page" at /explore/search/
+        // Let's try /explore/ directly which usually shows the search bar on mobile web
+        await _navigateTo('/explore/');
         break;
       case 2:
-        // Try to click Instagram's create button via JS
-        try {
-          await _controller.runJavaScript(
-            InjectionController.clickCreateButtonJS,
-          );
-        } catch (_) {
-          await _navigateTo('/');
-        }
+        _openSessionModal();
         break;
       case 3:
         await _navigateTo('/direct/inbox/');
@@ -253,12 +264,10 @@ class _MainWebViewPageState extends State<MainWebViewPage> {
         if (_cachedUsername != null) {
           await _navigateTo('/$_cachedUsername/');
         } else {
-          // Try to get username first then navigate
           await _cacheUsername();
           if (_cachedUsername != null) {
             await _navigateTo('/$_cachedUsername/');
           } else {
-            // Last fallback: navigate to accounts/edit — usually has username
             await _navigateTo('/accounts/edit/');
           }
         }
@@ -268,48 +277,59 @@ class _MainWebViewPageState extends State<MainWebViewPage> {
 
   @override
   Widget build(BuildContext context) {
-    final topPad = MediaQuery.of(context).padding.top;
     const barHeight = 60.0;
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      floatingActionButton: _SessionFAB(onTap: _openSessionModal),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-      body: Stack(
-        children: [
-          // ── WebView: full screen (behind everything) ────────────────
-          Positioned.fill(child: WebViewWidget(controller: _controller)),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        if (await _controller.canGoBack()) {
+          await _controller.goBack();
+        } else {
+          // If no history, we can either minimize or close.
+          // SystemNavigator.pop() is usually what users expect for "Close".
+          SystemNavigator.pop();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          children: [
+            // ── WebView: full screen (behind everything) ────────────────
+            Positioned.fill(child: WebViewWidget(controller: _controller)),
 
-          // ── Thin loading indicator at very top ──────────────────────
-          if (_isLoading)
+            // ── Thin loading indicator at very top ──────────────────────
+            if (_isLoading)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: const LinearProgressIndicator(
+                  backgroundColor: Colors.transparent,
+                  color: Colors.blue,
+                  minHeight: 2,
+                ),
+              ),
+
+            // ── The Edge Panel (replaced _StatusBar) ────────────────────
+            // No Positioned wrapper here: _EdgePanel returns its own Positioned siblings
+            _EdgePanel(controller: _controller),
+
+            // ── Our bottom bar overlaid on top of Instagram's bar ───────
+            // Making it taller than Instagram's native bar (~50dp) means
+            // theirs is fully hidden behind ours — no CSS needed as fallback.
             Positioned(
-              top: 0,
+              bottom: 0,
               left: 0,
               right: 0,
-              child: const LinearProgressIndicator(
-                backgroundColor: Colors.transparent,
-                color: Colors.blue,
-                minHeight: 2,
+              child: _FocusGramNavBar(
+                currentIndex: _currentIndex,
+                onTap: _onTabTapped,
+                height: barHeight,
               ),
             ),
-
-          // ── Status bar overlaid at top (below system status bar) ────
-          Positioned(top: topPad, left: 0, right: 0, child: _StatusBar()),
-
-          // ── Our bottom bar overlaid on top of Instagram's bar ───────
-          // Making it taller than Instagram's native bar (~50dp) means
-          // theirs is fully hidden behind ours — no CSS needed as fallback.
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: _FocusGramNavBar(
-              currentIndex: _currentIndex,
-              onTap: _onTabTapped,
-              height: barHeight,
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -317,7 +337,6 @@ class _MainWebViewPageState extends State<MainWebViewPage> {
   void _openSessionModal() {
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => const SessionModal(),
     );
@@ -325,85 +344,287 @@ class _MainWebViewPageState extends State<MainWebViewPage> {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Status Bar Widget — only rebuilds when session state changes
+// Edge Panel Widget — Samsung-style swipe-to-reveal side panel
 // ──────────────────────────────────────────────────────────────────────────────
 
-class _StatusBar extends StatelessWidget {
+class _EdgePanel extends StatefulWidget {
+  final WebViewController controller;
+  const _EdgePanel({required this.controller});
+
+  @override
+  State<_EdgePanel> createState() => _EdgePanelState();
+}
+
+class _EdgePanelState extends State<_EdgePanel> {
+  bool _isExpanded = false;
+
+  @override
+  void initState() {
+    super.initState();
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+  }
+
+  void _toggleExpansion() {
+    setState(() {
+      _isExpanded = !_isExpanded;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final sm = context.watch<SessionManager>();
+    final int remaining = sm.remainingSessionSeconds;
+    final double progress = sm.perSessionSeconds > 0
+        ? (remaining / sm.perSessionSeconds).clamp(0.0, 1.0)
+        : 0;
 
-    String label;
-    Color dotColor;
-    IconData dotIcon;
-
-    if (sm.isSessionActive) {
-      final m = sm.remainingSessionSeconds ~/ 60;
-      final s = sm.remainingSessionSeconds % 60;
-      label =
-          'Reels: ${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
-      dotColor = Colors.greenAccent;
-      dotIcon = Icons.play_circle_outline;
-    } else if (sm.isCooldownActive) {
-      final m = sm.cooldownRemainingSeconds ~/ 60;
-      label = 'Cooldown: ${m}m left';
-      dotColor = Colors.orangeAccent;
-      dotIcon = Icons.timer_outlined;
-    } else {
-      label = 'Reels Blocked';
-      dotColor = Colors.redAccent;
-      dotIcon = Icons.block;
+    Color barColor = Colors.grey.withValues(alpha: 0.6);
+    if (progress < 0.2) {
+      barColor = Colors.redAccent;
+    } else if (progress < 0.5) {
+      barColor = Colors.yellowAccent.withValues(alpha: 0.8);
     }
 
-    // App session indicator
-    final appM = sm.appSessionRemainingSeconds ~/ 60;
-    final appS = sm.appSessionRemainingSeconds % 60;
-    final appLabel = sm.isAppSessionActive
-        ? 'App: ${appM.toString().padLeft(2, '0')}:${appS.toString().padLeft(2, '0')}'
-        : '';
+    // We use a transparent Stack filling the screen to position elements anywhere.
+    // Hits will pass through the Stack to the WebView except on our children.
+    return Stack(
+      children: [
+        // ── The Handle (Minimized State) ──
+        if (!_isExpanded)
+          Positioned(
+            left: 0,
+            top: MediaQuery.of(context).size.height * 0.35,
+            child: Material(
+              color: Colors.transparent,
+              child: Column(
+                children: [
+                  GestureDetector(
+                    onHorizontalDragUpdate: (details) {
+                      if (details.delta.dx > 10) _toggleExpansion();
+                    },
+                    onTap: _toggleExpansion,
+                    child: Container(
+                      width: 10,
+                      height: 100,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.7),
+                        borderRadius: const BorderRadius.only(
+                          topRight: Radius.circular(10),
+                          bottomRight: Radius.circular(10),
+                        ),
+                        border: Border.all(color: Colors.white24, width: 0.5),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.3),
+                            blurRadius: 10,
+                          ),
+                        ],
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 6,
+                        horizontal: 2,
+                      ),
+                      child: Align(
+                        alignment: Alignment.bottomCenter,
+                        child: Container(
+                          width: 4,
+                          decoration: BoxDecoration(
+                            color: barColor,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          // Height determined by progress
+                          height: (progress * 88).clamp(4.0, 88.0),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  // Gear icon below handle
+                  GestureDetector(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const SettingsPage()),
+                    ),
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.7),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white24, width: 0.5),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.3),
+                            blurRadius: 8,
+                          ),
+                        ],
+                      ),
+                      child: const Icon(
+                        Icons.settings_rounded,
+                        color: Colors.white70,
+                        size: 18,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
 
-    return Container(
-      height: 40,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      color: Colors.black,
-      child: Row(
-        children: [
-          // Status dot
-          Icon(dotIcon, color: dotColor, size: 13),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              color: dotColor,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
+        // ── The Panel (Expanded State) ──
+        AnimatedPositioned(
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeOutQuart,
+          left: _isExpanded ? 0 : -220,
+          top: MediaQuery.of(context).size.height * 0.25,
+          child: GestureDetector(
+            onHorizontalDragUpdate: (details) {
+              if (details.delta.dx < -10) _toggleExpansion();
+            },
+            child: Container(
+              width: 210,
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: const Color(0xFF121212).withValues(alpha: 0.98),
+                borderRadius: const BorderRadius.only(
+                  topRight: Radius.circular(28),
+                  bottomRight: Radius.circular(28),
+                ),
+                border: Border.all(color: Colors.white12, width: 0.5),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.6),
+                    blurRadius: 30,
+                    spreadRadius: 5,
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'FOCUS CONTROL',
+                        style: TextStyle(
+                          color: Colors.blueAccent,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(
+                          Icons.chevron_left_rounded,
+                          color: Colors.white70,
+                          size: 28,
+                        ),
+                        onPressed: _toggleExpansion,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 32),
+                  // Reel Session Timer
+                  const Text(
+                    'REEL SESSION',
+                    style: TextStyle(
+                      color: Colors.white30,
+                      fontSize: 11,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _formatTime(sm.remainingSessionSeconds),
+                    style: TextStyle(
+                      color: barColor,
+                      fontSize: 40,
+                      fontWeight: FontWeight.w200,
+                      letterSpacing: 2,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  // Daily Remaining
+                  const Text(
+                    'DAILY QUOTA',
+                    style: TextStyle(
+                      color: Colors.white30,
+                      fontSize: 11,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '${sm.dailyRemainingSeconds ~/ 60}m Left',
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  const Divider(color: Colors.white10, height: 1),
+                  const SizedBox(height: 20),
+                  // Settings Link
+                  InkWell(
+                    onTap: () {
+                      _toggleExpansion();
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const SettingsPage()),
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(12),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8.0),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(
+                              Icons.tune_rounded,
+                              color: Colors.blueAccent,
+                              size: 18,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          const Text(
+                            'Preferences',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-          const Spacer(),
-          // App session timer
-          if (appLabel.isNotEmpty)
-            Text(
-              appLabel,
-              style: const TextStyle(color: Colors.white38, fontSize: 11),
-            ),
-          if (appLabel.isNotEmpty) const SizedBox(width: 10),
-          // Daily reel usage
-          Text(
-            'Daily: ${sm.dailyRemainingSeconds ~/ 60}m',
-            style: const TextStyle(color: Colors.white38, fontSize: 11),
-          ),
-          const SizedBox(width: 10),
-          // Settings icon
-          GestureDetector(
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const SettingsPage()),
-            ),
-            child: const Icon(Icons.tune, color: Colors.white38, size: 18),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
+  }
+
+  String _formatTime(int seconds) {
+    final m = seconds ~/ 60;
+    final s = seconds % 60;
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 }
 
@@ -427,7 +648,7 @@ class _FocusGramNavBar extends StatelessWidget {
     final items = [
       (Icons.home_outlined, Icons.home_rounded, 'Home'),
       (Icons.search, Icons.search, 'Search'),
-      (Icons.add_box_outlined, Icons.add_box_rounded, 'Create'),
+      (Icons.play_circle_outline, Icons.play_circle_filled, 'Session'),
       (Icons.chat_bubble_outline, Icons.chat_bubble, 'Messages'),
       (Icons.person_outline, Icons.person, 'Profile'),
     ];
@@ -463,44 +684,5 @@ class _FocusGramNavBar extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Session FAB
-// ──────────────────────────────────────────────────────────────────────────────
-
-class _SessionFAB extends StatelessWidget {
-  final VoidCallback onTap;
-  const _SessionFAB({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final sm = context.watch<SessionManager>();
-    final settings = context.watch<SettingsService>();
-
-    if (sm.isSessionActive) {
-      // Show "end session" button when session is active
-      return FloatingActionButton.small(
-        backgroundColor: Colors.green.shade700,
-        onPressed: () => sm.endSession(),
-        child: const Icon(Icons.stop, color: Colors.white, size: 18),
-      );
-    }
-
-    final fab = FloatingActionButton.small(
-      backgroundColor: Colors.blue.shade700,
-      onPressed: settings.requireLongPress ? null : onTap,
-      child: const Icon(
-        Icons.play_arrow_rounded,
-        color: Colors.white,
-        size: 22,
-      ),
-    );
-
-    if (settings.requireLongPress) {
-      return GestureDetector(onLongPress: onTap, child: fab);
-    }
-    return fab;
   }
 }

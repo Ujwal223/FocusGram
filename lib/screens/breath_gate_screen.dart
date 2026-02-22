@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 
 /// A mindfulness screen shown before the app opens.
-/// Forces the user to take a deep 8-second breath.
+/// Forces the user to take a deep 10-second breath.
 class BreathGateScreen extends StatefulWidget {
   final VoidCallback onFinish;
 
@@ -16,7 +16,7 @@ class _BreathGateScreenState extends State<BreathGateScreen>
     with TickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _scaleAnimation;
-  int _secondsRemaining = 8;
+  int _secondsRemaining = 10;
   Timer? _timer;
   bool _canContinue = false;
 
@@ -24,10 +24,10 @@ class _BreathGateScreenState extends State<BreathGateScreen>
   void initState() {
     super.initState();
 
-    // 8-second breathing animation: 4s in, 4s out
+    // 10-second breathing animation: 5s in, 5s out
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 4),
+      duration: const Duration(seconds: 5),
     );
 
     _scaleAnimation = Tween<double>(

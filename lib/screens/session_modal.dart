@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/session_manager.dart';
+import '../utils/discipline_challenge.dart';
 
 class SessionModal extends StatefulWidget {
   const SessionModal({super.key});
@@ -123,10 +124,15 @@ class _SessionModalState extends State<SessionModal> {
     );
   }
 
-  void _start(int minutes) {
+  void _start(int minutes) async {
     final sm = context.read<SessionManager>();
+
+    // Always require word challenge for reel sessions (User request)
+    final success = await DisciplineChallenge.show(context);
+    if (!success) return;
+
     if (sm.startSession(minutes)) {
-      Navigator.pop(context);
+      if (mounted) Navigator.pop(context);
     }
   }
 }

@@ -28,6 +28,11 @@ class SessionManager extends ChangeNotifier {
   static const _keyAppSessionExtUsed = 'app_sess_ext_used';
   static const _keyLastAppSessEnd = 'app_sess_last_end_ts';
   static const _keyDailyOpenCount = 'app_open_count';
+  static const _keyScheduleEnabled = 'sched_enabled';
+  static const _keyScheduleStartHour = 'sched_start_h';
+  static const _keyScheduleStartMin = 'sched_start_m';
+  static const _keyScheduleEndHour = 'sched_end_h';
+  static const _keyScheduleEndMin = 'sched_end_m';
 
   SharedPreferences? _prefs;
 
@@ -46,6 +51,17 @@ class SessionManager extends ChangeNotifier {
       false; // set when time runs out, waiting for user action
   int _dailyOpenCount = 0;
 
+  // ── Scheduled Blocking runtime ─────────────────────────────
+  bool _scheduleEnabled = false;
+  int _schedStartHour = 22; // Default 10 PM
+  int _schedStartMin = 0;
+  int _schedEndHour = 7; // Default 7 AM
+  int _schedEndMin = 0;
+
+  bool _isInForeground = true; // Tracking app lifecycle state
+  int _cachedRemainingSessionSeconds = 0;
+  int _cachedRemainingAppSessionSeconds = 0;
+
   // ── Settings defaults ──────────────────────────────────────
   int _dailyLimitSeconds = 30 * 60; // 30 min
   int _perSessionSeconds = 5 * 60; // 5 min
@@ -56,6 +72,7 @@ class SessionManager extends ChangeNotifier {
 
   int get remainingSessionSeconds {
     if (!_isSessionActive || _sessionExpiry == null) return 0;
+    // If not in foreground, the clock "freezes" visually too (or we could shift the expiry)
     final diff = _sessionExpiry!.difference(DateTime.now()).inSeconds;
     return diff > 0 ? diff : 0;
   }
@@ -123,6 +140,29 @@ class SessionManager extends ChangeNotifier {
   /// How many times the user has opened the app today.
   int get dailyOpenCount => _dailyOpenCount;
 
+  // ── Scheduled Blocking Getters ─────────────────────────────
+  bool get scheduleEnabled => _scheduleEnabled;
+  int get schedStartHour => _schedStartHour;
+  int get schedStartMin => _schedStartMin;
+  int get schedEndHour => _schedEndHour;
+  int get schedEndMin => _schedEndMin;
+
+  bool get isScheduledBlockActive {
+    if (!_scheduleEnabled) return false;
+    final now = DateTime.now();
+    final currentTime = now.hour * 60 + now.minute;
+    final startTime = _schedStartHour * 60 + _schedStartMin;
+    final endTime = _schedEndHour * 60 + _schedEndMin;
+
+    if (startTime < endTime) {
+      // Simple range (e.g., 9:00 to 17:00)
+      return currentTime >= startTime && currentTime < endTime;
+    } else {
+      // Over-midnight range (e.g., 22:00 to 07:00)
+      return currentTime >= startTime || currentTime < endTime;
+    }
+  }
+
   // ── Initialization ─────────────────────────────────────────
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
@@ -130,6 +170,31 @@ class SessionManager extends ChangeNotifier {
     _loadPersisted();
     _startTicker();
     _incrementOpenCount();
+  }
+
+  void setAppForeground(bool v) {
+    if (_isInForeground == v) return;
+    _isInForeground = v;
+
+    if (v) {
+      // Returning to foreground: resume sessions by shifting expiry
+      final now = DateTime.now();
+      if (_isSessionActive) {
+        _sessionExpiry = now.add(
+          Duration(seconds: _cachedRemainingSessionSeconds),
+        );
+      }
+      if (_appSessionEnd != null) {
+        _appSessionEnd = now.add(
+          Duration(seconds: _cachedRemainingAppSessionSeconds),
+        );
+      }
+    } else {
+      // Entering background: cache remaining time
+      _cachedRemainingSessionSeconds = remainingSessionSeconds;
+      _cachedRemainingAppSessionSeconds = appSessionRemainingSeconds;
+    }
+    notifyListeners();
   }
 
   Future<void> _resetDailyIfNeeded() async {
@@ -176,6 +241,12 @@ class SessionManager extends ChangeNotifier {
     if (lastAppEndMs > 0) {
       _lastAppSessionEnd = DateTime.fromMillisecondsSinceEpoch(lastAppEndMs);
     }
+
+    _scheduleEnabled = _prefs!.getBool(_keyScheduleEnabled) ?? false;
+    _schedStartHour = _prefs!.getInt(_keyScheduleStartHour) ?? 22;
+    _schedStartMin = _prefs!.getInt(_keyScheduleStartMin) ?? 0;
+    _schedEndHour = _prefs!.getInt(_keyScheduleEndHour) ?? 7;
+    _schedEndMin = _prefs!.getInt(_keyScheduleEndMin) ?? 0;
   }
 
   void _incrementOpenCount() {
@@ -189,10 +260,17 @@ class SessionManager extends ChangeNotifier {
   }
 
   void _tick() {
+    if (!_isInForeground) return; // Freeze everything when in background
+
     bool changed = false;
 
     // Reel session countdown
     if (_isSessionActive) {
+      // Recalculate expiry every tick to "pause" it while backgrounded:
+      // We don't change _sessionExpiry, but we increment _dailyUsedSeconds.
+      // If we want it to actually pause, we should probably store "remaining seconds"
+      // and update expiry ONLY when in foreground.
+
       if (remainingSessionSeconds <= 0) {
         _cleanupExpiredReelSession();
         changed = true;
@@ -205,14 +283,20 @@ class SessionManager extends ChangeNotifier {
     }
 
     // App session expiry check
-    if (_appSessionEnd != null &&
-        !_appSessionExpiredFlag &&
-        DateTime.now().isAfter(_appSessionEnd!)) {
-      _appSessionExpiredFlag = true;
-      changed = true;
+    if (_appSessionEnd != null && !_appSessionExpiredFlag) {
+      if (DateTime.now().isAfter(_appSessionEnd!)) {
+        _appSessionExpiredFlag = true;
+        changed = true;
+      }
     }
 
-    if (isCooldownActive) changed = true;
+    if (isCooldownActive) {
+      changed = true;
+    } else if (appOpenCooldownRemainingSeconds <= 0 &&
+        _lastAppSessionEnd != null) {
+      // Just expired
+      changed = true;
+    }
 
     if (changed) notifyListeners();
   }
@@ -313,10 +397,26 @@ class SessionManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> resetDailyCounter() async {
-    _dailyUsedSeconds = 0;
-    await _prefs?.setInt(_keyDailyUsedSeconds, 0);
-    if (_isSessionActive) endSession();
+  Future<void> setScheduleEnabled(bool v) async {
+    _scheduleEnabled = v;
+    await _prefs?.setBool(_keyScheduleEnabled, v);
+    notifyListeners();
+  }
+
+  Future<void> setScheduleTime({
+    required int startH,
+    required int startM,
+    required int endH,
+    required int endM,
+  }) async {
+    _schedStartHour = startH;
+    _schedStartMin = startM;
+    _schedEndHour = endH;
+    _schedEndMin = endM;
+    await _prefs?.setInt(_keyScheduleStartHour, startH);
+    await _prefs?.setInt(_keyScheduleStartMin, startM);
+    await _prefs?.setInt(_keyScheduleEndHour, endH);
+    await _prefs?.setInt(_keyScheduleEndMin, endM);
     notifyListeners();
   }
 

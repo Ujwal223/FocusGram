@@ -26,6 +26,9 @@ dependencies:
   # Local notifications for session reminders — latest stable
   flutter_local_notifications: ^20.1.0
 
+  # URL launcher for About page links — latest stable
+  url_launcher: ^6.3.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
