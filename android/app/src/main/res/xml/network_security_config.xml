@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Only allow HTTPS connections -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+    <!-- Allow Instagram domains explicitly -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">instagram.com</domain>
+        <domain includeSubdomains="true">cdninstagram.com</domain>
+        <domain includeSubdomains="true">fbcdn.net</domain>
+    </domain-config>
+</network-security-config>

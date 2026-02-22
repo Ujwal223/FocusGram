@@ -1,0 +1,35 @@
+name: focusgram
+description: "FocusGram — Distraction-free Instagram WebView wrapper."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.10.7
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # WebView engine — latest stable
+  webview_flutter: ^4.13.1
+
+  # Local key-value persistence — latest stable
+  shared_preferences: ^2.5.4
+
+  # Date/time formatting for daily resets — latest stable
+  intl: ^0.20.2
+
+  # Reactive state management — latest stable
+  provider: ^6.1.5
+
+  # Local notifications for session reminders — latest stable
+  flutter_local_notifications: ^20.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
