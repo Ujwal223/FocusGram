@@ -11,7 +11,7 @@ class AboutPage extends StatefulWidget {
 }
 
 class _AboutPageState extends State<AboutPage> {
-  final String _currentVersion = '0.9.8';
+  final String _currentVersion = '0.9.8-beta.2';
   bool _isChecking = false;
 
   Future<void> _checkUpdate() async {

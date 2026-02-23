@@ -11,9 +11,9 @@ RepoType: git
 Repo: https://github.com/Ujwal223/FocusGram
 
 Builds:
-  - versionName: 0.9.8-beta.1
-    versionCode: 1
-    commit: v0.9.8-beta.1
+  - versionName: 0.9.8-beta.2
+    versionCode: 2
+    commit: v0.9.8-beta.2
     subdir: android
     gradle:
       - yes
@@ -27,5 +27,5 @@ Builds:
 
 AutoUpdateMode: None
 UpdateCheckMode: None
-CurrentVersion: 0.9.8-beta.1
-CurrentVersionCode: 1
+CurrentVersion: 0.9.8-beta.2
+CurrentVersionCode: 2
