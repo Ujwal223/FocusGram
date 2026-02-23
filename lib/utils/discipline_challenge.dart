@@ -543,7 +543,7 @@ class DisciplineChallenge {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Type the following sequence exactly to proceed:',
+                'FocusGram is currently blocked to help you stay focused. Type the following sequence exactly to proceed:',
                 style: TextStyle(color: Colors.white70, fontSize: 14),
               ),
               const SizedBox(height: 16),

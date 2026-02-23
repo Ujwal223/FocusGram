@@ -49,6 +49,13 @@ class SettingsPage extends StatelessWidget {
           ),
           _buildSettingsTile(
             context: context,
+            title: 'Extras',
+            subtitle: 'Ghost mode, text selection and experimental features',
+            icon: Icons.extension_outlined,
+            destination: const _ExtrasSettingsPage(),
+          ),
+          _buildSettingsTile(
+            context: context,
             title: 'About',
             subtitle: 'Developer info and GitHub',
             icon: Icons.info_outline,
@@ -362,6 +369,56 @@ class _FrictionSliderTileState extends State<_FrictionSliderTile> {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _ExtrasSettingsPage extends StatelessWidget {
+  const _ExtrasSettingsPage();
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = context.watch<SettingsService>();
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        title: const Text('Extras', style: TextStyle(fontSize: 17)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, size: 18),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
+      body: ListView(
+        children: [
+          SwitchListTile(
+            title: const Text(
+              'Ghost Mode',
+              style: TextStyle(color: Colors.white),
+            ),
+            subtitle: const Text(
+              'Hides "typing..." and "seen" status in DMs',
+              style: TextStyle(color: Colors.white54, fontSize: 13),
+            ),
+            value: settings.ghostMode,
+            onChanged: (v) => settings.setGhostMode(v),
+            activeThumbColor: Colors.blue,
+          ),
+          SwitchListTile(
+            title: const Text(
+              'Enable Text Selection',
+              style: TextStyle(color: Colors.white),
+            ),
+            subtitle: const Text(
+              'Allows copying text from posts and captions',
+              style: TextStyle(color: Colors.white54, fontSize: 13),
+            ),
+            value: settings.enableTextSelection,
+            onChanged: (v) => settings.setEnableTextSelection(v),
+            activeThumbColor: Colors.blue,
+          ),
+        ],
+      ),
     );
   }
 }

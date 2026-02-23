@@ -8,6 +8,7 @@ import '../services/session_manager.dart';
 import '../services/settings_service.dart';
 import '../services/injection_controller.dart';
 import '../services/navigation_guard.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'session_modal.dart';
 import 'settings_page.dart';
 
@@ -23,14 +24,25 @@ class _MainWebViewPageState extends State<MainWebViewPage>
   late final WebViewController _controller;
   int _currentIndex = 0;
   bool _isLoading = true;
-
-  // Cached username for profile navigation
-  String? _cachedUsername;
-
   // Watchdog for app-session expiry
   Timer? _watchdog;
   bool _extensionDialogShown = false;
   bool _lastSessionActive = false;
+  String? _cachedUsername;
+  String _currentUrl = 'https://www.instagram.com/';
+  bool _hasError = false;
+
+  /// Helper to determine if we are on a login/onboarding page.
+  bool get _isOnOnboardingPage {
+    final path = Uri.tryParse(_currentUrl)?.path ?? '';
+    final lowerPath = path.toLowerCase();
+    return lowerPath.contains('/accounts/login') ||
+        lowerPath.contains('/accounts/emailsignup') ||
+        lowerPath.contains('/accounts/signup') ||
+        lowerPath.contains('/legal/') ||
+        lowerPath.contains('/help/') ||
+        _currentUrl.contains('instagram.com/accounts/login');
+  }
 
   @override
   void initState() {
@@ -39,9 +51,10 @@ class _MainWebViewPageState extends State<MainWebViewPage>
     _initWebView();
     _startWatchdog();
 
-    // Listen to session changes to update JS context immediately
+    // Listen to session & settings changes
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<SessionManager>().addListener(_onSessionChanged);
+      context.read<SettingsService>().addListener(_onSettingsChanged);
       _lastSessionActive = context.read<SessionManager>().isSessionActive;
     });
   }
@@ -53,6 +66,14 @@ class _MainWebViewPageState extends State<MainWebViewPage>
       _lastSessionActive = sm.isSessionActive;
       _applyInjections();
     }
+    // Force rebuild for timer updates
+    setState(() {});
+  }
+
+  void _onSettingsChanged() {
+    if (!mounted) return;
+    _applyInjections();
+    _controller.reload();
   }
 
   @override
@@ -60,6 +81,7 @@ class _MainWebViewPageState extends State<MainWebViewPage>
     WidgetsBinding.instance.removeObserver(this);
     _watchdog?.cancel();
     context.read<SessionManager>().removeListener(_onSessionChanged);
+    context.read<SettingsService>().removeListener(_onSettingsChanged);
     super.dispose();
   }
 
@@ -156,13 +178,20 @@ class _MainWebViewPageState extends State<MainWebViewPage>
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (url) {
-            // Only show loading if it's a real page load (not SPA nav)
-            if (!url.contains('#')) {
-              if (mounted) setState(() => _isLoading = true);
+            if (mounted) {
+              setState(() {
+                _isLoading = !url.contains('#');
+                _currentUrl = url; // Update immediately to hide/show UI
+              });
             }
           },
           onPageFinished: (url) {
-            if (mounted) setState(() => _isLoading = false);
+            if (mounted) {
+              setState(() {
+                _isLoading = false;
+                _currentUrl = url;
+              });
+            }
             _applyInjections();
             _updateCurrentTab(url);
             _cacheUsername();
@@ -178,6 +207,16 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                 !uri.host.contains('instagram.com') &&
                 !uri.host.contains('facebook.com')) {
               launchUrl(uri, mode: LaunchMode.externalApplication);
+              return NavigationDecision.prevent;
+            }
+
+            // Facebook Login Warning
+            if (uri != null &&
+                uri.host.contains('facebook.com') &&
+                _isOnOnboardingPage) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Sorry, Please use Email login')),
+              );
               return NavigationDecision.prevent;
             }
 
@@ -202,24 +241,49 @@ class _MainWebViewPageState extends State<MainWebViewPage>
           },
         ),
       )
-      ..loadRequest(Uri.parse('https://www.instagram.com/'));
+      ..loadRequest(Uri.parse('https://www.instagram.com/accounts/login/'));
   }
 
   void _applyInjections() {
+    if (!mounted) return;
+    if (_isOnOnboardingPage) return; // Restore native login/signup behavior
+
     final sessionManager = context.read<SessionManager>();
     final settings = context.read<SettingsService>();
     final js = InjectionController.buildInjectionJS(
       sessionActive: sessionManager.isSessionActive,
       blurExplore: settings.blurExplore,
+      blurReels: settings.blurReels,
+      ghostMode: settings.ghostMode,
+      enableTextSelection: settings.enableTextSelection,
     );
     _controller.runJavaScript(js);
   }
 
+  Future<void> _signOut() async {
+    final manager = WebViewCookieManager();
+    await manager.clearCookies();
+    await _controller.clearCache();
+    // Force immediate state update and navigation
+    if (mounted) {
+      setState(() {
+        _currentIndex = 0;
+        _cachedUsername = null;
+        _isLoading = true; // Show indicator during reload
+      });
+      await _controller.loadRequest(
+        Uri.parse('https://www.instagram.com/accounts/login/'),
+      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Signed out successfully')));
+    }
+  }
+
   Future<void> _cacheUsername() async {
-    if (_cachedUsername != null) return; // Already known
     try {
       final result = await _controller.runJavaScriptReturningResult(
-        InjectionController.getLoggedInUsernameJS,
+        "document.querySelector('header h2')?.innerText || ''",
       );
       final raw = result.toString().replaceAll('"', '').replaceAll("'", '');
       if (raw.isNotEmpty && raw != 'null' && raw != 'undefined') {
@@ -268,8 +332,10 @@ class _MainWebViewPageState extends State<MainWebViewPage>
   }
 
   Future<void> _onTabTapped(int index) async {
-    // Don't re-navigate if already on this tab
-    if (index == _currentIndex) return;
+    if (index == _currentIndex) {
+      await _controller.reload();
+      return;
+    }
     setState(() => _currentIndex = index);
 
     switch (index) {
@@ -284,9 +350,8 @@ class _MainWebViewPageState extends State<MainWebViewPage>
       case 2:
         if (context.read<SessionManager>().isSessionActive) {
           await _navigateTo('/reels/');
-        } else {
-          _openSessionModal();
         }
+        // If not active, do nothing (disabled as requested)
         break;
       case 3:
         await _navigateTo('/direct/inbox/');
@@ -326,13 +391,28 @@ class _MainWebViewPageState extends State<MainWebViewPage>
         backgroundColor: Colors.black,
         body: Stack(
           children: [
-            // ── WebView: full screen (behind everything) ────────────────
-            Positioned.fill(child: WebViewWidget(controller: _controller)),
+            // ── Main Content Layout ────────────────────────────────────
+            SafeArea(
+              child: Column(
+                children: [
+                  if (!_isOnOnboardingPage) _BrandedTopBar(),
+                  Expanded(child: WebViewWidget(controller: _controller)),
+                ],
+              ),
+            ),
 
-            // ── Thin loading indicator at very top ──────────────────────
+            if (_hasError)
+              _NoInternetScreen(
+                onRetry: () {
+                  setState(() => _hasError = false);
+                  _controller.reload();
+                },
+              ),
+
+            // ── Thin loading indicator (Placed below Top Bar) ──────────
             if (_isLoading)
               Positioned(
-                top: 0,
+                top: 60 + MediaQuery.of(context).padding.top,
                 left: 0,
                 right: 0,
                 child: const LinearProgressIndicator(
@@ -342,34 +422,24 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                 ),
               ),
 
-            // ── The Edge Panel (replaced _StatusBar) ────────────────────
-            // No Positioned wrapper here: _EdgePanel returns its own Positioned siblings
+            // ── The Edge Panel ──────────────────────────────────────────
             _EdgePanel(controller: _controller),
 
-            // ── Our bottom bar overlaid on top of Instagram's bar ───────
-            // Making it taller than Instagram's native bar (~50dp) means
-            // theirs is fully hidden behind ours — no CSS needed as fallback.
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: _FocusGramNavBar(
-                currentIndex: _currentIndex,
-                onTap: _onTabTapped,
-                height: barHeight,
+            // ── Our bottom bar ──────────────────────────────────────────
+            if (!_isOnOnboardingPage)
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: _FocusGramNavBar(
+                  currentIndex: _currentIndex,
+                  onTap: _onTabTapped,
+                  height: barHeight * 0.99, // 1% reduction
+                ),
               ),
-            ),
           ],
         ),
       ),
-    );
-  }
-
-  void _openSessionModal() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => const SessionModal(),
     );
   }
 }
@@ -424,7 +494,6 @@ class _EdgePanelState extends State<_EdgePanel> {
     // Hits will pass through the Stack to the WebView except on our children.
     return Stack(
       children: [
-        // ── Tap-to-close Backdrop (only when expanded) ──
         if (_isExpanded)
           Positioned.fill(
             child: GestureDetector(
@@ -584,7 +653,13 @@ class _EdgePanelState extends State<_EdgePanel> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    _formatTime(sm.remainingSessionSeconds),
+                    context.read<SessionManager>().isSessionActive
+                        ? _formatTime(
+                            context
+                                .read<SessionManager>()
+                                .remainingSessionSeconds,
+                          )
+                        : 'Off',
                     style: TextStyle(
                       color: barColor,
                       fontSize: 40,
@@ -592,73 +667,118 @@ class _EdgePanelState extends State<_EdgePanel> {
                       letterSpacing: 2,
                     ),
                   ),
-                  const SizedBox(height: 24),
-                  // Daily Remaining
-                  const Text(
-                    'DAILY QUOTA',
-                    style: TextStyle(
-                      color: Colors.white30,
-                      fontSize: 11,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
+                  const SizedBox(height: 20),
+                  _buildStatRow(
+                    'REEL QUOTA',
                     '${sm.dailyRemainingSeconds ~/ 60}m Left',
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w500,
-                    ),
+                    Icons.timer_outlined,
+                  ),
+                  _buildStatRow(
+                    'AUTO-CLOSE',
+                    _formatTime(sm.appSessionRemainingSeconds),
+                    Icons.hourglass_empty_rounded,
+                  ),
+                  _buildStatRow(
+                    'COOLDOWN',
+                    sm.isCooldownActive
+                        ? _formatTime(sm.cooldownRemainingSeconds)
+                        : 'Off',
+                    Icons.coffee_rounded,
+                    isWarning: sm.isCooldownActive,
                   ),
                   const SizedBox(height: 32),
-                  const Divider(color: Colors.white10, height: 1),
-                  const SizedBox(height: 20),
-                  // Settings Link
-                  InkWell(
-                    onTap: () {
-                      _toggleExpansion();
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const SettingsPage()),
-                      );
-                    },
-                    borderRadius: BorderRadius.circular(12),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8.0),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(
-                              color: Colors.blue.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Icon(
-                              Icons.tune_rounded,
-                              color: Colors.blueAccent,
-                              size: 18,
-                            ),
-                          ),
-                          const SizedBox(width: 14),
-                          const Text(
-                            'Preferences',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
+                  if (!context
+                      .findAncestorStateOfType<_MainWebViewPageState>()!
+                      ._isOnOnboardingPage) ...[
+                    const Divider(color: Colors.white10),
+                    const SizedBox(height: 8),
+                    ListTile(
+                      onTap: () async {
+                        _toggleExpansion();
+                        final state = context
+                            .findAncestorStateOfType<_MainWebViewPageState>();
+                        if (state != null) {
+                          await state._signOut();
+                        }
+                      },
+                      leading: const Icon(
+                        Icons.logout_rounded,
+                        color: Colors.redAccent,
+                        size: 20,
                       ),
+                      title: const Text(
+                        'Switch Account',
+                        style: TextStyle(
+                          color: Colors.redAccent,
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
                     ),
-                  ),
+                    const SizedBox(height: 8),
+                  ],
                 ],
               ),
             ),
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildStatRow(
+    String label,
+    String value,
+    IconData icon, {
+    bool isWarning = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: isWarning
+                  ? Colors.redAccent.withValues(alpha: 0.1)
+                  : Colors.white.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              icon,
+              color: isWarning ? Colors.redAccent : Colors.white70,
+              size: 16,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white38,
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                value,
+                style: TextStyle(
+                  color: isWarning ? Colors.redAccent : Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -670,8 +790,34 @@ class _EdgePanelState extends State<_EdgePanel> {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Custom Bottom Nav Bar — minimal, Instagram-like
+// Branded Top Bar — minimal, Instagram-like font
 // ──────────────────────────────────────────────────────────────────────────────
+
+class _BrandedTopBar extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 60,
+      decoration: const BoxDecoration(
+        color: Colors.black,
+        border: Border(bottom: BorderSide(color: Colors.white12, width: 0.5)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            'FocusGram',
+            style: GoogleFonts.grandHotel(
+              color: Colors.white,
+              fontSize: 32,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _FocusGramNavBar extends StatelessWidget {
   final int currentIndex;
@@ -711,6 +857,7 @@ class _FocusGramNavBar extends StatelessWidget {
                 behavior: HitTestBehavior.opaque,
                 child: SizedBox(
                   width: 60,
+                  height: double.infinity,
                   child: Center(
                     child: Icon(
                       isSelected ? filledIcon : outlinedIcon,
@@ -723,6 +870,57 @@ class _FocusGramNavBar extends StatelessWidget {
             }).toList(),
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// No Internet Screen — minimal, branded
+// ──────────────────────────────────────────────────────────────────────────────
+
+class _NoInternetScreen extends StatelessWidget {
+  final VoidCallback onRetry;
+  const _NoInternetScreen({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.black,
+      width: double.infinity,
+      height: double.infinity,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.wifi_off_rounded, color: Colors.white24, size: 80),
+          const SizedBox(height: 24),
+          const Text(
+            'No Connection',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Please check your internet settings.',
+            style: TextStyle(color: Colors.white38, fontSize: 14),
+          ),
+          const SizedBox(height: 40),
+          ElevatedButton(
+            onPressed: onRetry,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.black,
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+            ),
+            child: const Text('Retry'),
+          ),
+        ],
       ),
     );
   }

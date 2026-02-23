@@ -101,6 +101,7 @@ class SessionManager extends ChangeNotifier {
 
   int get perSessionSeconds => _perSessionSeconds;
   int get cooldownSeconds => _cooldownSeconds;
+  DateTime? get lastSessionEnd => _lastSessionEnd;
 
   // ── Public getters — App session ──────────────────────────
 

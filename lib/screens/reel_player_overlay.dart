@@ -41,6 +41,9 @@ class _ReelPlayerOverlayState extends State<ReelPlayerOverlay> {
               InjectionController.buildInjectionJS(
                 sessionActive: true,
                 blurExplore: false,
+                blurReels: false,
+                ghostMode: false,
+                enableTextSelection: true,
               ),
             );
           },

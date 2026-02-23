@@ -1,70 +1,116 @@
-/// Generates all CSS and JavaScript injection strings for the WebView.
-///
-/// Strategy:
-/// - Instagram's own bottom nav bar is hidden via both CSS and a periodic JS
-///   removal loop, since SPA re-renders can outpace MutationObserver.
-/// - Reel elements are hidden/blurred based on settings/session state.
-/// - A MutationObserver keeps re-applying the rules after SPA re-renders.
-/// - App-install banners are auto-dismissed.
+/// Controller for injecting custom JS and CSS into the WebView.
+/// Uses a combination of static strings and dynamic builders to:
+/// - Hide native navigation elements.
+/// - Inject FocusGram branding into the native header.
+/// - Implement "Ghost Mode" (stealth features).
+/// - Manage Reels/Explore distractions.
 class InjectionController {
-  /// iOS Safari user-agent — reduces login friction with Instagram.
+  /// The requested iOS 18.6 User Agent for Instagram App feel.
   static const String iOSUserAgent =
-      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
-      'AppleWebKit/605.1.15 (KHTML, like Gecko) '
-      'Version/17.0 Mobile/15E148 Safari/604.1';
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/22G86 [FBAN/FBIOS;FBAV/531.0.0.35.77;FBBV/792629356;FBDV/iPhone17,2;FBMD/iPhone;FBSN/iOS;FBSV/18.6;FBSS/3;FBID/phone;FBLC/en_US;FBOP/5;FBRV/0;IABMV/1]';
 
-  // ── CSS injection ───────────────────────────────────────────────────────────
+  // ── CSS & JS injection ──────────────────────────────────────────────────────
+
+  /// CSS to fix UI nuances like tap highlights.
+  static const String _globalUIFixesCSS = '''
+    * {
+      -webkit-tap-highlight-color: transparent !important;
+      outline: none !important;
+    }
+  ''';
+
+  /// CSS to disable text selection globally.
+  static const String _disableSelectionCSS = '''
+    * {
+      -webkit-user-select: none !important;
+      user-select: none !important;
+    }
+  ''';
+
+  /// Ghost Mode JS: Intercepts network calls to block seen/typing receipts.
+  static const String _ghostModeJS = '''
+    (function() {
+      const blockedUrls = [
+        '/api/v1/direct_v2/set_reel_seen/',
+        '/api/v1/direct_v2/threads/set_typing_status/',
+        '/api/v1/stories/reel/seen/',
+        '/api/v1/direct_v2/mark_visual_item_seen/'
+      ];
+
+      // Proxy fetch
+      const originalFetch = window.fetch;
+      window.fetch = function(url, options) {
+        if (typeof url === 'string') {
+          if (blockedUrls.some(u => url.includes(u))) {
+            return Promise.resolve(new Response(null, { status: 204 }));
+          }
+        }
+        return originalFetch.apply(this, arguments);
+      };
+
+      // Proxy XHR
+      const originalOpen = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function(method, url) {
+        this._blocked = blockedUrls.some(u => url.includes(u));
+        return originalOpen.apply(this, arguments);
+      };
+      const originalSend = XMLHttpRequest.prototype.send;
+      XMLHttpRequest.prototype.send = function() {
+        if (this._blocked) return; 
+        return originalSend.apply(this, arguments);
+      };
+    })();
+  ''';
+
+  /// Branding JS: Replaces Instagram logo with FocusGram while keeping icons.
+  static const String _brandingJS = '''
+    (function() {
+      function applyBranding() {
+        const igLogo = document.querySelector('svg[aria-label="Instagram"], svg[aria-label="Direct"]');
+        if (igLogo && !igLogo.dataset.focusgrammed) {
+           const container = igLogo.parentElement;
+           if (container) {
+              igLogo.style.display = 'none';
+              igLogo.dataset.focusgrammed = 'true';
+              
+              const brandText = document.createElement('span');
+              brandText.innerText = 'FocusGram';
+              brandText.style.fontFamily = '"Grand Hotel", cursive';
+              brandText.style.fontSize = '24px';
+              brandText.style.color = 'white';
+              brandText.style.marginLeft = '8px';
+              brandText.style.verticalAlign = 'middle';
+              
+              container.appendChild(brandText);
+           }
+        }
+      }
+      applyBranding();
+      const observer = new MutationObserver(applyBranding);
+      observer.observe(document.body, { childList: true, subtree: true });
+    })();
+  ''';
 
   /// Robust CSS that hides Instagram's native bottom nav bar.
-  /// Covers all known selector patterns including dynamic class names.
   static const String _hideInstagramNavCSS = '''
-    /* ── Instagram bottom navigation bar — hide completely ── */
-    /* Role-based selectors */
-    div[role="tablist"],
-    nav[role="navigation"],
-    /* Fixed-position bottom bar */
-    div[style*="position: fixed"][style*="bottom"],
-    div[style*="position:fixed"][style*="bottom"],
-    /* Instagram legacy class names */
-    ._acbl, ._aa4b, ._aahi, ._ab8s,
-    /* Section nav elements */
-    section nav,
-    /* Any nav inside the main app shell */
-    #react-root nav,
-    /* The outer wrapper of the bottom bar (PWA/mobile web) */
-    [class*="x1n2onr6"][class*="x1vjfegm"] > nav,
-    /* Catch-all: any fixed bottom element containing nav links */
-    footer nav,
-    div[class*="bottom"] nav {
+    div[role="tablist"], nav[role="navigation"],
+    ._acbl, ._aa4b, ._aahi, ._ab8s, section nav, footer nav {
       display: none !important;
       visibility: hidden !important;
       height: 0 !important;
       overflow: hidden !important;
       pointer-events: none !important;
     }
-    /* Ensure the body doesn't add bottom padding for the nav */
     body, #react-root, main {
       padding-bottom: 0 !important;
       margin-bottom: 0 !important;
     }
   ''';
 
-  /// CSS to hide Reel-related elements everywhere (feed, profile, search).
-  /// Used when session is NOT active.
+  /// CSS to hide Reel-related elements everywhere.
   static const String _hideReelsCSS = '''
-    /* Hide reel thumbnails and links */
-    a[href*="/reel/"],
-    a[href*="/reels"],
-    [aria-label*="Reel"],
-    [aria-label*="Reels"],
-    div[data-media-type="2"],
-    /* Profile grid reel filter tabs */
-    [aria-label="Reels"],
-    /* Reel indicators on feed thumbnails */
-    svg[aria-label="Reels"],
-    /* Video/reel chips in feed */
-    [class*="reel"],
-    [class*="Reel"] {
+    a[href*="/reel/"], a[href*="/reels"], [aria-label*="Reel"], [aria-label*="Reels"],
+    div[data-media-type="2"], [aria-label="Reels"], svg[aria-label="Reels"] {
       display: none !important;
       visibility: hidden !important;
       pointer-events: none !important;
@@ -72,95 +118,49 @@ class InjectionController {
   ''';
 
   /// CSS that adds bottom padding so feed content doesn't hide behind our bar.
-  /// Added more selectors to cover dynamic drawers like Notes and Reactions.
   static const String _bottomPaddingCSS = '''
     body, #react-root > div, [role="presentation"] > div {
       padding-bottom: 72px !important;
     }
-    /* Special handling for dynamic bottom drawers */
-    div[style*="bottom: 0px"], div[style*="bottom: 0"] {
+    div[style*="bottom: 0px"], div[style*="bottom: 0"], form[method="POST"] {
       padding-bottom: 72px !important;
     }
-  ''';
-
-  /// CSS to push IG content down so it doesn't hide behind our status bar.
-  static const String _topPaddingCSS = '''
-    header, #react-root > div > div > div:first-child {
-      margin-top: 44px !important;
-    }
-    /* Shift fixed headers down */
-    div[style*="position: fixed"][style*="top: 0"] {
-       top: 44px !important;
+    div[role="main"] div[style*="position: fixed"] {
+       bottom: 72px !important;
     }
   ''';
 
-  /// CSS to blur Explore feed posts/reels (keeps stories visible).
+  /// CSS to blur Explore feed posts/reels.
   static const String _blurExploreCSS = '''
-    /* Blur Explore grid posts and reel cards (not stories row) */
     main[role="main"] section > div > div:not(:first-child) a img,
     main[role="main"] section > div > div:not(:first-child) video,
-    main[role="main"] section > div > div:not(:first-child) [class*="x6s0dn4"],
-    main[role="main"] article img,
-    main[role="main"] article video,
-    /* Explore page grid */
-    ._aagv img,
-    ._aagv video {
+    main[role="main"] article img, main[role="main"] article video,
+    ._aagv img, ._aagv video {
       filter: blur(12px) !important;
       pointer-events: none !important;
     }
-    /* Overlay to block tapping blurred content */
-    ._aagv::after {
-      content: "";
-      position: absolute;
-      inset: 0;
-      z-index: 99;
-      cursor: not-allowed;
-    }
-    ._aagv {
-      position: relative !important;
-      overflow: hidden !important;
+  ''';
+
+  static const String _blurReelsCSS = '''
+    a[href*="/reel/"] img, a[href*="/reels"] img {
+       filter: blur(12px) !important;
     }
   ''';
 
-  /// Auto-dismiss "Open in App" banner that Instagram shows in mobile browsers.
+  /// Auto-dismiss "Open in App" banner.
   static const String _dismissAppBannerJS = '''
     (function dismissBanners() {
-      const selectors = [
-        '[id*="app-banner"]',
-        '[class*="app-banner"]',
-        '[data-testid*="app-banner"]',
-        'div[role="dialog"][aria-label*="app"]',
-        'div[role="dialog"][aria-label*="App"]',
-      ];
-      selectors.forEach(sel => {
-        document.querySelectorAll(sel).forEach(el => el.remove());
-      });
+      const selectors = ['[id*="app-banner"]', '[class*="app-banner"]', 'div[role="dialog"][aria-label*="app"]'];
+      selectors.forEach(sel => document.querySelectorAll(sel).forEach(el => el.remove()));
     })();
   ''';
 
-  /// Periodic remover: every 500ms force-removes the bottom nav.
-  /// Complements the MutationObserver for sites that rebuild DOM faster.
+  /// Periodic remover for bottom nav.
   static const String _periodicNavRemoverJS = '''
     (function periodicNavRemove() {
       function removeNav() {
-        // Target all fixed-bottom elements that could be the nav bar
-        document.querySelectorAll([
-          'div[role="tablist"]',
-          'nav[role="navigation"]',
-          '._acbl', '._aa4b', '._aahi', '._ab8s',
-          'section nav',
-          'footer nav'
-        ].join(',')).forEach(function(el) {
-          el.style.cssText += ';display:none!important;height:0!important;overflow:hidden!important;';
-        });
-        // Also hide any element that is fixed at the bottom and contains nav links
-        document.querySelectorAll('div[style]').forEach(function(el) {
-          const s = el.style;
-          if ((s.position === 'fixed' || s.position === 'sticky') &&
-              (s.bottom === '0px' || s.bottom === '0') &&
-              el.querySelector('a,button')) {
-            el.style.cssText += ';display:none!important;';
-          }
+        document.querySelectorAll('div[role="tablist"], nav[role="navigation"], footer nav').forEach(el => {
+          el.style.cssText += ';display:none!important;height:0!important;';
         });
       }
       removeNav();
@@ -168,12 +168,11 @@ class InjectionController {
     })();
   ''';
 
-  /// MutationObserver that continuously re-applies CSS after SPA re-renders.
+  /// MutationObserver that continuously re-applies CSS.
   static String _buildMutationObserver(String cssContent) =>
       '''
     (function applyFocusGramStyles() {
       const STYLE_ID = 'focusgram-injected-style';
-
       function injectCSS() {
         let el = document.getElementById(STYLE_ID);
         if (!el) {
@@ -183,175 +182,88 @@ class InjectionController {
         }
         el.textContent = ${_escapeJsString(cssContent)};
       }
-
       injectCSS();
-
-      const observer = new MutationObserver(function() {
-        if (!document.getElementById(STYLE_ID)) {
-          injectCSS();
-        }
+      const observer = new MutationObserver(() => {
+        if (!document.getElementById(STYLE_ID)) injectCSS();
       });
-
-      observer.observe(document.documentElement, {
-        childList: true,
-        subtree: true,
-      });
+      observer.observe(document.documentElement, { childList: true, subtree: true });
     })();
   ''';
 
   static String _escapeJsString(String s) {
-    // Wrap in JS template literal backticks; escape any internal backticks.
     final escaped = s.replaceAll(r'\', r'\\').replaceAll('`', r'\`');
     return '`$escaped`';
   }
 
   // ── Navigation helpers ──────────────────────────────────────────────────────
 
-  /// JS that soft-navigates Instagram's SPA without a full page reload.
-  /// [path] should start with / e.g. '/direct/inbox/'.
   static String softNavigateJS(String path) =>
       '''
     (function() {
       const target = ${_escapeJsString(path)};
-      // Try React Router / Instagram SPA navigation first (pushState trick)
       if (window.location.pathname !== target) {
         window.location.href = target;
       }
     })();
   ''';
 
-  /// JS to click Instagram's native "create post" button.
   static const String clickCreateButtonJS = '''
     (function() {
-      const btn = document.querySelector(
-        '[aria-label="New post"], [aria-label="Create"], svg[aria-label="New post"]'
-      );
-      if (btn) {
-        btn.closest('a, button') ? btn.closest('a, button').click() : btn.click();
-      } else {
-        // Fallback: navigate to home first, create will open as modal
-        window.location.href = '/';
-      }
+      const btn = document.querySelector('[aria-label="New post"], [aria-label="Create"]');
+      if (btn) btn.closest('a, button') ? btn.closest('a, button').click() : btn.click();
     })();
   ''';
 
-  /// JS to get the currently logged-in user's username.
-  static const String getLoggedInUsernameJS = '''
-    (function() {
-      try {
-        // Try shared data approach
-        const scripts = Array.from(document.querySelectorAll('script[type="application/json"]'));
-        for (const s of scripts) {
-          try {
-            const d = JSON.parse(s.textContent);
-            if (d && d.config && d.config.viewer && d.config.viewer.username) {
-              return d.config.viewer.username;
-            }
-          } catch(e){}
-        }
-        // Try window additionalDataLoaded
-        if (window.__additionalDataLoaded) {
-          const keys = Object.keys(window.__additionalDataLoaded || {});
-          for (const k of keys) {
-            const v = window.__additionalDataLoaded[k];
-            if (v && v.data && v.data.user && v.data.user.username) {
-              return v.data.user.username;
-            }
-          }
-        }
-        // Fallback: try profile anchor in nav
-        const profileLink = document.querySelector('a[href][aria-label*="rofile"]');
-        if (profileLink) {
-          const href = profileLink.getAttribute('href');
-          if (href) {
-            const parts = href.replace(/^[/]/, "").split("/");
-            if (parts[0] && parts[0].length > 0) return parts[0];
-          }
-        }
-        return null;
-      } catch(e) { return null; }
-    })();
-  ''';
-
-  /// MutationObserver to watch for Reel players and lock their scrolling.
+  /// MutationObserver for Reel scroll locking.
   static const String reelsMutationObserverJS = '''
     (function() {
       function lockReelScroll(reelContainer) {
         if (reelContainer.dataset.scrollLocked) return;
-        
-        // If session is active, don't lock
-        if (window.__focusgramSessionActive === true) return;
-
         reelContainer.dataset.scrollLocked = 'true';
-        
         let startY = 0;
-
-        reelContainer.addEventListener('touchstart', (e) => {
-          startY = e.touches[0].clientY;
-        }, { passive: true });
-
+        reelContainer.addEventListener('touchstart', (e) => startY = e.touches[0].clientY, { passive: true });
         reelContainer.addEventListener('touchmove', (e) => {
+          if (window.__focusgramSessionActive === true) return;
           const deltaY = e.touches[0].clientY - startY;
-          // Block upward swipe (next reel), allow downward (go back)
-          if (deltaY < -10) {
-            if (e.cancelable) {
-              e.preventDefault();
-              e.stopPropagation();
-            }
+          if (deltaY < -10 && e.cancelable) {
+            e.preventDefault();
+            e.stopPropagation();
           }
         }, { passive: false });
       }
-
-      // Watch for reel player being injected into DOM
       const observer = new MutationObserver(() => {
-        // Instagram's reel player containers — multiple selectors for resilience
-        const reelContainers = document.querySelectorAll(
-          '[class*="reel"], [class*="Reel"], video'
-        );
-        reelContainers.forEach((el) => {
-          // If it's a video or a reel container, wrap it
+        document.querySelectorAll('[class*="ReelsVideoPlayer"], video').forEach((el) => {
+          if (el.tagName === 'VIDEO' && el.closest('article')) return;
           lockReelScroll(el);
-          // Also try parent if it's a video
-          if (el.tagName === 'VIDEO' && el.parentElement) {
-            lockReelScroll(el.parentElement);
-          }
+          if (el.tagName === 'VIDEO' && el.parentElement) lockReelScroll(el.parentElement);
         });
       });
-
       observer.observe(document.body, { childList: true, subtree: true });
     })();
   ''';
 
-  /// JS to disable swipe-to-next behavior inside the isolated Reel player.
-  static const String disableReelSwipeJS = '''
-    (function disableSwipeNavigation() {
-      if (window.__focusgramSessionActive === true) return;
-      let startX = 0;
-      document.addEventListener('touchstart', e => { startX = e.touches[0].clientX; }, {passive: true});
-      document.addEventListener('touchmove', e => {
-        const dx = Math.abs(e.touches[0].clientX - startX);
-        if (dx > 30) e.preventDefault();
-      }, {passive: false});
-    })();
-  ''';
-
-  /// JS to update the session state variable in the page context.
   static String buildSessionStateJS(bool active) =>
       'window.__focusgramSessionActive = $active;';
 
-  // ── Public API ──────────────────────────────────────────────────────────────
-
-  /// Full injection JS to run on every page load.
+  /// Full injection JS to run on page load.
   static String buildInjectionJS({
     required bool sessionActive,
     required bool blurExplore,
+    required bool blurReels,
+    required bool ghostMode,
+    required bool enableTextSelection,
   }) {
     final StringBuffer css = StringBuffer();
+    css.writeln(_globalUIFixesCSS);
+    if (!enableTextSelection) css.writeln(_disableSelectionCSS);
     css.write(_hideInstagramNavCSS);
     css.write(_bottomPaddingCSS);
-    css.write(_topPaddingCSS);
-    if (!sessionActive) css.write(_hideReelsCSS);
-    if (blurExplore) css.write(_blurExploreCSS);
+
+    if (!sessionActive) {
+      css.write(_hideReelsCSS);
+      if (blurExplore) css.write(_blurExploreCSS);
+      if (blurReels) css.write(_blurReelsCSS);
+    }
 
     return '''
       ${buildSessionStateJS(sessionActive)}
@@ -359,6 +271,8 @@ class InjectionController {
       $_periodicNavRemoverJS
       $_dismissAppBannerJS
       $reelsMutationObserverJS
+      $_brandingJS
+      ${ghostMode ? _ghostModeJS : ''}
     ''';
   }
 }
