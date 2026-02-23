@@ -1,6 +1,6 @@
 Categories:
   - Multimedia
-  - Social
+  - Social Network
 License: AGPL-3.0-only
 SourceCode: https://github.com/Ujwal223/FocusGram
 IssueTracker: https://github.com/Ujwal223/FocusGram/issues
@@ -11,13 +11,21 @@ RepoType: git
 Repo: https://github.com/Ujwal223/FocusGram
 
 Builds:
-  - versionName: '0.9.8'
+  - versionName: 0.9.8-beta.1
     versionCode: 1
-    commit: v0.9.8
+    commit: v0.9.8-beta.1
+    subdir: android
     gradle:
       - yes
+    output: ../build/app/outputs/flutter-apk/app-release.apk
+    srclibs:
+      - flutter@3.38.7
+    prebuild:
+      - echo "flutter.sdk=$$flutter$$" >> local.properties
+      - $$flutter$$/bin/flutter pub get -C ..
+    ndk: 28.2.13676358
 
-AutoUpdateMode: Version
-UpdateCheckMode: Tags
-CurrentVersion: '0.9.8'
+AutoUpdateMode: None
+UpdateCheckMode: None
+CurrentVersion: 0.9.8-beta.1
 CurrentVersionCode: 1
