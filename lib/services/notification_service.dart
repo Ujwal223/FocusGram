@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 class NotificationService {
@@ -59,11 +60,15 @@ class NotificationService {
       iOS: iosDetails,
     );
 
-    await _notificationsPlugin.show(
-      id: id,
-      title: title,
-      body: body,
-      notificationDetails: platformDetails,
-    );
+    try {
+      await _notificationsPlugin.show(
+        id: id,
+        title: title,
+        body: body,
+        notificationDetails: platformDetails,
+      );
+    } catch (e) {
+      debugPrint('Notification error: $e');
+    }
   }
 }

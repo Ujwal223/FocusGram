@@ -1,0 +1,9 @@
+FocusGram is a distraction-free client for Instagram that allows you to use the core features—feed, stories, DMs, and profile—without getting stuck in the endless scroll of Reels and Explore.
+
+Key Features:
+- Adds blur in explore feeds and homepage posts.
+- Blocks navigation to /reel/ URLs to prevent accidental distraction.
+- Implement controlled Reel sessions with customizable time limits and daily totals.
+- Enforces cooldown periods between sessions to build better habits.
+- Privacy-focused: No ads, no tracking, and no proprietary SDKs.
+- 100% Free and Open Source.

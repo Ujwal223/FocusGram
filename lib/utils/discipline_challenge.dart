@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_windowmanager_plus/flutter_windowmanager_plus.dart';
 
 class DisciplineChallenge {
   static const List<String> _words = [
@@ -516,10 +517,19 @@ class DisciplineChallenge {
   ];
 
   /// Shows the word challenge dialog. Returns true if successful.
-  static Future<bool> show(BuildContext context) async {
+  static Future<bool> show(BuildContext context, {int count = 15}) async {
     final list = List<String>.from(_words)..shuffle();
-    final challenge = list.take(15).join(' ');
+    final challenge = list.take(count).join(' ');
     final controller = TextEditingController();
+
+    // Prevent screenshots on Android
+    try {
+      await FlutterWindowManagerPlus.addFlags(
+        FlutterWindowManagerPlus.FLAG_SECURE,
+      );
+    } catch (_) {}
+
+    if (!context.mounted) return false;
 
     final result = await showDialog<bool>(
       context: context,
@@ -569,6 +579,8 @@ class DisciplineChallenge {
               TextField(
                 controller: controller,
                 autofocus: true,
+                enableInteractiveSelection:
+                    false, // Prevents copy/paste/selection
                 style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
                   hintText: 'Type here...',
@@ -616,6 +628,14 @@ class DisciplineChallenge {
         ],
       ),
     );
+
+    // Re-enable screenshots
+    try {
+      await FlutterWindowManagerPlus.clearFlags(
+        FlutterWindowManagerPlus.FLAG_SECURE,
+      );
+    } catch (_) {}
+
     return result ?? false;
   }
 }

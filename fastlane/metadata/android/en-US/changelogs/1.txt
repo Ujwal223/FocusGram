@@ -1,0 +1,5 @@
+Initial open-source release of FocusGram.
+- Complete Reels and Explore hiding.
+- Timed Reel sessions and daily limits.
+- Isolated DM Reel player.
+- Privacy-first: No Firebase or trackers.

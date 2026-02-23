@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:app_links/app_links.dart';
 import 'services/session_manager.dart';
 import 'services/settings_service.dart';
+import 'services/focusgram_router.dart';
 import 'screens/onboarding_page.dart';
 import 'screens/main_webview_page.dart';
 import 'screens/breath_gate_screen.dart';
 import 'screens/app_session_picker.dart';
 import 'screens/cooldown_gate_screen.dart';
+import 'services/notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,6 +26,7 @@ void main() async {
 
   await sessionManager.init();
   await settingsService.init();
+  await NotificationService().init();
 
   runApp(
     MultiProvider(
@@ -40,16 +44,21 @@ class FocusGramApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final settings = context.watch<SettingsService>();
+    final isDark = settings.isDarkMode;
+
     return MaterialApp(
       title: 'FocusGram',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        brightness: Brightness.dark,
-        colorScheme: ColorScheme.dark(
-          primary: Colors.blue.shade400,
-          surface: Colors.black,
-        ),
-        scaffoldBackgroundColor: Colors.black,
+        brightness: isDark ? Brightness.dark : Brightness.light,
+        colorScheme: isDark
+            ? ColorScheme.dark(
+                primary: Colors.blue.shade400,
+                surface: Colors.black,
+              )
+            : ColorScheme.light(primary: Colors.blue),
+        scaffoldBackgroundColor: isDark ? Colors.black : Colors.white,
         useMaterial3: true,
         splashColor: Colors.transparent,
         highlightColor: Colors.transparent,
@@ -76,6 +85,29 @@ class _InitialRouteHandlerState extends State<InitialRouteHandler> {
   bool _breathCompleted = false;
   bool _appSessionStarted = false;
   bool _onboardingCompleted = false;
+  late AppLinks _appLinks;
+
+  @override
+  void initState() {
+    super.initState();
+    _appLinks = AppLinks();
+    _initDeepLinks();
+  }
+
+  Future<void> _initDeepLinks() async {
+    // 1. Handle background links while app is running
+    _appLinks.uriLinkStream.listen((uri) {
+      debugPrint('Incoming Deep Link: $uri');
+      FocusGramRouter.pendingUrl.value = uri.toString();
+    });
+
+    // 2. Handle the initial link that opened the app
+    final initialUri = await _appLinks.getInitialLink();
+    if (initialUri != null) {
+      debugPrint('Initial Deep Link: $initialUri');
+      FocusGramRouter.pendingUrl.value = initialUri.toString();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

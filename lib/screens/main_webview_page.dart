@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -9,10 +10,11 @@ import '../services/session_manager.dart';
 import '../services/settings_service.dart';
 import '../services/injection_controller.dart';
 import '../services/navigation_guard.dart';
+import '../services/focusgram_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/notification_service.dart';
+import '../utils/discipline_challenge.dart';
 import 'settings_page.dart';
-import 'app_session_picker.dart';
 
 class MainWebViewPage extends StatefulWidget {
   const MainWebViewPage({super.key});
@@ -24,15 +26,14 @@ class MainWebViewPage extends StatefulWidget {
 class _MainWebViewPageState extends State<MainWebViewPage>
     with WidgetsBindingObserver {
   late final WebViewController _controller;
-  int _currentIndex = 0;
+  final GlobalKey<_EdgePanelState> _edgePanelKey = GlobalKey<_EdgePanelState>();
   bool _isLoading = true;
-  // Watchdog for app-session expiry
   Timer? _watchdog;
   bool _extensionDialogShown = false;
   bool _lastSessionActive = false;
-  String? _cachedUsername;
   String _currentUrl = 'https://www.instagram.com/';
   bool _hasError = false;
+  bool _reelsBlockedOverlay = false;
 
   /// Helper to determine if we are on a login/onboarding page.
   bool get _isOnOnboardingPage {
@@ -46,11 +47,6 @@ class _MainWebViewPageState extends State<MainWebViewPage>
         _currentUrl.contains('instagram.com/accounts/login');
   }
 
-  /// Helper to determine if we are inside Direct Messages.
-  bool get _isInDirect {
-    return _currentUrl.contains('instagram.com/direct/');
-  }
-
   @override
   void initState() {
     super.initState();
@@ -58,12 +54,29 @@ class _MainWebViewPageState extends State<MainWebViewPage>
     _initWebView();
     _startWatchdog();
 
-    // Listen to session & settings changes
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<SessionManager>().addListener(_onSessionChanged);
       context.read<SettingsService>().addListener(_onSettingsChanged);
       _lastSessionActive = context.read<SessionManager>().isSessionActive;
     });
+
+    FocusGramRouter.pendingUrl.addListener(_onPendingUrlChanged);
+  }
+
+  void _onPendingUrlChanged() {
+    final url = FocusGramRouter.pendingUrl.value;
+    if (url != null && url.isNotEmpty) {
+      FocusGramRouter.pendingUrl.value = null;
+      _controller.loadRequest(Uri.parse(url));
+    }
+  }
+
+  /// Sets the isolated reel player flag in the WebView so the scroll-lock
+  /// knows it should block swipe-to-next-reel.
+  Future<void> _setIsolatedPlayer(bool active) async {
+    await _controller.runJavaScript(
+      'window.__focusgramIsolatedPlayer = $active;',
+    );
   }
 
   void _onSessionChanged() {
@@ -72,21 +85,26 @@ class _MainWebViewPageState extends State<MainWebViewPage>
     if (_lastSessionActive != sm.isSessionActive) {
       _lastSessionActive = sm.isSessionActive;
       _applyInjections();
+
+      // If session became active and we were showing overlay, hide it
+      if (_lastSessionActive && _reelsBlockedOverlay) {
+        setState(() => _reelsBlockedOverlay = false);
+      }
     }
-    // Force rebuild for timer updates
     setState(() {});
   }
 
   void _onSettingsChanged() {
     if (!mounted) return;
     _applyInjections();
-    _controller.reload();
+    // Removed _controller.reload() to improve performance. JS injection now handles updates instantly.
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _watchdog?.cancel();
+    FocusGramRouter.pendingUrl.removeListener(_onPendingUrlChanged);
     context.read<SessionManager>().removeListener(_onSessionChanged);
     context.read<SettingsService>().removeListener(_onSettingsChanged);
     super.dispose();
@@ -149,7 +167,7 @@ class _MainWebViewPageState extends State<MainWebViewPage>
             onPressed: () {
               Navigator.pop(context);
               sm.endAppSession();
-              SystemNavigator.pop(); // Force close
+              SystemNavigator.pop();
             },
             child: const Text(
               'Close App',
@@ -161,8 +179,7 @@ class _MainWebViewPageState extends State<MainWebViewPage>
               onPressed: () {
                 Navigator.pop(context);
                 sm.extendAppSession();
-                _extensionDialogShown =
-                    false; // Reset so watchdog can fire again at next expiry
+                _extensionDialogShown = false;
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.blue,
@@ -178,21 +195,36 @@ class _MainWebViewPageState extends State<MainWebViewPage>
   }
 
   void _initWebView() {
+    final settings = context.read<SettingsService>();
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setUserAgent(InjectionController.iOSUserAgent)
-      ..setBackgroundColor(Colors.black);
+      ..setBackgroundColor(settings.isDarkMode ? Colors.black : Colors.white);
 
-    // Support file uploads on Android
     if (_controller.platform is AndroidWebViewController) {
-      AndroidWebViewController.enableDebugging(true);
-      (_controller.platform as AndroidWebViewController).setOnShowFileSelector((
-        FileSelectorParams params,
-      ) async {
-        // Standard Android implementation triggers the file picker intent automatically
-        // when this callback is set, or we can use file_picker package if needed.
-        // For now, returning empty list if we want to custom handle, or better:
-        // By default, setting a non-null callback enables the system picker.
+      final androidController =
+          _controller.platform as AndroidWebViewController;
+      AndroidWebViewController.enableDebugging(false);
+      androidController.setMediaPlaybackRequiresUserGesture(false);
+      androidController.setOnShowFileSelector((params) async {
+        try {
+          final picker = ImagePicker();
+          final acceptsVideo = params.acceptTypes.any(
+            (t) => t.contains('video'),
+          );
+          final XFile? file = acceptsVideo
+              ? await picker.pickVideo(source: ImageSource.gallery)
+              : await picker.pickImage(source: ImageSource.gallery);
+          if (file != null) {
+            // WebView expects a content:// URI, not a raw filesystem path.
+            // XFile.path on Android is already a content:// URI string when
+            // picked from the gallery via image_picker >= 0.9, but if it
+            // starts with '/' we need to prefix it with 'file://'.
+            final path = file.path;
+            final uri = path.startsWith('/') ? 'file://$path' : path;
+            return [uri];
+          }
+        } catch (_) {}
         return <String>[];
       });
     }
@@ -204,7 +236,14 @@ class _MainWebViewPageState extends State<MainWebViewPage>
             if (mounted) {
               setState(() {
                 _isLoading = !url.contains('#');
-                _currentUrl = url; // Update immediately to hide/show UI
+                _currentUrl = url;
+                // If navigating to reels and no session, block it
+                if (url.contains('/reels/') &&
+                    !context.read<SessionManager>().isSessionActive) {
+                  _reelsBlockedOverlay = true;
+                } else {
+                  _reelsBlockedOverlay = false;
+                }
               });
             }
           },
@@ -216,67 +255,146 @@ class _MainWebViewPageState extends State<MainWebViewPage>
               });
             }
             _applyInjections();
-            _updateCurrentTab(url);
-            _cacheUsername();
-            // Inject Notification Bridge Hook
             _controller.runJavaScript(InjectionController.notificationBridgeJS);
-            // Inject MutationObserver to lock reel scrolling resiliently
-            _controller.runJavaScript(
-              InjectionController.reelsMutationObserverJS,
-            );
+
+            // Set isolated player flag: true only when a single reel is opened
+            // from a DM thread (URL contains /reel/ but we're coming from /direct/).
+            // When the user navigates away, clear the flag.
+            final isIsolatedReel =
+                url.contains('/reel/') && !url.contains('/reels/');
+            _setIsolatedPlayer(isIsolatedReel);
           },
           onNavigationRequest: (request) {
-            // Handle external links (non-Instagram/Facebook)
             final uri = Uri.tryParse(request.url);
             if (uri != null &&
+                uri.host.contains('instagram.com') &&
+                (request.url.contains('accounts/settings') ||
+                    request.url.contains('accounts/edit'))) {
+              return NavigationDecision.navigate;
+            }
+
+            // Block reels feed if no session active
+            if (request.url.contains('/reels/') &&
+                !context.read<SessionManager>().isSessionActive) {
+              setState(() => _reelsBlockedOverlay = true);
+              return NavigationDecision.prevent;
+            }
+
+            if (uri != null &&
                 !uri.host.contains('instagram.com') &&
-                !uri.host.contains('facebook.com')) {
+                !uri.host.contains('facebook.com') &&
+                !uri.host.contains('cdninstagram.com') &&
+                !uri.host.contains('fbcdn.net')) {
               launchUrl(uri, mode: LaunchMode.externalApplication);
               return NavigationDecision.prevent;
             }
 
-            // Facebook Login Warning
-            if (uri != null &&
-                uri.host.contains('facebook.com') &&
-                _isOnOnboardingPage) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Sorry, Please use Email login')),
-              );
-              return NavigationDecision.prevent;
-            }
-
             final decision = NavigationGuard.evaluate(url: request.url);
-
             if (decision.blocked) {
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(decision.reason ?? 'Navigation blocked'),
-                    backgroundColor: Colors.red.shade900,
-                    behavior: SnackBarBehavior.floating,
-                    margin: const EdgeInsets.fromLTRB(16, 0, 16, 80),
-                    duration: const Duration(seconds: 2),
-                  ),
-                );
+              // Custom handling for reels in overlay instead of snackbar
+              if (request.url.contains('/reels/')) {
+                setState(() => _reelsBlockedOverlay = true);
+                return NavigationDecision.prevent;
               }
               return NavigationDecision.prevent;
             }
 
             return NavigationDecision.navigate;
           },
+          onWebResourceError: (error) {
+            if (error.isForMainFrame == true &&
+                (error.errorCode == -2 || error.errorCode == -6)) {
+              if (mounted) setState(() => _hasError = true);
+            }
+          },
         ),
       )
       ..addJavaScriptChannel(
         'FocusGramNotificationChannel',
         onMessageReceived: (message) {
+          final settings = context.read<SettingsService>();
+          final msg = message.message;
+
+          // Check if it's a bridge payload (Title: Body) or a simple flag (DM/Activity)
+          String title = '';
+          String body = '';
+          bool isDM = false;
+
+          if (msg.contains(': ')) {
+            final parts = msg.split(': ');
+            title = parts[0];
+            body = parts.sublist(1).join(': ');
+            isDM =
+                title.toLowerCase().contains('message') ||
+                title.toLowerCase().contains('direct');
+          } else {
+            isDM = msg == 'DM';
+            title = isDM ? 'Instagram Message' : 'Instagram Notification';
+            body = isDM
+                ? 'Someone messaged you'
+                : 'New activity in notifications';
+          }
+
+          if (isDM && !settings.notifyDMs) return;
+          if (!isDM && !settings.notifyActivity) return;
+
           try {
-            // Instagram sends notification data; we bridge to native
             NotificationService().showNotification(
               id: DateTime.now().millisecond,
-              title: 'Instagram',
-              body: message.message,
+              title: title,
+              body: body,
             );
           } catch (_) {}
+        },
+      )
+      ..addJavaScriptChannel(
+        'FocusGramShareChannel',
+        onMessageReceived: (message) {
+          try {
+            final data = message.message;
+            String url = data;
+            try {
+              final json = RegExp(r'"url":"([^"]+)"').firstMatch(data);
+              if (json != null) url = json.group(1) ?? data;
+            } catch (_) {}
+            Clipboard.setData(ClipboardData(text: url));
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Link copied (tracking removed)'),
+                  backgroundColor: const Color(0xFF1A1A2E),
+                  behavior: SnackBarBehavior.floating,
+                  margin: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+                ),
+              );
+            }
+          } catch (_) {}
+        },
+      )
+      ..addJavaScriptChannel(
+        'FocusGramThemeChannel',
+        onMessageReceived: (message) {
+          context.read<SettingsService>().setDarkMode(
+            message.message == 'dark',
+          );
+        },
+      )
+      ..addJavaScriptChannel(
+        'FocusGramPathChannel',
+        onMessageReceived: (message) {
+          if (!mounted) return;
+          final path = message.message;
+          final sm = context.read<SessionManager>();
+          if (path.startsWith('/reels') && !sm.isSessionActive) {
+            // SPA navigation landed on Reels without a session — gate it.
+            setState(() => _reelsBlockedOverlay = true);
+            // Navigate back to home feed so the overlay has content behind it.
+            _controller.runJavaScript(
+              'if (window.location.pathname.startsWith("/reels")) window.location.href = "/";',
+            );
+          } else if (_reelsBlockedOverlay && !path.startsWith('/reels')) {
+            setState(() => _reelsBlockedOverlay = false);
+          }
         },
       )
       ..loadRequest(Uri.parse('https://www.instagram.com/accounts/login/'));
@@ -284,7 +402,7 @@ class _MainWebViewPageState extends State<MainWebViewPage>
 
   void _applyInjections() {
     if (!mounted) return;
-    if (_isOnOnboardingPage) return; // Restore native login/signup behavior
+    if (_isOnOnboardingPage) return;
 
     final sessionManager = context.read<SessionManager>();
     final settings = context.read<SettingsService>();
@@ -292,7 +410,10 @@ class _MainWebViewPageState extends State<MainWebViewPage>
       sessionActive: sessionManager.isSessionActive,
       blurExplore: settings.blurExplore,
       blurReels: settings.blurReels,
-      ghostMode: settings.ghostMode,
+      ghostTyping: settings.ghostTyping,
+      ghostSeen: settings.ghostSeen,
+      ghostStories: settings.ghostStories,
+      ghostDmPhotos: settings.ghostDmPhotos,
       enableTextSelection: settings.enableTextSelection,
     );
     _controller.runJavaScript(js);
@@ -302,141 +423,105 @@ class _MainWebViewPageState extends State<MainWebViewPage>
     final manager = WebViewCookieManager();
     await manager.clearCookies();
     await _controller.clearCache();
-    // Force immediate state update and navigation
     if (mounted) {
       setState(() {
-        _currentIndex = 0;
-        _cachedUsername = null;
-        _isLoading = true; // Show indicator during reload
+        _isLoading = true;
+        _reelsBlockedOverlay = false;
       });
       await _controller.loadRequest(
         Uri.parse('https://www.instagram.com/accounts/login/'),
       );
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Signed out successfully')));
     }
   }
 
-  Future<void> _cacheUsername() async {
-    try {
-      final result = await _controller.runJavaScriptReturningResult(
-        "document.querySelector('header h2')?.innerText || ''",
-      );
-      final raw = result.toString().replaceAll('"', '').replaceAll("'", '');
-      if (raw.isNotEmpty && raw != 'null' && raw != 'undefined') {
-        _cachedUsername = raw;
-      }
-    } catch (_) {}
+  /// Formats [seconds] as `MM:SS` for the cooldown countdown display.
+  static String _fmtSeconds(int seconds) {
+    final m = (seconds ~/ 60).toString().padLeft(2, '0');
+    final s = (seconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
   }
 
-  void _updateCurrentTab(String url) {
-    final uri = Uri.tryParse(url);
-    if (uri == null) return;
-    final path = uri.path;
-
-    int newIndex = _currentIndex;
-    if (path == '/' || path.isEmpty) {
-      newIndex = 0;
-    } else if (path.startsWith('/explore') || path.startsWith('/search')) {
-      newIndex = 1;
-    } else if (path.startsWith('/direct')) {
-      newIndex = 3;
-    } else if (_cachedUsername != null &&
-        path.startsWith('/$_cachedUsername')) {
-      newIndex = 4;
+  Future<void> _showReelSessionPicker() async {
+    final settings = context.read<SettingsService>();
+    if (settings.requireWordChallenge) {
+      final passed = await DisciplineChallenge.show(context);
+      if (!passed || !mounted) return;
     }
-
-    if (newIndex != _currentIndex) {
-      setState(() => _currentIndex = newIndex);
-    }
+    _showReelSessionPickerBottomSheet();
   }
 
-  /// Navigate using JS when already on Instagram (avoids full page reload).
-  /// Falls back to loadRequest if not on instagram.com.
-  Future<void> _navigateTo(String path) async {
-    try {
-      final currentUrl = await _controller.currentUrl();
-      if (currentUrl != null && currentUrl.contains('instagram.com')) {
-        // SPA soft nav — instant, no full reload
-        await _controller.runJavaScript(
-          InjectionController.softNavigateJS(path),
-        );
-        return;
-      }
-    } catch (_) {}
-    // Fallback: full load
-    await _controller.loadRequest(Uri.parse('https://www.instagram.com$path'));
-  }
-
-  Future<void> _onTabTapped(String label) async {
-    final sm = context.read<SessionManager>();
-
-    switch (label) {
-      case 'Home':
-        await _navigateTo('/');
-        break;
-      case 'Search':
-        await _navigateTo('/explore/');
-        break;
-      case 'Create':
-        await _navigateTo('/reels/create/'); // Default create path
-        break;
-      case 'Notifications':
-        await _navigateTo('/notifications/');
-        break;
-      case 'Reels':
-        if (sm.isSessionActive) {
-          await _navigateTo('/reels/');
-        } else {
-          // Show session picker if no session active
-          _showSessionPicker();
-        }
-        break;
-      case 'Profile':
-        if (_cachedUsername != null) {
-          await _navigateTo('/$_cachedUsername/');
-        } else {
-          await _cacheUsername();
-          if (_cachedUsername != null) {
-            await _navigateTo('/$_cachedUsername/');
-          } else {
-            await _navigateTo('/accounts/edit/');
-          }
-        }
-        break;
-    }
-  }
-
-  void _showSessionPicker() {
+  void _showReelSessionPickerBottomSheet() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => Container(
         height: MediaQuery.of(context).size.height * 0.7,
-        decoration: const BoxDecoration(
-          color: Color(0xFF121212),
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(25),
-            topRight: Radius.circular(25),
-          ),
+        decoration: BoxDecoration(
+          color: const Color(0xFF121212),
+          borderRadius: BorderRadius.circular(25),
         ),
-        child: ClipRRect(
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(25),
-            topRight: Radius.circular(25),
-          ),
-          child: Navigator(
-            onGenerateRoute: (_) => MaterialPageRoute(
-              builder: (ctx) => AppSessionPickerScreen(
-                onSessionStarted: () => Navigator.pop(context),
+        child: Column(
+          children: [
+            const SizedBox(height: 16),
+            const Text(
+              'Start Reel Session',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
               ),
             ),
-          ),
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: Text(
+                'Reels will be unblocked for the duration you choose.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white54, fontSize: 13),
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                children: [
+                  _buildReelSessionTile(5),
+                  _buildReelSessionTile(10),
+                  _buildReelSessionTile(15),
+                  const SizedBox(height: 40),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(color: Colors.white38),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
+    );
+  }
+
+  Widget _buildReelSessionTile(int mins) {
+    final sm = context.read<SessionManager>();
+    return ListTile(
+      title: Text('$mins Minutes', style: const TextStyle(color: Colors.white)),
+      trailing: const Icon(
+        Icons.arrow_forward_ios,
+        color: Colors.white24,
+        size: 14,
+      ),
+      onTap: () {
+        Navigator.pop(context);
+        if (sm.startSession(mins)) {
+          setState(() => _reelsBlockedOverlay = false);
+          _controller.loadRequest(
+            Uri.parse('https://www.instagram.com/reels/'),
+          );
+        }
+      },
     );
   }
 
@@ -446,6 +531,33 @@ class _MainWebViewPageState extends State<MainWebViewPage>
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
+        if (_reelsBlockedOverlay) {
+          setState(() => _reelsBlockedOverlay = false);
+          _controller.goBack();
+          return;
+        }
+        // Run history.back() in the WebView JS context first.
+        // This properly closes Instagram's comment sheet / modal overlay
+        // (which uses the History API pushState). If the webview itself
+        // can go back in its own page-level history, canGoBack() handles it.
+        // We use a JS promise to detect whether we actually navigated:
+        final didNavigate = await _controller
+            .runJavaScriptReturningResult(
+              '(function(){'
+              '  var before = window.location.href;'
+              '  history.back();'
+              '  return before;'
+              '})()',
+            )
+            .then((_) => true)
+            .catchError((_) => false);
+        if (didNavigate) {
+          // history.back() was called — wait a frame to let the SPA handle it
+          // If the URL didn't change (e.g., no more history states), fall
+          // through to webview-level back or app exit.
+          await Future.delayed(const Duration(milliseconds: 120));
+          return;
+        }
         if (await _controller.canGoBack()) {
           await _controller.goBack();
         } else {
@@ -453,19 +565,73 @@ class _MainWebViewPageState extends State<MainWebViewPage>
         }
       },
       child: Scaffold(
-        backgroundColor: Colors.black,
+        backgroundColor: context.watch<SettingsService>().isDarkMode
+            ? Colors.black
+            : Colors.white,
         body: Stack(
           children: [
-            // ── Main Content Layout ────────────────────────────────────
             SafeArea(
               child: Column(
                 children: [
-                  if (!_isOnOnboardingPage) _BrandedTopBar(),
-                  Expanded(child: WebViewWidget(controller: _controller)),
+                  if (!_isOnOnboardingPage)
+                    _BrandedTopBar(
+                      onFocusControlTap: () =>
+                          _edgePanelKey.currentState?._toggleExpansion(),
+                    ),
+                  Expanded(
+                    child: Consumer<SessionManager>(
+                      builder: (ctx, sm, _) {
+                        if (sm.isScheduledBlockActive) {
+                          return Container(
+                            color: Colors.black,
+                            padding: const EdgeInsets.all(32),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(
+                                  Icons.bedtime_rounded,
+                                  color: Colors.blueAccent,
+                                  size: 80,
+                                ),
+                                const SizedBox(height: 24),
+                                Text(
+                                  'Focus Hours Active',
+                                  style: GoogleFonts.grandHotel(
+                                    color: Colors.white,
+                                    fontSize: 42,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'Instagram is blocked according to your schedule (${sm.activeScheduleText ?? 'Focus Hours'}).',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 15,
+                                    height: 1.5,
+                                  ),
+                                ),
+                                const SizedBox(height: 48),
+                                const Text(
+                                  'Your future self will thank you for the extra sleep and focus.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: Colors.white38,
+                                    fontSize: 12,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+                        return WebViewWidget(controller: _controller);
+                      },
+                    ),
+                  ),
                 ],
               ),
             ),
-
             if (_hasError)
               _NoInternetScreen(
                 onRetry: () {
@@ -473,8 +639,6 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                   _controller.reload();
                 },
               ),
-
-            // ── Thin loading indicator (Placed below Top Bar) ──────────
             if (_isLoading)
               Positioned(
                 top: 60 + MediaQuery.of(context).padding.top,
@@ -482,17 +646,166 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                 right: 0,
                 child: const _InstagramGradientProgressBar(),
               ),
+            _EdgePanel(key: _edgePanelKey, controller: _controller),
 
-            // ── The Edge Panel ──────────────────────────────────────────
-            _EdgePanel(controller: _controller),
+            if (_reelsBlockedOverlay)
+              Positioned.fill(
+                child: Consumer<SettingsService>(
+                  builder: (ctx, settings, _) {
+                    final isDark = settings.isDarkMode;
+                    final bg = isDark ? Colors.black : Colors.white;
+                    final textMain = isDark ? Colors.white : Colors.black;
+                    final textDim = isDark ? Colors.white70 : Colors.black87;
+                    final textSub = isDark ? Colors.white38 : Colors.black45;
 
-            // ── Our bottom bar ──────────────────────────────────────────
-            if (!_isOnOnboardingPage && !_isInDirect)
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: const _FocusGramNavBar(),
+                    return Container(
+                      color: bg.withValues(alpha: 0.95),
+                      padding: const EdgeInsets.all(32),
+                      child: Consumer<SessionManager>(
+                        builder: (ctx, sm, _) {
+                          final onCooldown = sm.isCooldownActive;
+                          final quotaFinished = sm.dailyRemainingSeconds <= 0;
+
+                          return Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                quotaFinished
+                                    ? Icons.timer_off_rounded
+                                    : Icons.lock_clock_rounded,
+                                color: quotaFinished
+                                    ? Colors.redAccent
+                                    : Colors.blueAccent,
+                                size: 80,
+                              ),
+                              const SizedBox(height: 24),
+                              Text(
+                                quotaFinished
+                                    ? 'Daily Quota Finished'
+                                    : 'Reels are Blocked',
+                                style: GoogleFonts.grandHotel(
+                                  color: textMain,
+                                  fontSize: 42,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                quotaFinished
+                                    ? 'You have reached your planned limit for today. Step away and focus on what matters most.'
+                                    : 'Start a planned reel session to access the feed. Use Instagram for connection, not distraction.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: textDim,
+                                  fontSize: 15,
+                                  height: 1.5,
+                                ),
+                              ),
+                              const SizedBox(height: 48),
+                              if (quotaFinished) ...[
+                                Text(
+                                  'Your discipline is your strength.',
+                                  style: TextStyle(
+                                    color: Colors.greenAccent.withValues(
+                                      alpha: 0.8,
+                                    ),
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                                const SizedBox(height: 24),
+                                Text(
+                                  'To adjust your daily limit, go to Settings > Guardrails.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: textSub,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ] else if (onCooldown) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 28,
+                                    vertical: 14,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.orange.withValues(
+                                      alpha: 0.12,
+                                    ),
+                                    borderRadius: BorderRadius.circular(30),
+                                    border: Border.all(
+                                      color: Colors.orange.withValues(
+                                        alpha: 0.4,
+                                      ),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(
+                                        Icons.hourglass_bottom_rounded,
+                                        color: Colors.orangeAccent,
+                                        size: 18,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'Cooldown: ${_fmtSeconds(sm.cooldownRemainingSeconds)}',
+                                        style: const TextStyle(
+                                          color: Colors.orangeAccent,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Wait for the cooldown to expire before starting a new session.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: textSub,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ] else
+                                ElevatedButton(
+                                  onPressed: _showReelSessionPicker,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.blueAccent,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 40,
+                                      vertical: 16,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(30),
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    'Start Session',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              const SizedBox(height: 20),
+                              TextButton(
+                                onPressed: () {
+                                  setState(() => _reelsBlockedOverlay = false);
+                                  _controller.goBack();
+                                },
+                                child: Text(
+                                  'Go Back',
+                                  style: TextStyle(color: textSub),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    );
+                  },
+                ),
               ),
           ],
         ),
@@ -501,36 +814,16 @@ class _MainWebViewPageState extends State<MainWebViewPage>
   }
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Edge Panel Widget — Samsung-style swipe-to-reveal side panel
-// ──────────────────────────────────────────────────────────────────────────────
-
 class _EdgePanel extends StatefulWidget {
   final WebViewController controller;
-  const _EdgePanel({required this.controller});
-
+  const _EdgePanel({super.key, required this.controller});
   @override
   State<_EdgePanel> createState() => _EdgePanelState();
 }
 
 class _EdgePanelState extends State<_EdgePanel> {
   bool _isExpanded = false;
-
-  @override
-  void initState() {
-    super.initState();
-  }
-
-  @override
-  void dispose() {
-    super.dispose();
-  }
-
-  void _toggleExpansion() {
-    setState(() {
-      _isExpanded = !_isExpanded;
-    });
-  }
+  void _toggleExpansion() => setState(() => _isExpanded = !_isExpanded);
 
   @override
   Widget build(BuildContext context) {
@@ -539,16 +832,17 @@ class _EdgePanelState extends State<_EdgePanel> {
     final double progress = sm.perSessionSeconds > 0
         ? (remaining / sm.perSessionSeconds).clamp(0.0, 1.0)
         : 0;
+    Color barColor = progress < 0.2
+        ? Colors.redAccent
+        : (progress < 0.5 ? Colors.yellowAccent : Colors.blueAccent);
 
-    Color barColor = Colors.grey.withValues(alpha: 0.6);
-    if (progress < 0.2) {
-      barColor = Colors.redAccent;
-    } else if (progress < 0.5) {
-      barColor = Colors.yellowAccent.withValues(alpha: 0.8);
-    }
+    final settings = context.watch<SettingsService>();
+    final isDark = settings.isDarkMode;
+    final panelBg = isDark ? const Color(0xFF121212) : Colors.white;
+    final textDim = isDark ? Colors.white70 : Colors.black87;
+    final textSub = isDark ? Colors.white30 : Colors.black38;
+    final border = isDark ? Colors.white12 : Colors.black12;
 
-    // We use a transparent Stack filling the screen to position elements anywhere.
-    // Hits will pass through the Stack to the WebView except on our children.
     return Stack(
       children: [
         if (_isExpanded)
@@ -556,228 +850,162 @@ class _EdgePanelState extends State<_EdgePanel> {
             child: GestureDetector(
               onTap: _toggleExpansion,
               behavior: HitTestBehavior.opaque,
-              child: Container(color: Colors.black.withValues(alpha: 0.15)),
-            ),
-          ),
-
-        // ── The Handle (Minimized State) ──
-        if (!_isExpanded)
-          Positioned(
-            left: 0,
-            top: MediaQuery.of(context).size.height * 0.35 + 30, // Added margin
-            child: Material(
-              color: Colors.transparent,
-              child: Column(
-                children: [
-                  GestureDetector(
-                    onHorizontalDragUpdate: (details) {
-                      if (details.delta.dx > 10) _toggleExpansion();
-                    },
-                    onTap: _toggleExpansion,
-                    child: Container(
-                      width: 10,
-                      height: 100,
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.7),
-                        borderRadius: const BorderRadius.only(
-                          topRight: Radius.circular(10),
-                          bottomRight: Radius.circular(10),
-                        ),
-                        border: Border.all(color: Colors.white24, width: 0.5),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.3),
-                            blurRadius: 10,
-                          ),
-                        ],
-                      ),
-                      padding: const EdgeInsets.symmetric(
-                        vertical: 6,
-                        horizontal: 2,
-                      ),
-                      child: Align(
-                        alignment: Alignment.bottomCenter,
-                        child: Container(
-                          width: 4,
-                          decoration: BoxDecoration(
-                            color: barColor,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          // Height determined by progress
-                          height: (progress * 88).clamp(4.0, 88.0),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  // Gear icon below handle
-                  GestureDetector(
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const SettingsPage()),
-                    ),
-                    child: Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.7),
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white24, width: 0.5),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.3),
-                            blurRadius: 8,
-                          ),
-                        ],
-                      ),
-                      child: const Icon(
-                        Icons.settings_rounded,
-                        color: Colors.white70,
-                        size: 18,
-                      ),
-                    ),
-                  ),
-                ],
+              child: Container(
+                color: Colors.black.withValues(alpha: isDark ? 0.15 : 0.05),
               ),
             ),
           ),
-
-        // ── The Panel (Expanded State) ──
         AnimatedPositioned(
           duration: const Duration(milliseconds: 350),
           curve: Curves.easeOutQuart,
           left: _isExpanded ? 0 : -220,
-          top: MediaQuery.of(context).size.height * 0.25 + 30, // Added margin
-          child: GestureDetector(
-            onHorizontalDragUpdate: (details) {
-              if (details.delta.dx < -10) _toggleExpansion();
-            },
-            child: Container(
-              width: 210,
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: const Color(0xFF121212).withValues(alpha: 0.98),
-                borderRadius: const BorderRadius.only(
-                  topRight: Radius.circular(28),
-                  bottomRight: Radius.circular(28),
-                ),
-                border: Border.all(color: Colors.white12, width: 0.5),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.6),
-                    blurRadius: 30,
-                    spreadRadius: 5,
-                  ),
-                ],
+          top: MediaQuery.of(context).size.height * 0.25 + 30,
+          child: Container(
+            width: 210,
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: panelBg.withValues(alpha: 0.98),
+              borderRadius: const BorderRadius.only(
+                topRight: Radius.circular(28),
+                bottomRight: Radius.circular(28),
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'FOCUS CONTROL',
-                        style: TextStyle(
-                          color: Colors.blueAccent,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1.5,
-                        ),
+              border: Border.all(color: border, width: 0.5),
+              boxShadow: [
+                BoxShadow(
+                  color: (isDark ? Colors.black : Colors.black12).withValues(
+                    alpha: 0.3,
+                  ),
+                  blurRadius: 30,
+                  spreadRadius: 5,
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'FOCUS CONTROL',
+                      style: TextStyle(
+                        color: Colors.blueAccent,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.5,
                       ),
-                      IconButton(
-                        icon: const Icon(
-                          Icons.chevron_left_rounded,
-                          color: Colors.white70,
-                          size: 28,
-                        ),
-                        onPressed: _toggleExpansion,
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        Icons.chevron_left_rounded,
+                        color: textDim,
+                        size: 28,
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 32),
-                  // Reel Session Timer
-                  const Text(
-                    'REEL SESSION',
-                    style: TextStyle(
-                      color: Colors.white30,
-                      fontSize: 11,
-                      letterSpacing: 1,
+                      onPressed: _toggleExpansion,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
                     ),
+                  ],
+                ),
+                const SizedBox(height: 32),
+                Text(
+                  'REEL SESSION',
+                  style: TextStyle(
+                    color: textSub,
+                    fontSize: 11,
+                    letterSpacing: 1,
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    context.read<SessionManager>().isSessionActive
-                        ? _formatTime(
-                            context
-                                .read<SessionManager>()
-                                .remainingSessionSeconds,
-                          )
-                        : 'Off',
-                    style: TextStyle(
-                      color: barColor,
-                      fontSize: 40,
-                      fontWeight: FontWeight.w200,
-                      letterSpacing: 2,
-                    ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  sm.isSessionActive
+                      ? _formatTime(sm.remainingSessionSeconds)
+                      : 'Off',
+                  style: TextStyle(
+                    color: barColor,
+                    fontSize: 40,
+                    fontWeight: FontWeight.w200,
+                    letterSpacing: 2,
                   ),
-                  const SizedBox(height: 20),
-                  _buildStatRow(
-                    'REEL QUOTA',
-                    '${sm.dailyRemainingSeconds ~/ 60}m Left',
-                    Icons.timer_outlined,
-                  ),
-                  _buildStatRow(
-                    'AUTO-CLOSE',
-                    _formatTime(sm.appSessionRemainingSeconds),
-                    Icons.hourglass_empty_rounded,
-                  ),
-                  _buildStatRow(
-                    'COOLDOWN',
-                    sm.isCooldownActive
-                        ? _formatTime(sm.cooldownRemainingSeconds)
-                        : 'Off',
-                    Icons.coffee_rounded,
-                    isWarning: sm.isCooldownActive,
-                  ),
-                  const SizedBox(height: 32),
-                  if (!context
-                      .findAncestorStateOfType<_MainWebViewPageState>()!
-                      ._isOnOnboardingPage) ...[
-                    const Divider(color: Colors.white10),
-                    const SizedBox(height: 8),
-                    ListTile(
-                      onTap: () async {
-                        _toggleExpansion();
-                        final state = context
-                            .findAncestorStateOfType<_MainWebViewPageState>();
-                        if (state != null) {
-                          await state._signOut();
-                        }
+                ),
+                const SizedBox(height: 20),
+                _buildStatRow(
+                  'REEL QUOTA',
+                  '${sm.dailyRemainingSeconds ~/ 60}m Left',
+                  Icons.timer_outlined,
+                  isDark: isDark,
+                ),
+                _buildStatRow(
+                  'AUTO-CLOSE',
+                  _formatTime(sm.appSessionRemainingSeconds),
+                  Icons.hourglass_empty_rounded,
+                  isDark: isDark,
+                ),
+                _buildStatRow(
+                  'COOLDOWN',
+                  sm.isCooldownActive
+                      ? _formatTime(sm.cooldownRemainingSeconds)
+                      : 'Off',
+                  Icons.coffee_rounded,
+                  isWarning: sm.isCooldownActive,
+                  isDark: isDark,
+                ),
+                if (!sm.isSessionActive && sm.dailyRemainingSeconds > 0) ...[
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        context
+                            .findAncestorStateOfType<_MainWebViewPageState>()
+                            ?._showReelSessionPicker();
                       },
-                      leading: const Icon(
-                        Icons.logout_rounded,
-                        color: Colors.redAccent,
-                        size: 20,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blueAccent,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
-                      title: const Text(
-                        'Switch Account',
+                      child: const Text(
+                        'Start Session',
                         style: TextStyle(
-                          color: Colors.redAccent,
                           fontSize: 13,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
                     ),
-                    const SizedBox(height: 8),
-                  ],
+                  ),
                 ],
-              ),
+                const SizedBox(height: 32),
+                Divider(color: isDark ? Colors.white10 : Colors.black12),
+                const SizedBox(height: 8),
+                ListTile(
+                  onTap: () {
+                    _toggleExpansion();
+                    context
+                        .findAncestorStateOfType<_MainWebViewPageState>()
+                        ?._signOut();
+                  },
+                  leading: const Icon(
+                    Icons.logout_rounded,
+                    color: Colors.redAccent,
+                    size: 20,
+                  ),
+                  title: const Text(
+                    'Switch Account',
+                    style: TextStyle(
+                      color: Colors.redAccent,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ],
             ),
           ),
         ),
@@ -790,7 +1018,10 @@ class _EdgePanelState extends State<_EdgePanel> {
     String value,
     IconData icon, {
     bool isWarning = false,
+    bool isDark = true,
   }) {
+    final textMain = isDark ? Colors.white : Colors.black;
+    final textSub = isDark ? Colors.white38 : Colors.black38;
     return Padding(
       padding: const EdgeInsets.only(bottom: 20),
       child: Row(
@@ -800,12 +1031,16 @@ class _EdgePanelState extends State<_EdgePanel> {
             decoration: BoxDecoration(
               color: isWarning
                   ? Colors.redAccent.withValues(alpha: 0.1)
-                  : Colors.white.withValues(alpha: 0.05),
+                  : (isDark ? Colors.white : Colors.black).withValues(
+                      alpha: 0.05,
+                    ),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(
               icon,
-              color: isWarning ? Colors.redAccent : Colors.white70,
+              color: isWarning
+                  ? Colors.redAccent
+                  : (isDark ? Colors.white70 : Colors.black54),
               size: 16,
             ),
           ),
@@ -815,8 +1050,8 @@ class _EdgePanelState extends State<_EdgePanel> {
             children: [
               Text(
                 label,
-                style: const TextStyle(
-                  color: Colors.white38,
+                style: TextStyle(
+                  color: textSub,
                   fontSize: 9,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 1,
@@ -826,7 +1061,7 @@ class _EdgePanelState extends State<_EdgePanel> {
               Text(
                 value,
                 style: TextStyle(
-                  color: isWarning ? Colors.redAccent : Colors.white,
+                  color: isWarning ? Colors.redAccent : textMain,
                   fontSize: 18,
                   fontWeight: FontWeight.w600,
                   fontFeatures: const [FontFeature.tabularFigures()],
@@ -846,31 +1081,53 @@ class _EdgePanelState extends State<_EdgePanel> {
   }
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Branded Top Bar — minimal, Instagram-like font
-// ──────────────────────────────────────────────────────────────────────────────
-
 class _BrandedTopBar extends StatelessWidget {
+  final VoidCallback? onFocusControlTap;
+  const _BrandedTopBar({this.onFocusControlTap});
   @override
   Widget build(BuildContext context) {
+    final isDark = context.watch<SettingsService>().isDarkMode;
+    final barBg = isDark ? Colors.black : Colors.white;
+    final textMain = isDark ? Colors.white : Colors.black;
+    final iconColor = isDark ? Colors.white70 : Colors.black54;
+    final border = isDark ? Colors.white12 : Colors.black12;
+
     return Container(
       height: 60,
-      decoration: const BoxDecoration(
-        color: Colors.black,
-        border: Border(bottom: BorderSide(color: Colors.white12, width: 0.5)),
+      decoration: BoxDecoration(
+        color: barBg,
+        border: Border(bottom: BorderSide(color: border, width: 0.5)),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            'FocusGram',
-            style: GoogleFonts.grandHotel(
-              color: Colors.white,
-              fontSize: 32,
-              letterSpacing: 0.5,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            IconButton(
+              icon: Icon(Icons.settings_outlined, color: iconColor, size: 22),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SettingsPage()),
+              ),
             ),
-          ),
-        ],
+            Text(
+              'FocusGram',
+              style: GoogleFonts.grandHotel(
+                color: textMain,
+                fontSize: 32,
+                letterSpacing: 0.5,
+              ),
+            ),
+            IconButton(
+              icon: const Icon(
+                Icons.timer_outlined,
+                color: Colors.blueAccent,
+                size: 22,
+              ),
+              onPressed: onFocusControlTap,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -878,161 +1135,70 @@ class _BrandedTopBar extends StatelessWidget {
 
 class _InstagramGradientProgressBar extends StatelessWidget {
   const _InstagramGradientProgressBar();
-
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       height: 2.5,
-      child: Stack(
-        children: [
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  Color(0xFFFEDA75), // Yellow
-                  Color(0xFFFA7E1E), // Orange
-                  Color(0xFFD62976), // Pink
-                  Color(0xFF962FBF), // Purple
-                  Color(0xFF4F5BD5), // Blue
-                ],
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _FocusGramNavBar extends StatelessWidget {
-  const _FocusGramNavBar();
-
-  @override
-  Widget build(BuildContext context) {
-    final settings = context.watch<SettingsService>();
-    final allItems = {
-      'Home': (Icons.home_outlined, Icons.home_rounded),
-      'Search': (Icons.search, Icons.search),
-      'Create': (Icons.add_box_outlined, Icons.add_box),
-      'Notifications': (Icons.favorite_border, Icons.favorite),
-      'Reels': (Icons.play_circle_outline, Icons.play_circle_filled),
-      'Profile': (Icons.person_outline, Icons.person),
-    };
-
-    final activeTabs = settings.enabledTabs;
-    final state = context.findAncestorStateOfType<_MainWebViewPageState>()!;
-    final sm = context.watch<SessionManager>();
-
-    return Container(
-      color: Colors.black,
-      child: SafeArea(
-        top: false,
-        child: Container(
-          height: 56,
-          decoration: const BoxDecoration(
-            border: Border(top: BorderSide(color: Colors.white12, width: 0.5)),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: activeTabs.map((tab) {
-              final icons = allItems[tab];
-              if (icons == null) return const SizedBox();
-
-              final isSelected = _isTabSelected(
-                tab,
-                state._currentUrl,
-                state._cachedUsername,
-              );
-
-              return GestureDetector(
-                onTap: () => state._onTabTapped(tab),
-                behavior: HitTestBehavior.opaque,
-                child: SizedBox(
-                  width:
-                      MediaQuery.of(context).size.width /
-                      activeTabs.length.clamp(1, 6),
-                  height: double.infinity,
-                  child: Center(
-                    child: Icon(
-                      isSelected ? icons.$2 : icons.$1,
-                      color: isSelected
-                          ? Colors.white
-                          : (tab == 'Reels' && !sm.isSessionActive)
-                          ? Colors.white24
-                          : Colors.white54,
-                      size: 26,
-                    ),
-                  ),
-                ),
-              );
-            }).toList(),
+      child: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              Color(0xFFFEDA75),
+              Color(0xFFFA7E1E),
+              Color(0xFFD62976),
+              Color(0xFF962FBF),
+              Color(0xFF4F5BD5),
+            ],
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
           ),
         ),
       ),
     );
   }
-
-  bool _isTabSelected(String tab, String url, String? username) {
-    final path = Uri.tryParse(url)?.path ?? '';
-    switch (tab) {
-      case 'Home':
-        return path == '/' || path.isEmpty;
-      case 'Search':
-        return path.startsWith('/explore');
-      case 'Create':
-        return path.startsWith('/create');
-      case 'Notifications':
-        return path.startsWith('/notifications');
-      case 'Reels':
-        return path.startsWith('/reels');
-      case 'Profile':
-        return username != null && path.startsWith('/$username');
-      default:
-        return false;
-    }
-  }
 }
-
-// ──────────────────────────────────────────────────────────────────────────────
-// No Internet Screen — minimal, branded
-// ──────────────────────────────────────────────────────────────────────────────
 
 class _NoInternetScreen extends StatelessWidget {
   final VoidCallback onRetry;
   const _NoInternetScreen({required this.onRetry});
-
   @override
   Widget build(BuildContext context) {
+    final isDark = context.watch<SettingsService>().isDarkMode;
     return Container(
-      color: Colors.black,
+      color: isDark ? Colors.black : Colors.white,
       width: double.infinity,
       height: double.infinity,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.wifi_off_rounded, color: Colors.white24, size: 80),
+          Icon(
+            Icons.wifi_off_rounded,
+            color: isDark ? Colors.white24 : Colors.black12,
+            size: 80,
+          ),
           const SizedBox(height: 24),
-          const Text(
+          Text(
             'No Connection',
             style: TextStyle(
-              color: Colors.white,
+              color: isDark ? Colors.white : Colors.black,
               fontSize: 20,
               fontWeight: FontWeight.bold,
             ),
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'Please check your internet settings.',
-            style: TextStyle(color: Colors.white38, fontSize: 14),
+            style: TextStyle(
+              color: isDark ? Colors.white38 : Colors.black38,
+              fontSize: 14,
+            ),
           ),
           const SizedBox(height: 40),
           ElevatedButton(
             onPressed: onRetry,
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.white,
-              foregroundColor: Colors.black,
+              backgroundColor: isDark ? Colors.white : Colors.black,
+              foregroundColor: isDark ? Colors.black : Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(20),

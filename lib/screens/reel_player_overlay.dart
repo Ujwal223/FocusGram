@@ -32,6 +32,10 @@ class _ReelPlayerOverlayState extends State<ReelPlayerOverlay> {
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageFinished: (url) {
+            // Set isolated player flag to ensure scroll-lock applies even if a session is active globally
+            _controller.runJavaScript(
+              'window.__focusgramIsolatedPlayer = true;',
+            );
             // Apply scroll-lock via MutationObserver: prevents swiping to next reel
             _controller.runJavaScript(
               InjectionController.reelsMutationObserverJS,
@@ -42,7 +46,10 @@ class _ReelPlayerOverlayState extends State<ReelPlayerOverlay> {
                 sessionActive: true,
                 blurExplore: false,
                 blurReels: false,
-                ghostMode: false,
+                ghostTyping: false,
+                ghostSeen: false,
+                ghostStories: false,
+                ghostDmPhotos: false,
                 enableTextSelection: true,
               ),
             );

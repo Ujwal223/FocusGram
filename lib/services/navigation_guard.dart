@@ -9,8 +9,9 @@ class NavigationGuard {
   static const _allowedHosts = ['instagram.com', 'www.instagram.com'];
 
   /// Regex matching the Reels FEED root — NOT individual reels.
+  /// The `(/|\?|$)` suffix ensures query params (e.g. ?fg=blocked) still match.
   static final _reelsFeedRegex = RegExp(
-    r'instagram\.com/reels/?$',
+    r'instagram\.com/reels(/|\?|$)',
     caseSensitive: false,
   );
 
@@ -36,7 +37,7 @@ class NavigationGuard {
 
     // Block non-Instagram domains (prevents phishing/external redirects)
     final host = uri.host.toLowerCase();
-    if (!_allowedHosts.any((h) => host == h || host.endsWith('.$h'))) {
+    if (!_allowedHosts.any((h) => host == h)) {
       return BlockDecision(
         blocked: true,
         reason: 'External domain blocked: $host',

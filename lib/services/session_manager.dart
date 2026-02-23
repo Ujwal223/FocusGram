@@ -1,8 +1,37 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
+import 'dart:convert';
+import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'notification_service.dart';
+
+class FocusSchedule {
+  final int startHour;
+  final int startMinute;
+  final int endHour;
+  final int endMinute;
+
+  FocusSchedule({
+    required this.startHour,
+    required this.startMinute,
+    required this.endHour,
+    required this.endMinute,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'startH': startHour,
+    'startM': startMinute,
+    'endH': endHour,
+    'endM': endMinute,
+  };
+
+  factory FocusSchedule.fromJson(Map<String, dynamic> json) => FocusSchedule(
+    startHour: json['startH'] as int,
+    startMinute: json['startM'] as int,
+    endHour: json['endH'] as int,
+    endMinute: json['endM'] as int,
+  );
+}
 
 /// Manages all session logic for FocusGram:
 ///
@@ -34,6 +63,7 @@ class SessionManager extends ChangeNotifier {
   static const _keyScheduleStartMin = 'sched_start_m';
   static const _keyScheduleEndHour = 'sched_end_h';
   static const _keyScheduleEndMin = 'sched_end_m';
+  static const _keySchedulesJson = 'sched_list_json';
 
   SharedPreferences? _prefs;
 
@@ -56,8 +86,10 @@ class SessionManager extends ChangeNotifier {
   bool _scheduleEnabled = false;
   int _schedStartHour = 22; // Default 10 PM
   int _schedStartMin = 0;
-  int _schedEndHour = 7; // Default 7 AM
+  int _schedEndHour = 7;
   int _schedEndMin = 0;
+  List<FocusSchedule> _schedules = [];
+  bool _lastScheduleState = false;
 
   bool _isInForeground = true; // Tracking app lifecycle state
   int _cachedRemainingSessionSeconds = 0;
@@ -148,21 +180,56 @@ class SessionManager extends ChangeNotifier {
   int get schedStartMin => _schedStartMin;
   int get schedEndHour => _schedEndHour;
   int get schedEndMin => _schedEndMin;
+  List<FocusSchedule> get schedules => _schedules;
 
   bool get isScheduledBlockActive {
     if (!_scheduleEnabled) return false;
     final now = DateTime.now();
     final currentTime = now.hour * 60 + now.minute;
-    final startTime = _schedStartHour * 60 + _schedStartMin;
-    final endTime = _schedEndHour * 60 + _schedEndMin;
 
-    if (startTime < endTime) {
-      // Simple range (e.g., 9:00 to 17:00)
-      return currentTime >= startTime && currentTime < endTime;
-    } else {
-      // Over-midnight range (e.g., 22:00 to 07:00)
-      return currentTime >= startTime || currentTime < endTime;
+    for (final s in _schedules) {
+      final startTime = s.startHour * 60 + s.startMinute;
+      final endTime = s.endHour * 60 + s.endMinute;
+
+      if (startTime < endTime) {
+        // Simple range (e.g., 9:00 to 17:00)
+        if (currentTime >= startTime && currentTime < endTime) return true;
+      } else {
+        // Over-midnight range (e.g., 22:00 to 07:00)
+        if (currentTime >= startTime || currentTime < endTime) return true;
+      }
     }
+    return false;
+  }
+
+  String? get activeScheduleText {
+    if (!isScheduledBlockActive) return null;
+    final now = DateTime.now();
+    final currentTime = now.hour * 60 + now.minute;
+
+    for (final s in _schedules) {
+      final startTime = s.startHour * 60 + s.startMinute;
+      final endTime = s.endHour * 60 + s.endMinute;
+
+      bool active = false;
+      if (startTime < endTime) {
+        if (currentTime >= startTime && currentTime < endTime) active = true;
+      } else {
+        if (currentTime >= startTime || currentTime < endTime) active = true;
+      }
+      if (active) {
+        return '${formatTime12h(s.startHour, s.startMinute)} to ${formatTime12h(s.endHour, s.endMinute)}';
+      }
+    }
+    return null;
+  }
+
+  String formatTime12h(int h, int m) {
+    var hour = h % 12;
+    if (hour == 0) hour = 12;
+    final period = h >= 12 ? 'PM' : 'AM';
+    final min = m.toString().padLeft(2, '0');
+    return '$hour:$min $period';
   }
 
   // ── Initialization ─────────────────────────────────────────
@@ -170,6 +237,7 @@ class SessionManager extends ChangeNotifier {
     _prefs = await SharedPreferences.getInstance();
     await _resetDailyIfNeeded();
     _loadPersisted();
+    _lastScheduleState = isScheduledBlockActive;
     _startTicker();
     _incrementOpenCount();
   }
@@ -249,6 +317,23 @@ class SessionManager extends ChangeNotifier {
     _schedStartMin = _prefs!.getInt(_keyScheduleStartMin) ?? 0;
     _schedEndHour = _prefs!.getInt(_keyScheduleEndHour) ?? 7;
     _schedEndMin = _prefs!.getInt(_keyScheduleEndMin) ?? 0;
+
+    final schedJson = _prefs!.getString(_keySchedulesJson);
+    if (schedJson != null) {
+      final List decode = jsonDecode(schedJson);
+      _schedules = decode.map((m) => FocusSchedule.fromJson(m)).toList();
+    } else {
+      // Migrate old single schedule if it exists
+      _schedules = [
+        FocusSchedule(
+          startHour: _schedStartHour,
+          startMinute: _schedStartMin,
+          endHour: _schedEndHour,
+          endMinute: _schedEndMin,
+        ),
+      ];
+      _saveSchedulesToPrefs();
+    }
   }
 
   void _incrementOpenCount() {
@@ -297,6 +382,13 @@ class SessionManager extends ChangeNotifier {
     } else if (appOpenCooldownRemainingSeconds <= 0 &&
         _lastAppSessionEnd != null) {
       // Just expired
+      changed = true;
+    }
+
+    // Schedule check
+    final sched = isScheduledBlockActive;
+    if (sched != _lastScheduleState) {
+      _lastScheduleState = sched;
       changed = true;
     }
 
@@ -418,15 +510,51 @@ class SessionManager extends ChangeNotifier {
     required int endH,
     required int endM,
   }) async {
-    _schedStartHour = startH;
-    _schedStartMin = startM;
     _schedEndHour = endH;
     _schedEndMin = endM;
+    // Update the first schedule for compatibility? Or just replace all?
+    // Let's replace all schedules with this one if this method is called.
+    _schedules = [
+      FocusSchedule(
+        startHour: startH,
+        startMinute: startM,
+        endHour: endH,
+        endMinute: endM,
+      ),
+    ];
     await _prefs?.setInt(_keyScheduleStartHour, startH);
     await _prefs?.setInt(_keyScheduleStartMin, startM);
     await _prefs?.setInt(_keyScheduleEndHour, endH);
     await _prefs?.setInt(_keyScheduleEndMin, endM);
+    await _saveSchedulesToPrefs();
     notifyListeners();
+  }
+
+  Future<void> _saveSchedulesToPrefs() async {
+    final json = jsonEncode(_schedules.map((s) => s.toJson()).toList());
+    await _prefs?.setString(_keySchedulesJson, json);
+  }
+
+  Future<void> addSchedule(FocusSchedule s) async {
+    _schedules.add(s);
+    await _saveSchedulesToPrefs();
+    notifyListeners();
+  }
+
+  Future<void> removeScheduleAt(int index) async {
+    if (index >= 0 && index < _schedules.length) {
+      _schedules.removeAt(index);
+      await _saveSchedulesToPrefs();
+      notifyListeners();
+    }
+  }
+
+  Future<void> updateScheduleAt(int index, FocusSchedule s) async {
+    if (index >= 0 && index < _schedules.length) {
+      _schedules[index] = s;
+      await _saveSchedulesToPrefs();
+      notifyListeners();
+    }
   }
 
   @override

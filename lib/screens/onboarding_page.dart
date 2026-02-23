@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:app_settings/app_settings.dart';
 import '../services/settings_service.dart';
 import '../services/notification_service.dart';
 
@@ -38,6 +39,14 @@ class _OnboardingPageState extends State<OnboardingPage> {
           'Plan your usage. Set daily limits and use timed sessions to stay in control of your time.',
       icon: Icons.timer,
       color: Colors.orange,
+    ),
+    OnboardingData(
+      title: 'Open Links in FocusGram',
+      description:
+          'To open Instagram links directly here: Tap "Configure", then "Open by default" -> "Add link" and select all.',
+      icon: Icons.link,
+      color: Colors.cyan,
+      isAppSettingsPage: true,
     ),
     OnboardingData(
       title: 'Upload Content',
@@ -101,48 +110,53 @@ class _OnboardingPageState extends State<OnboardingPage> {
                   child: SizedBox(
                     width: double.infinity,
                     height: 56,
-                    child: ElevatedButton(
-                      onPressed: () async {
-                        if (_pages[_currentPage].isPermissionPage) {
-                          if (_pages[_currentPage].permission != null) {
-                            await _pages[_currentPage].permission!.request();
-                          }
-                          if (_pages[_currentPage].title == 'Stay Notified') {
-                            await NotificationService().init();
-                          }
-                          if (_currentPage == _pages.length - 1) {
-                            _finish();
-                          } else {
-                            _pageController.nextPage(
-                              duration: const Duration(milliseconds: 300),
-                              curve: Curves.easeInOut,
-                            );
-                          }
-                        } else if (_currentPage < _pages.length - 1) {
-                          _pageController.nextPage(
-                            duration: const Duration(milliseconds: 300),
-                            curve: Curves.easeInOut,
-                          );
-                        } else {
-                          _finish();
-                        }
+                    child: Builder(
+                      builder: (context) {
+                        final data = _pages[_currentPage];
+                        return ElevatedButton(
+                          onPressed: () async {
+                            if (data.isAppSettingsPage) {
+                              await AppSettings.openAppSettings(
+                                type: AppSettingsType.settings,
+                              );
+                            } else if (data.isPermissionPage) {
+                              if (data.permission != null) {
+                                await data.permission!.request();
+                              }
+                              if (data.title == 'Stay Notified') {
+                                await NotificationService().init();
+                              }
+                            }
+
+                            if (_currentPage == _pages.length - 1) {
+                              _finish();
+                            } else {
+                              _pageController.nextPage(
+                                duration: const Duration(milliseconds: 300),
+                                curve: Curves.easeInOut,
+                              );
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                          child: Text(
+                            _currentPage == _pages.length - 1
+                                ? 'Get Started'
+                                : (data.isAppSettingsPage
+                                      ? 'Configure'
+                                      : 'Next'),
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        );
                       },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                      ),
-                      child: Text(
-                        _currentPage == _pages.length - 1
-                            ? 'Get Started'
-                            : 'Next',
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
                     ),
                   ),
                 ),
@@ -166,6 +180,7 @@ class OnboardingData {
   final IconData icon;
   final Color color;
   final bool isPermissionPage;
+  final bool isAppSettingsPage;
   final Permission? permission;
 
   OnboardingData({
@@ -174,6 +189,7 @@ class OnboardingData {
     required this.icon,
     required this.color,
     this.isPermissionPage = false,
+    this.isAppSettingsPage = false,
     this.permission,
   });
 }

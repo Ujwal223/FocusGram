@@ -9,6 +9,7 @@
         android:usesCleartextTraffic="false"
         android:networkSecurityConfig="@xml/network_security_config">
 
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -25,6 +26,26 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+
+            <!-- Instagram, Threads, and related domains deep linking -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <!-- https://instagram.com and subdomains -->
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+                <data android:host="instagram.com" />
+                <data android:host="www.instagram.com" />
+                <data android:host="l.instagram.com" />
+                <data android:host="help.instagram.com" />
+                <data android:host="about.instagram.com" />
+                
+                <!-- Short URLs -->
+                <data android:host="instagr.am" />
+                <data android:host="www.instagr.am" />
             </intent-filter>
         </activity>
 

@@ -1,19 +1,93 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/session_manager.dart';
+import '../services/settings_service.dart';
 import '../utils/discipline_challenge.dart';
 
-class GuardrailsPage extends StatelessWidget {
+class GuardrailsPage extends StatefulWidget {
   const GuardrailsPage({super.key});
+
+  @override
+  State<GuardrailsPage> createState() => _GuardrailsPageState();
+}
+
+class _GuardrailsPageState extends State<GuardrailsPage> {
+  Future<void> _handleScheduleAction(
+    BuildContext context,
+    SessionManager sm,
+    Future<void> Function() action,
+  ) async {
+    if (sm.isScheduledBlockActive) {
+      final ok = await DisciplineChallenge.show(context, count: 35);
+      if (!context.mounted || !ok) return;
+    }
+    await action();
+  }
+
+  Future<void> _pickNewSchedule(BuildContext context, SessionManager sm) async {
+    final start = await showTimePicker(
+      context: context,
+      initialTime: const TimeOfDay(hour: 22, minute: 0),
+      helpText: 'Select Start Time',
+    );
+    if (!context.mounted || start == null) return;
+
+    final end = await showTimePicker(
+      context: context,
+      initialTime: const TimeOfDay(hour: 7, minute: 0),
+      helpText: 'Select End Time',
+    );
+    if (!context.mounted || end == null) return;
+
+    await sm.addSchedule(
+      FocusSchedule(
+        startHour: start.hour,
+        startMinute: start.minute,
+        endHour: end.hour,
+        endMinute: end.minute,
+      ),
+    );
+  }
+
+  Future<void> _editExistingSchedule(
+    BuildContext context,
+    SessionManager sm,
+    int index,
+    FocusSchedule s,
+  ) async {
+    final start = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: s.startHour, minute: s.startMinute),
+      helpText: 'Edit Start Time',
+    );
+    if (!context.mounted || start == null) return;
+
+    final end = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: s.endHour, minute: s.endMinute),
+      helpText: 'Edit End Time',
+    );
+    if (!context.mounted || end == null) return;
+
+    await sm.updateScheduleAt(
+      index,
+      FocusSchedule(
+        startHour: start.hour,
+        startMinute: start.minute,
+        endHour: end.hour,
+        endMinute: end.minute,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final sm = context.watch<SessionManager>();
+    final settings = context.watch<SettingsService>();
+    final isDark = settings.isDarkMode;
 
     return Scaffold(
-      backgroundColor: Colors.black,
       appBar: AppBar(
-        backgroundColor: Colors.black,
         title: const Text(
           'Guardrails',
           style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
@@ -25,11 +99,14 @@ class GuardrailsPage extends StatelessWidget {
       ),
       body: ListView(
         children: [
-          const Padding(
-            padding: EdgeInsets.all(16.0),
+          Padding(
+            padding: const EdgeInsets.all(16.0),
             child: Text(
               'Set your limits to stay focused. Changes to these settings require a challenge.',
-              style: TextStyle(color: Colors.white54, fontSize: 13),
+              style: TextStyle(
+                color: isDark ? Colors.white54 : Colors.black54,
+                fontSize: 13,
+              ),
             ),
           ),
           _buildFrictionSliderTile(
@@ -60,84 +137,83 @@ class GuardrailsPage extends StatelessWidget {
                 'Reducing cooldown makes it easier to start new sessions. Are you sure?',
             onConfirmed: (v) => sm.setCooldownMinutes(v.toInt()),
           ),
-          const Divider(color: Colors.white10, height: 32),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16.0),
-            child: Text(
-              'Scheduled Blocking',
+          Divider(color: isDark ? Colors.white10 : Colors.black12, height: 32),
+          SwitchListTile(
+            title: const Text('Scheduled Blocking'),
+            subtitle: Text(
+              'Block Instagram during specific hours',
               style: TextStyle(
-                color: Colors.blue,
-                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white54 : Colors.black54,
                 fontSize: 13,
               ),
-            ),
-          ),
-          SwitchListTile(
-            title: const Text(
-              'Enable Blocking Schedule',
-              style: TextStyle(color: Colors.white),
-            ),
-            subtitle: const Text(
-              'Block Instagram during specific hours',
-              style: TextStyle(color: Colors.white54, fontSize: 13),
             ),
             value: sm.scheduleEnabled,
             onChanged: (v) => sm.setScheduleEnabled(v),
           ),
           if (sm.scheduleEnabled) ...[
-            ListTile(
-              title: const Text(
-                'Start Time',
-                style: TextStyle(color: Colors.white),
-              ),
-              trailing: Text(
-                '${sm.schedStartHour.toString().padLeft(2, '0')}:${sm.schedStartMin.toString().padLeft(2, '0')}',
-                style: const TextStyle(color: Colors.blue),
-              ),
-              onTap: () async {
-                final time = await showTimePicker(
-                  context: context,
-                  initialTime: TimeOfDay(
-                    hour: sm.schedStartHour,
-                    minute: sm.schedStartMin,
+            ...sm.schedules.asMap().entries.map((entry) {
+              final idx = entry.key;
+              final s = entry.value;
+              return ListTile(
+                title: Text(
+                  'Schedule ${idx + 1}',
+                  style: const TextStyle(fontSize: 14),
+                ),
+                subtitle: Text(
+                  '${sm.formatTime12h(s.startHour, s.startMinute)} - ${sm.formatTime12h(s.endHour, s.endMinute)}',
+                  style: TextStyle(
+                    color: isDark ? Colors.white54 : Colors.black54,
+                    fontSize: 13,
                   ),
-                );
-                if (time != null) {
-                  sm.setScheduleTime(
-                    startH: time.hour,
-                    startM: time.minute,
-                    endH: sm.schedEndHour,
-                    endM: sm.schedEndMin,
-                  );
-                }
-              },
-            ),
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(
+                        Icons.edit,
+                        color: Colors.blue,
+                        size: 20,
+                      ),
+                      onPressed: () => _handleScheduleAction(
+                        context,
+                        sm,
+                        () => _editExistingSchedule(context, sm, idx, s),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(
+                        Icons.delete_outline,
+                        color: Colors.redAccent,
+                        size: 20,
+                      ),
+                      onPressed: () => _handleScheduleAction(
+                        context,
+                        sm,
+                        () => sm.removeScheduleAt(idx),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
             ListTile(
+              leading: const Icon(
+                Icons.add_circle_outline,
+                color: Colors.blueAccent,
+              ),
               title: const Text(
-                'End Time',
-                style: TextStyle(color: Colors.white),
+                'Add Focus Hours',
+                style: TextStyle(
+                  color: Colors.blueAccent,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-              trailing: Text(
-                '${sm.schedEndHour.toString().padLeft(2, '0')}:${sm.schedEndMin.toString().padLeft(2, '0')}',
-                style: const TextStyle(color: Colors.blue),
+              onTap: () => _handleScheduleAction(
+                context,
+                sm,
+                () => _pickNewSchedule(context, sm),
               ),
-              onTap: () async {
-                final time = await showTimePicker(
-                  context: context,
-                  initialTime: TimeOfDay(
-                    hour: sm.schedEndHour,
-                    minute: sm.schedEndMin,
-                  ),
-                );
-                if (time != null) {
-                  sm.setScheduleTime(
-                    startH: sm.schedStartHour,
-                    startM: sm.schedStartMin,
-                    endH: time.hour,
-                    endM: time.minute,
-                  );
-                }
-              },
             ),
           ],
         ],
@@ -217,18 +293,17 @@ class _FrictionSliderTileState extends State<_FrictionSliderTile> {
 
   @override
   Widget build(BuildContext context) {
+    final settings = context.watch<SettingsService>();
+    final isDark = settings.isDarkMode;
     final divisions = ((widget.max - widget.min) / widget.divisor).round();
 
     return Column(
       children: [
         ListTile(
-          title: Text(
-            widget.title,
-            style: const TextStyle(color: Colors.white),
-          ),
+          title: Text(widget.title),
           subtitle: Text(
             '${_draftValue.toInt()} min',
-            style: const TextStyle(color: Colors.white70),
+            style: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
           ),
           trailing: _pendingConfirm
               ? Row(
@@ -241,15 +316,22 @@ class _FrictionSliderTileState extends State<_FrictionSliderTile> {
                           _pendingConfirm = false;
                         });
                       },
-                      child: const Text(
-                        'Cancel',
-                        style: TextStyle(color: Colors.white38),
-                      ),
+                      child: const Text('Cancel'),
                     ),
                     ElevatedButton(
                       onPressed: () async {
-                        final success = await DisciplineChallenge.show(context);
-                        if (!success) return;
+                        final sm = context.read<SessionManager>();
+                        int wordCount = 15;
+                        // If we are at 0 quota, increase difficulty to 35 words
+                        if (widget.title.contains('Daily Reel Limit') &&
+                            sm.dailyRemainingSeconds <= 0) {
+                          wordCount = 35;
+                        }
+                        final success = await DisciplineChallenge.show(
+                          context,
+                          count: wordCount,
+                        );
+                        if (!context.mounted || !success) return;
                         await widget.onConfirmed(_draftValue);
                         setState(() => _pendingConfirm = false);
                       },

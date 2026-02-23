@@ -11,7 +11,7 @@ class AboutPage extends StatefulWidget {
 }
 
 class _AboutPageState extends State<AboutPage> {
-  final String _currentVersion = '0.8.5';
+  final String _currentVersion = '0.9.8';
   bool _isChecking = false;
 
   Future<void> _checkUpdate() async {
@@ -110,10 +110,13 @@ class _AboutPageState extends State<AboutPage> {
                   color: Colors.blue.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(
-                  Icons.psychology,
-                  color: Colors.blue,
-                  size: 50,
+                child: ClipOval(
+                  child: Image.asset(
+                    'assets/images/focusgram.png',
+                    width: 60,
+                    height: 60,
+                    fit: BoxFit.cover,
+                  ),
                 ),
               ),
               const SizedBox(height: 24),
