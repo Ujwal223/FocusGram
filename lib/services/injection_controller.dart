@@ -17,6 +17,16 @@ class InjectionController {
       -webkit-tap-highlight-color: transparent !important;
       outline: none !important;
     }
+    /* Hide all scrollbars */
+    ::-webkit-scrollbar {
+      display: none !important;
+      width: 0 !important;
+      height: 0 !important;
+    }
+    * {
+      -ms-overflow-style: none !important;
+      scrollbar-width: none !important;
+    }
   ''';
 
   /// CSS to disable text selection globally.
@@ -93,13 +103,18 @@ class InjectionController {
 
   /// Robust CSS that hides Instagram's native bottom nav bar.
   static const String _hideInstagramNavCSS = '''
-    div[role="tablist"], nav[role="navigation"],
-    ._acbl, ._aa4b, ._aahi, ._ab8s, section nav, footer nav {
+    /* Hide bottom nav but keep search header */
+    div[role="tablist"], footer nav, ._acbl, ._aa4b {
       display: none !important;
       visibility: hidden !important;
       height: 0 !important;
       overflow: hidden !important;
       pointer-events: none !important;
+    }
+    /* Only hide top nav if not on search page */
+    body:not([path*="/explore/search/"]) nav[role="navigation"],
+    body:not([path*="/explore/search/"]) section nav {
+       display: none !important;
     }
     body, #react-root, main {
       padding-bottom: 0 !important;
@@ -214,6 +229,30 @@ class InjectionController {
     })();
   ''';
 
+  /// Hijacks the Web Notification API to bridge Instagram notifications to native.
+  static String get notificationBridgeJS => """
+    (function() {
+      const NativeNotification = window.Notification;
+      if (!NativeNotification) return;
+
+      window.Notification = function(title, options) {
+        const body = (options && options.body) ? options.body : "";
+        
+        // Pass to Flutter
+        if (window.FocusGramNotificationChannel) {
+          window.FocusGramNotificationChannel.postMessage(title + ": " + body);
+        }
+        
+        return new NativeNotification(title, options);
+      };
+      
+      window.Notification.permission = "granted";
+      window.Notification.requestPermission = function() {
+        return Promise.resolve("granted");
+      };
+    })();
+  """;
+
   /// MutationObserver for Reel scroll locking.
   static const String reelsMutationObserverJS = '''
     (function() {
@@ -267,6 +306,8 @@ class InjectionController {
 
     return '''
       ${buildSessionStateJS(sessionActive)}
+      /* Set path attribute on body for CSS targeting */
+      document.body.setAttribute('path', window.location.pathname);
       ${_buildMutationObserver(css.toString())}
       $_periodicNavRemoverJS
       $_dismissAppBannerJS

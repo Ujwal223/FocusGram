@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'notification_service.dart';
 
 /// Manages all session logic for FocusGram:
 ///
@@ -308,6 +309,13 @@ class SessionManager extends ChangeNotifier {
     _lastSessionEnd = DateTime.now();
     _prefs?.setInt(_keySessionExpiry, 0);
     _prefs?.setInt(_keyLastSessionEnd, _lastSessionEnd!.millisecondsSinceEpoch);
+
+    // Alert User
+    NotificationService().showNotification(
+      id: 999,
+      title: 'Session Ended',
+      body: 'Your Reel session has expired. Time to focus!',
+    );
   }
 
   // ── Reel session API ───────────────────────────────────────

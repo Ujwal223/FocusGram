@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/session_manager.dart';
 import '../services/settings_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'guardrails_page.dart';
 import 'about_page.dart';
 
@@ -60,6 +61,39 @@ class SettingsPage extends StatelessWidget {
             subtitle: 'Developer info and GitHub',
             icon: Icons.info_outline,
             destination: const AboutPage(),
+          ),
+
+          const Divider(
+            color: Colors.white10,
+            height: 40,
+            indent: 16,
+            endIndent: 16,
+          ),
+
+          ListTile(
+            leading: const Icon(
+              Icons.settings_outlined,
+              color: Colors.purpleAccent,
+            ),
+            title: const Text(
+              'Instagram Settings',
+              style: TextStyle(color: Colors.white),
+            ),
+            subtitle: const Text(
+              'Open native Instagram account settings',
+              style: TextStyle(color: Colors.white54, fontSize: 12),
+            ),
+            trailing: const Icon(
+              Icons.open_in_new,
+              color: Colors.white24,
+              size: 14,
+            ),
+            onTap: () async {
+              final uri = Uri.parse(
+                'https://www.instagram.com/accounts/settings/?entrypoint=profile',
+              );
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+            },
           ),
 
           const SizedBox(height: 40),
@@ -379,6 +413,15 @@ class _ExtrasSettingsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsService>();
+    final allTabs = [
+      'Home',
+      'Search',
+      'Create',
+      'Notifications',
+      'Reels',
+      'Profile',
+    ];
+
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -391,6 +434,7 @@ class _ExtrasSettingsPage extends StatelessWidget {
       ),
       body: ListView(
         children: [
+          const _SettingsSectionHeader(title: 'EXPERIMENT'),
           SwitchListTile(
             title: const Text(
               'Ghost Mode',
@@ -417,7 +461,57 @@ class _ExtrasSettingsPage extends StatelessWidget {
             onChanged: (v) => settings.setEnableTextSelection(v),
             activeThumbColor: Colors.blue,
           ),
+          const _SettingsSectionHeader(title: 'BOTTOM BAR'),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Wrap(
+              spacing: 8,
+              children: allTabs.map((tab) {
+                final isEnabled = settings.enabledTabs.contains(tab);
+                return FilterChip(
+                  label: Text(tab),
+                  selected: isEnabled,
+                  onSelected: (_) => settings.toggleTab(tab),
+                  backgroundColor: Colors.white10,
+                  selectedColor: Colors.blue.withValues(alpha: 0.3),
+                  checkmarkColor: Colors.blue,
+                  labelStyle: TextStyle(
+                    color: isEnabled ? Colors.blue : Colors.white60,
+                    fontSize: 12,
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 4, 16, 16),
+            child: Text(
+              'Toggle tabs to customize your navigation bar. At least one tab must be enabled.',
+              style: TextStyle(color: Colors.white24, fontSize: 11),
+            ),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+class _SettingsSectionHeader extends StatelessWidget {
+  final String title;
+  const _SettingsSectionHeader({required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
+      child: Text(
+        title,
+        style: const TextStyle(
+          color: Colors.blue,
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 1.2,
+        ),
       ),
     );
   }

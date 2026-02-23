@@ -4,13 +4,15 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 import '../services/session_manager.dart';
 import '../services/settings_service.dart';
 import '../services/injection_controller.dart';
 import '../services/navigation_guard.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'session_modal.dart';
+import '../services/notification_service.dart';
 import 'settings_page.dart';
+import 'app_session_picker.dart';
 
 class MainWebViewPage extends StatefulWidget {
   const MainWebViewPage({super.key});
@@ -42,6 +44,11 @@ class _MainWebViewPageState extends State<MainWebViewPage>
         lowerPath.contains('/legal/') ||
         lowerPath.contains('/help/') ||
         _currentUrl.contains('instagram.com/accounts/login');
+  }
+
+  /// Helper to determine if we are inside Direct Messages.
+  bool get _isInDirect {
+    return _currentUrl.contains('instagram.com/direct/');
   }
 
   @override
@@ -174,7 +181,23 @@ class _MainWebViewPageState extends State<MainWebViewPage>
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setUserAgent(InjectionController.iOSUserAgent)
-      ..setBackgroundColor(Colors.black)
+      ..setBackgroundColor(Colors.black);
+
+    // Support file uploads on Android
+    if (_controller.platform is AndroidWebViewController) {
+      AndroidWebViewController.enableDebugging(true);
+      (_controller.platform as AndroidWebViewController).setOnShowFileSelector((
+        FileSelectorParams params,
+      ) async {
+        // Standard Android implementation triggers the file picker intent automatically
+        // when this callback is set, or we can use file_picker package if needed.
+        // For now, returning empty list if we want to custom handle, or better:
+        // By default, setting a non-null callback enables the system picker.
+        return <String>[];
+      });
+    }
+
+    _controller
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (url) {
@@ -195,6 +218,8 @@ class _MainWebViewPageState extends State<MainWebViewPage>
             _applyInjections();
             _updateCurrentTab(url);
             _cacheUsername();
+            // Inject Notification Bridge Hook
+            _controller.runJavaScript(InjectionController.notificationBridgeJS);
             // Inject MutationObserver to lock reel scrolling resiliently
             _controller.runJavaScript(
               InjectionController.reelsMutationObserverJS,
@@ -241,6 +266,19 @@ class _MainWebViewPageState extends State<MainWebViewPage>
           },
         ),
       )
+      ..addJavaScriptChannel(
+        'FocusGramNotificationChannel',
+        onMessageReceived: (message) {
+          try {
+            // Instagram sends notification data; we bridge to native
+            NotificationService().showNotification(
+              id: DateTime.now().millisecond,
+              title: 'Instagram',
+              body: message.message,
+            );
+          } catch (_) {}
+        },
+      )
       ..loadRequest(Uri.parse('https://www.instagram.com/accounts/login/'));
   }
 
@@ -274,6 +312,7 @@ class _MainWebViewPageState extends State<MainWebViewPage>
       await _controller.loadRequest(
         Uri.parse('https://www.instagram.com/accounts/login/'),
       );
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Signed out successfully')));
@@ -331,32 +370,31 @@ class _MainWebViewPageState extends State<MainWebViewPage>
     await _controller.loadRequest(Uri.parse('https://www.instagram.com$path'));
   }
 
-  Future<void> _onTabTapped(int index) async {
-    if (index == _currentIndex) {
-      await _controller.reload();
-      return;
-    }
-    setState(() => _currentIndex = index);
+  Future<void> _onTabTapped(String label) async {
+    final sm = context.read<SessionManager>();
 
-    switch (index) {
-      case 0:
+    switch (label) {
+      case 'Home':
         await _navigateTo('/');
         break;
-      case 1:
-        // Search tab - user reported "dark page" at /explore/search/
-        // Let's try /explore/ directly which usually shows the search bar on mobile web
+      case 'Search':
         await _navigateTo('/explore/');
         break;
-      case 2:
-        if (context.read<SessionManager>().isSessionActive) {
+      case 'Create':
+        await _navigateTo('/reels/create/'); // Default create path
+        break;
+      case 'Notifications':
+        await _navigateTo('/notifications/');
+        break;
+      case 'Reels':
+        if (sm.isSessionActive) {
           await _navigateTo('/reels/');
+        } else {
+          // Show session picker if no session active
+          _showSessionPicker();
         }
-        // If not active, do nothing (disabled as requested)
         break;
-      case 3:
-        await _navigateTo('/direct/inbox/');
-        break;
-      case 4:
+      case 'Profile':
         if (_cachedUsername != null) {
           await _navigateTo('/$_cachedUsername/');
         } else {
@@ -371,10 +409,39 @@ class _MainWebViewPageState extends State<MainWebViewPage>
     }
   }
 
+  void _showSessionPicker() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.7,
+        decoration: const BoxDecoration(
+          color: Color(0xFF121212),
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(25),
+            topRight: Radius.circular(25),
+          ),
+        ),
+        child: ClipRRect(
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(25),
+            topRight: Radius.circular(25),
+          ),
+          child: Navigator(
+            onGenerateRoute: (_) => MaterialPageRoute(
+              builder: (ctx) => AppSessionPickerScreen(
+                onSessionStarted: () => Navigator.pop(context),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    const barHeight = 60.0;
-
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
@@ -382,8 +449,6 @@ class _MainWebViewPageState extends State<MainWebViewPage>
         if (await _controller.canGoBack()) {
           await _controller.goBack();
         } else {
-          // If no history, we can either minimize or close.
-          // SystemNavigator.pop() is usually what users expect for "Close".
           SystemNavigator.pop();
         }
       },
@@ -415,27 +480,19 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                 top: 60 + MediaQuery.of(context).padding.top,
                 left: 0,
                 right: 0,
-                child: const LinearProgressIndicator(
-                  backgroundColor: Colors.transparent,
-                  color: Colors.blue,
-                  minHeight: 2,
-                ),
+                child: const _InstagramGradientProgressBar(),
               ),
 
             // ── The Edge Panel ──────────────────────────────────────────
             _EdgePanel(controller: _controller),
 
             // ── Our bottom bar ──────────────────────────────────────────
-            if (!_isOnOnboardingPage)
+            if (!_isOnOnboardingPage && !_isInDirect)
               Positioned(
                 bottom: 0,
                 left: 0,
                 right: 0,
-                child: _FocusGramNavBar(
-                  currentIndex: _currentIndex,
-                  onTap: _onTabTapped,
-                  height: barHeight * 0.99, // 1% reduction
-                ),
+                child: const _FocusGramNavBar(),
               ),
           ],
         ),
@@ -819,49 +876,92 @@ class _BrandedTopBar extends StatelessWidget {
   }
 }
 
-class _FocusGramNavBar extends StatelessWidget {
-  final int currentIndex;
-  final Future<void> Function(int) onTap;
-  final double height;
-
-  const _FocusGramNavBar({
-    required this.currentIndex,
-    required this.onTap,
-    this.height = 52,
-  });
+class _InstagramGradientProgressBar extends StatelessWidget {
+  const _InstagramGradientProgressBar();
 
   @override
   Widget build(BuildContext context) {
-    final items = [
-      (Icons.home_outlined, Icons.home_rounded, 'Home'),
-      (Icons.search, Icons.search, 'Search'),
-      (Icons.play_circle_outline, Icons.play_circle_filled, 'Session'),
-      (Icons.chat_bubble_outline, Icons.chat_bubble, 'Messages'),
-      (Icons.person_outline, Icons.person, 'Profile'),
-    ];
+    return SizedBox(
+      height: 2.5,
+      child: Stack(
+        children: [
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Color(0xFFFEDA75), // Yellow
+                  Color(0xFFFA7E1E), // Orange
+                  Color(0xFFD62976), // Pink
+                  Color(0xFF962FBF), // Purple
+                  Color(0xFF4F5BD5), // Blue
+                ],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FocusGramNavBar extends StatelessWidget {
+  const _FocusGramNavBar();
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = context.watch<SettingsService>();
+    final allItems = {
+      'Home': (Icons.home_outlined, Icons.home_rounded),
+      'Search': (Icons.search, Icons.search),
+      'Create': (Icons.add_box_outlined, Icons.add_box),
+      'Notifications': (Icons.favorite_border, Icons.favorite),
+      'Reels': (Icons.play_circle_outline, Icons.play_circle_filled),
+      'Profile': (Icons.person_outline, Icons.person),
+    };
+
+    final activeTabs = settings.enabledTabs;
+    final state = context.findAncestorStateOfType<_MainWebViewPageState>()!;
+    final sm = context.watch<SessionManager>();
 
     return Container(
       color: Colors.black,
       child: SafeArea(
         top: false,
-        child: SizedBox(
-          height: height,
+        child: Container(
+          height: 56,
+          decoration: const BoxDecoration(
+            border: Border(top: BorderSide(color: Colors.white12, width: 0.5)),
+          ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: items.asMap().entries.map((entry) {
-              final i = entry.key;
-              final (outlinedIcon, filledIcon, label) = entry.value;
-              final isSelected = i == currentIndex;
+            children: activeTabs.map((tab) {
+              final icons = allItems[tab];
+              if (icons == null) return const SizedBox();
+
+              final isSelected = _isTabSelected(
+                tab,
+                state._currentUrl,
+                state._cachedUsername,
+              );
+
               return GestureDetector(
-                onTap: () => onTap(i),
+                onTap: () => state._onTabTapped(tab),
                 behavior: HitTestBehavior.opaque,
                 child: SizedBox(
-                  width: 60,
+                  width:
+                      MediaQuery.of(context).size.width /
+                      activeTabs.length.clamp(1, 6),
                   height: double.infinity,
                   child: Center(
                     child: Icon(
-                      isSelected ? filledIcon : outlinedIcon,
-                      color: isSelected ? Colors.white : Colors.white54,
+                      isSelected ? icons.$2 : icons.$1,
+                      color: isSelected
+                          ? Colors.white
+                          : (tab == 'Reels' && !sm.isSessionActive)
+                          ? Colors.white24
+                          : Colors.white54,
                       size: 26,
                     ),
                   ),
@@ -872,6 +972,26 @@ class _FocusGramNavBar extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  bool _isTabSelected(String tab, String url, String? username) {
+    final path = Uri.tryParse(url)?.path ?? '';
+    switch (tab) {
+      case 'Home':
+        return path == '/' || path.isEmpty;
+      case 'Search':
+        return path.startsWith('/explore');
+      case 'Create':
+        return path.startsWith('/create');
+      case 'Notifications':
+        return path.startsWith('/notifications');
+      case 'Reels':
+        return path.startsWith('/reels');
+      case 'Profile':
+        return username != null && path.startsWith('/$username');
+      default:
+        return false;
+    }
   }
 }
 

@@ -10,16 +10,23 @@ class SettingsService extends ChangeNotifier {
   static const _keyRequireWordChallenge = 'set_require_word_challenge';
   static const _keyGhostMode = 'set_ghost_mode';
   static const _keyEnableTextSelection = 'set_enable_text_selection';
+  static const _keyEnabledTabs = 'set_enabled_tabs';
+  static const _keyShowInstaSettings = 'set_show_insta_settings';
+
+  static const _keyIsFirstRun = 'set_is_first_run';
 
   SharedPreferences? _prefs;
 
-  bool _blurExplore = true; // Default: blur explore feed posts/reels
-  bool _blurReels = false; // If false: hide reels in feed (after session ends)
-  bool _requireLongPress = true; // Long-press FAB to start session
-  bool _showBreathGate = true; // Show breathing gate on every open
+  bool _blurExplore = true;
+  bool _blurReels = false;
+  bool _requireLongPress = true;
+  bool _showBreathGate = true;
   bool _requireWordChallenge = true;
-  bool _ghostMode = true; // Default: hide seen/typing
-  bool _enableTextSelection = false; // Default: disabled
+  bool _ghostMode = true;
+  bool _enableTextSelection = false;
+  bool _showInstaSettings = true;
+  List<String> _enabledTabs = ['Home', 'Search', 'Create', 'Reels', 'Profile'];
+  bool _isFirstRun = true;
 
   bool get blurExplore => _blurExplore;
   bool get blurReels => _blurReels;
@@ -28,6 +35,9 @@ class SettingsService extends ChangeNotifier {
   bool get requireWordChallenge => _requireWordChallenge;
   bool get ghostMode => _ghostMode;
   bool get enableTextSelection => _enableTextSelection;
+  bool get showInstaSettings => _showInstaSettings;
+  List<String> get enabledTabs => _enabledTabs;
+  bool get isFirstRun => _isFirstRun;
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
@@ -38,6 +48,17 @@ class SettingsService extends ChangeNotifier {
     _requireWordChallenge = _prefs!.getBool(_keyRequireWordChallenge) ?? true;
     _ghostMode = _prefs!.getBool(_keyGhostMode) ?? true;
     _enableTextSelection = _prefs!.getBool(_keyEnableTextSelection) ?? false;
+    _showInstaSettings = _prefs!.getBool(_keyShowInstaSettings) ?? true;
+    _enabledTabs =
+        _prefs!.getStringList(_keyEnabledTabs) ??
+        ['Home', 'Search', 'Create', 'Reels', 'Profile'];
+    _isFirstRun = _prefs!.getBool(_keyIsFirstRun) ?? true;
+    notifyListeners();
+  }
+
+  Future<void> setFirstRunCompleted() async {
+    _isFirstRun = false;
+    await _prefs?.setBool(_keyIsFirstRun, false);
     notifyListeners();
   }
 
@@ -80,6 +101,24 @@ class SettingsService extends ChangeNotifier {
   Future<void> setEnableTextSelection(bool v) async {
     _enableTextSelection = v;
     await _prefs?.setBool(_keyEnableTextSelection, v);
+    notifyListeners();
+  }
+
+  Future<void> setShowInstaSettings(bool v) async {
+    _showInstaSettings = v;
+    await _prefs?.setBool(_keyShowInstaSettings, v);
+    notifyListeners();
+  }
+
+  Future<void> toggleTab(String tab) async {
+    if (_enabledTabs.contains(tab)) {
+      if (_enabledTabs.length > 1) {
+        _enabledTabs.remove(tab);
+      }
+    } else {
+      _enabledTabs.add(tab);
+    }
+    await _prefs?.setStringList(_keyEnabledTabs, _enabledTabs);
     notifyListeners();
   }
 }
