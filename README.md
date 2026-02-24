@@ -14,6 +14,9 @@
 
 Most people don't want to delete Instagram entirely—they just want to stop wasting hours on Reels. FocusGram surgically removes the parts of Instagram designed for compulsive scrolling, while keeping your feed, stories, and DMs fully functional.
 
+<img width="1920" height="1080" alt="Purple and Pink Pastel Simple Modern Payment Mobile App Presentation" src="https://github.com/user-attachments/assets/a2da0c58-b7a1-4ac4-a5a7-0e30b751a111" />
+
+
 ### Key Benefits
 - **Mental Health**: Stop the dopamine loop of endless autoplay videos.
 - **Productivity**: Open Instagram to check a message or post a story, and get out in seconds.
