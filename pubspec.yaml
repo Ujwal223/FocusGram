@@ -1,5 +1,5 @@
 name: focusgram
-description: "FocusGram — Distraction-free Instagram WebView wrapper."
+description: "FocusGram is a distraction-free client for Instagram on Android that hides Reels and Explore, so you can stay connected without getting lost in the scroll. "
 publish_to: 'none'
 
 version: 0.9.8-beta.2+2

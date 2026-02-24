@@ -48,6 +48,7 @@ We are currently in the process of submitting FocusGram to the F-Droid store for
 **Is my login safe?**
 Yes. FocusGram uses a standard system WebView. Your credentials go directly to Instagram/Meta's servers, just like in a mobile browser. We do not (and cannot) see your password.
 
+
 **Why is it free?**
 FocusGram is Open Source software created by [Ujwal Chapagain](https://github.com/Ujwal223). It is built for everyone who wants a healthier relationship with social media.
 
