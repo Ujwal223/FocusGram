@@ -24,14 +24,14 @@ Builds:
       - flutterVersion=$(sed -n -E "s/.*flutter-version:\ '(.*)'/\1/p" ../.github/workflows/release.yml)
       - '[[ $flutterVersion ]]'
       - git -C $$flutter$$ checkout -f $flutterVersion
-      - export PUB_CACHE=$(pwd)/.pub-cache
+      - export PUB_CACHE=$$flutter$$/../.pub-cache
       - echo "flutter.sdk=$$flutter$$" >> local.properties
       - $$flutter$$/bin/flutter pub get -C ..
     scanignore:
-      - $$flutter$$/bin/cache
+      - srclib/flutter/bin/cache
     scandelete:
-      - $$flutter$$
-      - .pub-cache
+      - srclib/flutter
+      - srclib/.pub-cache
     ndk: 28.2.13676358
 
 AutoUpdateMode: Version

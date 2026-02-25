@@ -17,10 +17,6 @@
 # Keystore and common
 -keep class com.ujwal.focusgram.** { *; }
 
-# Flutter Play Store Split (ignore optional references)
--dontwarn com.google.android.play.core.**
--dontwarn com.google.android.gms.common.**
-
 # Avoid stripping JS bridge names
 -keepattributes JavascriptInterface
 -keepclassmembers class * {
