@@ -34,7 +34,8 @@ Builds:
       - .pub-cache
     ndk: 28.2.13676358
 
-AutoUpdateMode: None
-UpdateCheckMode: None
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+UpdateCheckData: pubspec.yaml|version:\s.+\+(\d+)|.|version:\s(.+)\+
 CurrentVersion: 0.9.8-beta.2
 CurrentVersionCode: 2
