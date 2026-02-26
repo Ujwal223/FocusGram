@@ -4,13 +4,7 @@
 
 # FocusGram
 
-<<<<<<< Updated upstream
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
-[![Flutter](https://img.shields.io/badge/Flutter-stable-blue?logo=flutter)](https://flutter.dev)
-[![Downloads](https://img.shields.io/github/downloads/ujwal223/focusgram/total?label=downloads&color=blue&cacheSeconds=300)](https://github.com/ujwal223/focusgram/releases)
-=======
 **Use social media on your terms.**
->>>>>>> Stashed changes
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_3.0-blue.svg)](LICENSE)
 [![Flutter](https://img.shields.io/badge/Flutter-3.38-blue?logo=flutter&logoColor=white)](https://flutter.dev)
@@ -27,7 +21,8 @@ Most people don't want to quit Instagram. They want to check their messages, pos
 
 FocusGram is an Android app that loads the Instagram website with the distracting parts removed. No private APIs. No data collection. No accounts. Just a cleaner way to use a platform you already use.
 
-<img src="https://github.com/user-attachments/assets/a2da0c58-b7a1-4ac4-a5a7-0e30b751a111" alt="FocusGram screenshots" width="100%" />
+<img width="1920" height="1080" alt="FocusGram App Screenshots" src="https://github.com/user-attachments/assets/cffd4012-4cf3-4ba8-aa1a-883e1f85478e" />
+
 
 ---
 
