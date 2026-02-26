@@ -44,8 +44,8 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = 2
-        versionName = "0.9.8-beta.2"
+        versionCode = 3
+        versionName = "1.0.0"
     }
 
     buildTypes {
@@ -64,6 +64,12 @@ android {
     }
 
     configurations.all {
+        exclude(group = "com.google.android.gms")
+        exclude(group = "com.google.firebase")
+        exclude(group = "com.google.android.datatransport")
+        exclude(group = "com.google.android.play")
+        exclude(group = "com.google.android.play", module = "core")
+        exclude(group = "com.google.android.play", module = "core-common")
     }
 }
 

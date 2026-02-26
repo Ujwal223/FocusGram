@@ -1,3 +1,8 @@
+-keep class io.flutter.** { *; }
+-keep class io.flutter.plugins.** { *; }
+-keep class com.pichillilorenzo.flutter_inappwebview.** { *; }
+-keep class **.GeneratedPluginRegistrant { *; }
+
 # Strip Google Play Core (Flutter engine bundles these unnecessarily for F-Droid)
 -dontwarn com.google.android.play.core.**
 -dontwarn com.google.android.play.core.splitinstall.**

@@ -1,0 +1,36 @@
+Categories:
+  - System
+  - Productivity
+License: AGPL-3.0-only
+SourceCode: https://github.com/Ujwal223/FocusGram
+IssueTracker: https://github.com/Ujwal223/FocusGram/issues
+
+Summary: A wellness-focused Instagram web wrapper
+
+Description: |-
+  FocusGram is a digital wellness tool that loads instagram.com inside a secure Android WebView. It is designed to help you stay focused by filtering out distractions and enforcing session limits.
+  
+  Key Features:
+  - Client-side content filtering (blur explore, hide reels)
+  - Customizable session timers and daily limits
+  - Mindfulness breath gate before opening
+  - No proprietary SDKs, analytics, or tracking
+  - Fully FOSS and privacy-respecting
+
+RepoType: git
+Repo: https://github.com/Ujwal223/FocusGram
+
+Builds:
+  - versionName: 1.0.0
+    versionCode: 3
+    commit: main
+    subdir: .
+    gradle:
+      - yes
+    scanned:
+      - yes
+
+AutoUpdateMode: Version v%v
+UpdateCheckMode: Tags
+CurrentVersion: 1.0.0
+CurrentVersionCode: 3

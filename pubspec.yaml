@@ -1,8 +1,8 @@
 name: focusgram
-description: "FocusGram is a distraction-free client for Instagram on Android that hides Reels and Explore, so you can stay connected without getting lost in the scroll. "
+description: "FocusGram is a free, open-source digital wellness tool for Android. Blocks distracting content, sets time limits, and helps you use social media intentionally."
 publish_to: 'none'
 
-version: 0.9.8-beta.2+2
+version: 1.0.0+3
 
 environment:
   sdk: ^3.10.7
@@ -11,10 +11,8 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # WebView engine — latest stable
-  webview_flutter: ^4.13.1
-  # Android-specific WebView platform (explicit dep required for direct import)
-  webview_flutter_android: ^4.3.0
+  # WebView engine — Apache 2.0, F-Droid safe, replaces webview_flutter entirely
+  flutter_inappwebview: ^6.1.5
 
   # Local key-value persistence — latest stable
   shared_preferences: ^2.5.4
@@ -30,6 +28,7 @@ dependencies:
 
   # URL launcher for About page links — latest stable
   url_launcher: ^6.3.2
+  package_info_plus: ^8.1.2
   # Handling Instagram deep links — latest stable
   app_links: ^6.3.2
   # Open system settings — latest stable
@@ -40,6 +39,9 @@ dependencies:
   # Image/file picker for story uploads on Android
   image_picker: ^1.1.2
   flutter_windowmanager_plus: ^1.0.1
+
+  # Charts for on-device screen time dashboard (MIT)
+  fl_chart: ^0.69.0
 
 dev_dependencies:
   flutter_test:

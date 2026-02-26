@@ -1,0 +1,7 @@
+New: Reels History, Minimal Mode, Disable Reels/Explore toggles, Autoplay Blocker, Screen Time Dashboard, Grayscale Mode, 8 content hide toggles.
+
+Fixes: DM keyboard bug, Reels scroll lag.
+
+Performance: Native nav bar, background preloading, skeleton screen, haptic feedback, smooth scrolling.
+
+F-Droid: Removed all Google dependencies. No Play Services in APK.

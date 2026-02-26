@@ -13,19 +13,37 @@ class SettingsService extends ChangeNotifier {
   static const _keyShowInstaSettings = 'set_show_insta_settings';
   static const _keyIsFirstRun = 'set_is_first_run';
 
-  // Granular Ghost Mode keys
-  static const _keyGhostTyping = 'set_ghost_typing';
-  static const _keyGhostSeen = 'set_ghost_seen';
-  static const _keyGhostStories = 'set_ghost_stories';
-  static const _keyGhostDmPhotos = 'set_ghost_dm_photos';
+  // Focus / playback
+  static const _keyBlockAutoplay = 'block_autoplay';
+
+  // Grayscale mode
+  static const _keyGrayscaleEnabled = 'grayscale_enabled';
+  static const _keyGrayscaleScheduleEnabled = 'grayscale_schedule_enabled';
+  static const _keyGrayscaleScheduleTime = 'grayscale_schedule_time';
+
+  // Content filtering / UI hiding
+  static const _keyHideSuggestedPosts = 'hide_suggested_posts';
+  static const _keyHideSponsoredPosts = 'hide_sponsored_posts';
+  static const _keyHideLikeCounts = 'hide_like_counts';
+  static const _keyHideFollowerCounts = 'hide_follower_counts';
+  static const _keyHideStoriesBar = 'hide_stories_bar';
+  static const _keyHideExploreTab = 'hide_explore_tab';
+  static const _keyHideReelsTab = 'hide_reels_tab';
+  static const _keyHideShopTab = 'hide_shop_tab';
+
+  // Complete section disabling / Minimal mode
+  static const _keyDisableReelsEntirely = 'disable_reels_entirely';
+  static const _keyDisableExploreEntirely = 'disable_explore_entirely';
+  static const _keyMinimalModeEnabled = 'minimal_mode_enabled';
+
+  // Reels History
+  static const _keyReelsHistoryEnabled = 'reels_history_enabled';
 
   // Privacy keys
   static const _keySanitizeLinks = 'set_sanitize_links';
   static const _keyNotifyDMs = 'set_notify_dms';
   static const _keyNotifyActivity = 'set_notify_activity';
-
-  // Legacy key for migration
-  static const _keyGhostModeLegacy = 'set_ghost_mode';
+  static const _keyNotifySessionEnd = 'set_notify_session_end';
 
   SharedPreferences? _prefs;
 
@@ -38,16 +56,32 @@ class SettingsService extends ChangeNotifier {
   bool _showInstaSettings = true;
   bool _isDarkMode = true; // Default to dark as per existing app theme
 
-  // Granular Ghost Mode defaults (all on)
-  bool _ghostTyping = true;
-  bool _ghostSeen = true;
-  bool _ghostStories = true;
-  bool _ghostDmPhotos = true;
+  bool _blockAutoplay = true;
 
-  // Privacy defaults
+  bool _grayscaleEnabled = false;
+  bool _grayscaleScheduleEnabled = false;
+  String _grayscaleScheduleTime = '21:00'; // 9:00 PM default
+
+  bool _hideSuggestedPosts = false;
+  bool _hideSponsoredPosts = false;
+  bool _hideLikeCounts = false;
+  bool _hideFollowerCounts = false;
+  bool _hideStoriesBar = false;
+  bool _hideExploreTab = false;
+  bool _hideReelsTab = false;
+  bool _hideShopTab = false;
+
+  bool _disableReelsEntirely = false;
+  bool _disableExploreEntirely = false;
+  bool _minimalModeEnabled = false;
+
+  bool _reelsHistoryEnabled = true;
+
+  // Privacy defaults - notifications OFF by default
   bool _sanitizeLinks = true;
-  bool _notifyDMs = true;
-  bool _notifyActivity = true;
+  bool _notifyDMs = false;
+  bool _notifyActivity = false;
+  bool _notifySessionEnd = false;
 
   List<String> _enabledTabs = [
     'Home',
@@ -68,18 +102,49 @@ class SettingsService extends ChangeNotifier {
   List<String> get enabledTabs => _enabledTabs;
   bool get isFirstRun => _isFirstRun;
   bool get isDarkMode => _isDarkMode;
-
-  // Granular Ghost Mode getters
-  bool get ghostTyping => _ghostTyping;
-  bool get ghostSeen => _ghostSeen;
-  bool get ghostStories => _ghostStories;
-  bool get ghostDmPhotos => _ghostDmPhotos;
+  bool get blockAutoplay => _blockAutoplay;
   bool get notifyDMs => _notifyDMs;
   bool get notifyActivity => _notifyActivity;
+  bool get notifySessionEnd => _notifySessionEnd;
 
-  /// True if ANY ghost mode setting is enabled (for injection logic).
-  bool get anyGhostModeEnabled =>
-      _ghostTyping || _ghostSeen || _ghostStories || _ghostDmPhotos;
+  bool get grayscaleEnabled => _grayscaleEnabled;
+  bool get grayscaleScheduleEnabled => _grayscaleScheduleEnabled;
+  String get grayscaleScheduleTime => _grayscaleScheduleTime;
+
+  bool get hideSuggestedPosts => _hideSuggestedPosts;
+  bool get hideSponsoredPosts => _hideSponsoredPosts;
+  bool get hideLikeCounts => _hideLikeCounts;
+  bool get hideFollowerCounts => _hideFollowerCounts;
+  bool get hideStoriesBar => _hideStoriesBar;
+  bool get hideExploreTab => _hideExploreTab;
+  bool get hideReelsTab => _hideReelsTab;
+  bool get hideShopTab => _hideShopTab;
+
+  bool get disableReelsEntirely => _disableReelsEntirely;
+  bool get disableExploreEntirely => _disableExploreEntirely;
+  bool get minimalModeEnabled => _minimalModeEnabled;
+
+  bool get reelsHistoryEnabled => _reelsHistoryEnabled;
+
+  /// True if grayscale should currently be applied, considering the manual
+  /// toggle and the optional schedule.
+  bool get isGrayscaleActiveNow {
+    if (_grayscaleEnabled) return true;
+    if (!_grayscaleScheduleEnabled) return false;
+    try {
+      final parts = _grayscaleScheduleTime.split(':');
+      if (parts.length != 2) return false;
+      final h = int.parse(parts[0]);
+      final m = int.parse(parts[1]);
+      final now = DateTime.now();
+      final currentMinutes = now.hour * 60 + now.minute;
+      final startMinutes = h * 60 + m;
+      // Active from the configured time until midnight.
+      return currentMinutes >= startMinutes;
+    } catch (_) {
+      return false;
+    }
+  }
 
   // Privacy getters
   bool get sanitizeLinks => _sanitizeLinks;
@@ -93,31 +158,34 @@ class SettingsService extends ChangeNotifier {
     _requireWordChallenge = _prefs!.getBool(_keyRequireWordChallenge) ?? true;
     _enableTextSelection = _prefs!.getBool(_keyEnableTextSelection) ?? false;
     _showInstaSettings = _prefs!.getBool(_keyShowInstaSettings) ?? true;
+    _blockAutoplay = _prefs!.getBool(_keyBlockAutoplay) ?? true;
 
-    // Migrate legacy ghostMode key -> all granular keys
-    final legacyGhostMode = _prefs!.getBool(_keyGhostModeLegacy);
-    if (legacyGhostMode != null) {
-      // Seed all four granular keys with the legacy value
-      _ghostTyping = legacyGhostMode;
-      _ghostSeen = legacyGhostMode;
-      _ghostStories = legacyGhostMode;
-      _ghostDmPhotos = legacyGhostMode;
-      // Save granular keys and remove legacy key
-      await _prefs!.setBool(_keyGhostTyping, legacyGhostMode);
-      await _prefs!.setBool(_keyGhostSeen, legacyGhostMode);
-      await _prefs!.setBool(_keyGhostStories, legacyGhostMode);
-      await _prefs!.setBool(_keyGhostDmPhotos, legacyGhostMode);
-      await _prefs!.remove(_keyGhostModeLegacy);
-    } else {
-      _ghostTyping = _prefs!.getBool(_keyGhostTyping) ?? true;
-      _ghostSeen = _prefs!.getBool(_keyGhostSeen) ?? true;
-      _ghostStories = _prefs!.getBool(_keyGhostStories) ?? true;
-      _ghostDmPhotos = _prefs!.getBool(_keyGhostDmPhotos) ?? true;
-    }
+    _grayscaleEnabled = _prefs!.getBool(_keyGrayscaleEnabled) ?? false;
+    _grayscaleScheduleEnabled =
+        _prefs!.getBool(_keyGrayscaleScheduleEnabled) ?? false;
+    _grayscaleScheduleTime =
+        _prefs!.getString(_keyGrayscaleScheduleTime) ?? '21:00';
+
+    _hideSuggestedPosts = _prefs!.getBool(_keyHideSuggestedPosts) ?? false;
+    _hideSponsoredPosts = _prefs!.getBool(_keyHideSponsoredPosts) ?? false;
+    _hideLikeCounts = _prefs!.getBool(_keyHideLikeCounts) ?? false;
+    _hideFollowerCounts = _prefs!.getBool(_keyHideFollowerCounts) ?? false;
+    _hideStoriesBar = _prefs!.getBool(_keyHideStoriesBar) ?? false;
+    _hideExploreTab = _prefs!.getBool(_keyHideExploreTab) ?? false;
+    _hideReelsTab = _prefs!.getBool(_keyHideReelsTab) ?? false;
+    _hideShopTab = _prefs!.getBool(_keyHideShopTab) ?? false;
+
+    _disableReelsEntirely = _prefs!.getBool(_keyDisableReelsEntirely) ?? false;
+    _disableExploreEntirely =
+        _prefs!.getBool(_keyDisableExploreEntirely) ?? false;
+    _minimalModeEnabled = _prefs!.getBool(_keyMinimalModeEnabled) ?? false;
+
+    _reelsHistoryEnabled = _prefs!.getBool(_keyReelsHistoryEnabled) ?? true;
 
     _sanitizeLinks = _prefs!.getBool(_keySanitizeLinks) ?? true;
-    _notifyDMs = _prefs!.getBool(_keyNotifyDMs) ?? true;
-    _notifyActivity = _prefs!.getBool(_keyNotifyActivity) ?? true;
+    _notifyDMs = _prefs!.getBool(_keyNotifyDMs) ?? false;
+    _notifyActivity = _prefs!.getBool(_keyNotifyActivity) ?? false;
+    _notifySessionEnd = _prefs!.getBool(_keyNotifySessionEnd) ?? false;
 
     _enabledTabs =
         (_prefs!.getStringList(_keyEnabledTabs) ??
@@ -179,36 +247,107 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setBlockAutoplay(bool v) async {
+    _blockAutoplay = v;
+    await _prefs?.setBool(_keyBlockAutoplay, v);
+    notifyListeners();
+  }
+
+  Future<void> setGrayscaleEnabled(bool v) async {
+    _grayscaleEnabled = v;
+    await _prefs?.setBool(_keyGrayscaleEnabled, v);
+    notifyListeners();
+  }
+
+  Future<void> setGrayscaleScheduleEnabled(bool v) async {
+    _grayscaleScheduleEnabled = v;
+    await _prefs?.setBool(_keyGrayscaleScheduleEnabled, v);
+    notifyListeners();
+  }
+
+  Future<void> setGrayscaleScheduleTime(String hhmm) async {
+    _grayscaleScheduleTime = hhmm;
+    await _prefs?.setString(_keyGrayscaleScheduleTime, hhmm);
+    notifyListeners();
+  }
+
+  Future<void> setHideSuggestedPosts(bool v) async {
+    _hideSuggestedPosts = v;
+    await _prefs?.setBool(_keyHideSuggestedPosts, v);
+    notifyListeners();
+  }
+
+  Future<void> setHideSponsoredPosts(bool v) async {
+    _hideSponsoredPosts = v;
+    await _prefs?.setBool(_keyHideSponsoredPosts, v);
+    notifyListeners();
+  }
+
+  Future<void> setHideLikeCounts(bool v) async {
+    _hideLikeCounts = v;
+    await _prefs?.setBool(_keyHideLikeCounts, v);
+    notifyListeners();
+  }
+
+  Future<void> setHideFollowerCounts(bool v) async {
+    _hideFollowerCounts = v;
+    await _prefs?.setBool(_keyHideFollowerCounts, v);
+    notifyListeners();
+  }
+
+  Future<void> setHideStoriesBar(bool v) async {
+    _hideStoriesBar = v;
+    await _prefs?.setBool(_keyHideStoriesBar, v);
+    notifyListeners();
+  }
+
+  Future<void> setHideExploreTab(bool v) async {
+    _hideExploreTab = v;
+    await _prefs?.setBool(_keyHideExploreTab, v);
+    notifyListeners();
+  }
+
+  Future<void> setHideReelsTab(bool v) async {
+    _hideReelsTab = v;
+    await _prefs?.setBool(_keyHideReelsTab, v);
+    notifyListeners();
+  }
+
+  Future<void> setHideShopTab(bool v) async {
+    _hideShopTab = v;
+    await _prefs?.setBool(_keyHideShopTab, v);
+    notifyListeners();
+  }
+
+  Future<void> setDisableReelsEntirely(bool v) async {
+    _disableReelsEntirely = v;
+    await _prefs?.setBool(_keyDisableReelsEntirely, v);
+    notifyListeners();
+  }
+
+  Future<void> setDisableExploreEntirely(bool v) async {
+    _disableExploreEntirely = v;
+    await _prefs?.setBool(_keyDisableExploreEntirely, v);
+    notifyListeners();
+  }
+
+  Future<void> setMinimalModeEnabled(bool v) async {
+    _minimalModeEnabled = v;
+    await _prefs?.setBool(_keyMinimalModeEnabled, v);
+    notifyListeners();
+  }
+
+  Future<void> setReelsHistoryEnabled(bool v) async {
+    _reelsHistoryEnabled = v;
+    await _prefs?.setBool(_keyReelsHistoryEnabled, v);
+    notifyListeners();
+  }
+
   void setDarkMode(bool dark) {
     if (_isDarkMode != dark) {
       _isDarkMode = dark;
       notifyListeners();
     }
-  }
-
-  // Granular Ghost Mode setters
-  Future<void> setGhostTyping(bool v) async {
-    _ghostTyping = v;
-    await _prefs?.setBool(_keyGhostTyping, v);
-    notifyListeners();
-  }
-
-  Future<void> setGhostSeen(bool v) async {
-    _ghostSeen = v;
-    await _prefs?.setBool(_keyGhostSeen, v);
-    notifyListeners();
-  }
-
-  Future<void> setGhostStories(bool v) async {
-    _ghostStories = v;
-    await _prefs?.setBool(_keyGhostStories, v);
-    notifyListeners();
-  }
-
-  Future<void> setGhostDmPhotos(bool v) async {
-    _ghostDmPhotos = v;
-    await _prefs?.setBool(_keyGhostDmPhotos, v);
-    notifyListeners();
   }
 
   Future<void> setSanitizeLinks(bool v) async {
@@ -226,6 +365,12 @@ class SettingsService extends ChangeNotifier {
   Future<void> setNotifyActivity(bool v) async {
     _notifyActivity = v;
     await _prefs?.setBool(_keyNotifyActivity, v);
+    notifyListeners();
+  }
+
+  Future<void> setNotifySessionEnd(bool v) async {
+    _notifySessionEnd = v;
+    await _prefs?.setBool(_keyNotifySessionEnd, v);
     notifyListeners();
   }
 

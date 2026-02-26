@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../services/injection_controller.dart';
 import '../services/session_manager.dart';
 import 'package:provider/provider.dart';
@@ -15,58 +15,12 @@ class ReelPlayerOverlay extends StatefulWidget {
 }
 
 class _ReelPlayerOverlayState extends State<ReelPlayerOverlay> {
-  late final WebViewController _controller;
   DateTime? _startTime;
 
   @override
   void initState() {
     super.initState();
     _startTime = DateTime.now();
-    _initWebView();
-  }
-
-  void _initWebView() {
-    _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setUserAgent(InjectionController.iOSUserAgent)
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onPageFinished: (url) {
-            // Set isolated player flag to ensure scroll-lock applies even if a session is active globally
-            _controller.runJavaScript(
-              'window.__focusgramIsolatedPlayer = true;',
-            );
-            // Apply scroll-lock via MutationObserver: prevents swiping to next reel
-            _controller.runJavaScript(
-              InjectionController.reelsMutationObserverJS,
-            );
-            // Also hide Instagram's bottom nav inside this overlay
-            _controller.runJavaScript(
-              InjectionController.buildInjectionJS(
-                sessionActive: true,
-                blurExplore: false,
-                blurReels: false,
-                ghostTyping: false,
-                ghostSeen: false,
-                ghostStories: false,
-                ghostDmPhotos: false,
-                enableTextSelection: true,
-              ),
-            );
-          },
-          onNavigationRequest: (request) {
-            // Allow only the initial reel URL and instagram.com generally
-            final uri = Uri.tryParse(request.url);
-            if (uri == null) return NavigationDecision.prevent;
-            final host = uri.host;
-            if (!host.contains('instagram.com')) {
-              return NavigationDecision.prevent;
-            }
-            return NavigationDecision.navigate;
-          },
-        ),
-      )
-      ..loadRequest(Uri.parse(widget.url));
   }
 
   @override
@@ -114,7 +68,65 @@ class _ReelPlayerOverlayState extends State<ReelPlayerOverlay> {
           ),
         ],
       ),
-      body: WebViewWidget(controller: _controller),
+      body: InAppWebView(
+        initialUrlRequest: URLRequest(url: WebUri(widget.url)),
+        initialSettings: InAppWebViewSettings(
+          userAgent: InjectionController.iOSUserAgent,
+          mediaPlaybackRequiresUserGesture: true,
+          useHybridComposition: true,
+          cacheEnabled: true,
+          cacheMode: CacheMode.LOAD_CACHE_ELSE_NETWORK,
+          domStorageEnabled: true,
+          databaseEnabled: true,
+          hardwareAcceleration: true,
+          transparentBackground: true,
+          safeBrowsingEnabled: false,
+          supportZoom: false,
+          allowsInlineMediaPlayback: true,
+          verticalScrollBarEnabled: false,
+          horizontalScrollBarEnabled: false,
+        ),
+        onWebViewCreated: (controller) {
+          // Controller is not stored; this overlay is self-contained.
+        },
+        onLoadStop: (controller, url) async {
+          // Set isolated player flag to ensure scroll-lock applies even if a session is active globally
+          await controller.evaluateJavascript(
+            source: 'window.__focusgramIsolatedPlayer = true;',
+          );
+          // Apply scroll-lock via MutationObserver: prevents swiping to next reel
+          await controller.evaluateJavascript(
+            source: InjectionController.reelsMutationObserverJS,
+          );
+          // Also apply FocusGram baseline CSS (hides bottom nav etc.)
+          await controller.evaluateJavascript(
+            source: InjectionController.buildInjectionJS(
+              sessionActive: true,
+              blurExplore: false,
+              blurReels: false,
+              enableTextSelection: true,
+              hideSuggestedPosts: false,
+              hideSponsoredPosts: false,
+              hideLikeCounts: false,
+              hideFollowerCounts: false,
+              hideStoriesBar: false,
+              hideExploreTab: false,
+              hideReelsTab: false,
+              hideShopTab: false,
+              disableReelsEntirely: false,
+            ),
+          );
+        },
+        shouldOverrideUrlLoading: (controller, action) async {
+          // Keep this overlay locked to instagram.com pages only
+          final uri = action.request.url;
+          if (uri == null) return NavigationActionPolicy.CANCEL;
+          if (!uri.host.contains('instagram.com')) {
+            return NavigationActionPolicy.CANCEL;
+          }
+          return NavigationActionPolicy.ALLOW;
+        },
+      ),
     );
   }
 }

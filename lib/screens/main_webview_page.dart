@@ -1,20 +1,30 @@
 import 'dart:async';
+import 'dart:collection';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_flutter_android/webview_flutter_android.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/session_manager.dart';
 import '../services/settings_service.dart';
 import '../services/injection_controller.dart';
+import '../services/injection_manager.dart';
+import '../scripts/autoplay_blocker.dart';
+import '../scripts/native_feel.dart';
+import '../scripts/haptic_bridge.dart';
+import '../scripts/spa_navigation_monitor.dart';
+import '../scripts/content_disabling.dart';
+import '../services/screen_time_service.dart';
 import '../services/navigation_guard.dart';
 import '../services/focusgram_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/notification_service.dart';
+import '../features/update_checker/update_checker_service.dart';
 import '../utils/discipline_challenge.dart';
 import 'settings_page.dart';
+import '../features/loading/skeleton_screen.dart';
+import '../features/preloader/instagram_preloader.dart';
 
 class MainWebViewPage extends StatefulWidget {
   const MainWebViewPage({super.key});
@@ -25,15 +35,25 @@ class MainWebViewPage extends StatefulWidget {
 
 class _MainWebViewPageState extends State<MainWebViewPage>
     with WidgetsBindingObserver {
-  late final WebViewController _controller;
+  InAppWebViewController? _controller;
+  late final PullToRefreshController _pullToRefreshController;
+  InjectionManager? _injectionManager;
   final GlobalKey<_EdgePanelState> _edgePanelKey = GlobalKey<_EdgePanelState>();
+  bool _showSkeleton =
+      true; // true from the start so skeleton covers black Scaffold before WebView first paints
   bool _isLoading = true;
   Timer? _watchdog;
+  // FIX 4: Safety timer to clear stuck loading state
+  Timer? _loadingTimeout;
   bool _extensionDialogShown = false;
   bool _lastSessionActive = false;
   String _currentUrl = 'https://www.instagram.com/';
   bool _hasError = false;
   bool _reelsBlockedOverlay = false;
+  bool _isPreloaded = false;
+  bool _minimalModeBannerDismissed = false;
+  DateTime _lastMainFrameLoadStartedAt = DateTime.fromMillisecondsSinceEpoch(0);
+  SkeletonType _skeletonType = SkeletonType.generic;
 
   /// Helper to determine if we are on a login/onboarding page.
   bool get _isOnOnboardingPage {
@@ -51,13 +71,23 @@ class _MainWebViewPageState extends State<MainWebViewPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _initPullToRefresh();
     _initWebView();
     _startWatchdog();
+
+    // Check for updates on launch
+    context.read<UpdateCheckerService>().checkForUpdates();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<SessionManager>().addListener(_onSessionChanged);
       context.read<SettingsService>().addListener(_onSettingsChanged);
       _lastSessionActive = context.read<SessionManager>().isSessionActive;
+      // Initialise structural snapshots so first change is detected correctly
+      final settings = context.read<SettingsService>();
+      _lastMinimalMode = settings.minimalModeEnabled;
+      _lastDisableReels = settings.disableReelsEntirely;
+      _lastDisableExplore = settings.disableExploreEntirely;
+      _lastBlockAutoplay = settings.blockAutoplay;
     });
 
     FocusGramRouter.pendingUrl.addListener(_onPendingUrlChanged);
@@ -67,15 +97,15 @@ class _MainWebViewPageState extends State<MainWebViewPage>
     final url = FocusGramRouter.pendingUrl.value;
     if (url != null && url.isNotEmpty) {
       FocusGramRouter.pendingUrl.value = null;
-      _controller.loadRequest(Uri.parse(url));
+      _controller?.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
     }
   }
 
   /// Sets the isolated reel player flag in the WebView so the scroll-lock
   /// knows it should block swipe-to-next-reel.
   Future<void> _setIsolatedPlayer(bool active) async {
-    await _controller.runJavaScript(
-      'window.__focusgramIsolatedPlayer = $active;',
+    await _controller?.evaluateJavascript(
+      source: 'window.__focusgramIsolatedPlayer = $active;',
     );
   }
 
@@ -84,7 +114,16 @@ class _MainWebViewPageState extends State<MainWebViewPage>
     final sm = context.read<SessionManager>();
     if (_lastSessionActive != sm.isSessionActive) {
       _lastSessionActive = sm.isSessionActive;
-      _applyInjections();
+
+      if (_lastSessionActive) {
+        HapticFeedback.mediumImpact();
+      } else {
+        HapticFeedback.heavyImpact();
+      }
+
+      if (_controller != null && _injectionManager != null) {
+        _injectionManager!.runAllPostLoadInjections(_currentUrl);
+      }
 
       // If session became active and we were showing overlay, hide it
       if (_lastSessionActive && _reelsBlockedOverlay) {
@@ -94,16 +133,60 @@ class _MainWebViewPageState extends State<MainWebViewPage>
     setState(() {});
   }
 
+  // Debounce timer so rapid toggles don't spam reloads
+  Timer? _reloadDebounce;
+
+  // Snapshot of structural settings — used to detect when a reload is needed
+  bool _lastMinimalMode = false;
+  bool _lastDisableReels = false;
+  bool _lastDisableExplore = false;
+  bool _lastBlockAutoplay = false;
+
   void _onSettingsChanged() {
     if (!mounted) return;
-    _applyInjections();
-    // Removed _controller.reload() to improve performance. JS injection now handles updates instantly.
+    final settings = context.read<SettingsService>();
+
+    // 1. Apply all cosmetic changes immediately via injection
+    if (_controller != null) {
+      _controller!.evaluateJavascript(
+        source: 'window.__fgBlockAutoplay = ${settings.blockAutoplay};',
+      );
+    }
+    if (_controller != null && _injectionManager != null) {
+      _injectionManager!.runAllPostLoadInjections(_currentUrl);
+    }
+
+    // 2. Rebuild Flutter widget tree (e.g. overlay conditions, banner state)
+    setState(() {});
+
+    // 3. Detect structural changes that need a full reload.
+    //    CSS injection alone can't undo Instagram's already-rendered React DOM.
+    final structuralChange =
+        settings.minimalModeEnabled != _lastMinimalMode ||
+        settings.disableReelsEntirely != _lastDisableReels ||
+        settings.disableExploreEntirely != _lastDisableExplore ||
+        settings.blockAutoplay != _lastBlockAutoplay;
+
+    _lastMinimalMode = settings.minimalModeEnabled;
+    _lastDisableReels = settings.disableReelsEntirely;
+    _lastDisableExplore = settings.disableExploreEntirely;
+    _lastBlockAutoplay = settings.blockAutoplay;
+
+    if (structuralChange && _controller != null) {
+      // Debounce: if user toggles rapidly, only reload once they stop
+      _reloadDebounce?.cancel();
+      _reloadDebounce = Timer(const Duration(milliseconds: 600), () {
+        if (mounted) _controller?.reload();
+      });
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _watchdog?.cancel();
+    _loadingTimeout?.cancel();
+    _reloadDebounce?.cancel();
     FocusGramRouter.pendingUrl.removeListener(_onPendingUrlChanged);
     context.read<SessionManager>().removeListener(_onSessionChanged);
     context.read<SettingsService>().removeListener(_onSettingsChanged);
@@ -114,12 +197,15 @@ class _MainWebViewPageState extends State<MainWebViewPage>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (!mounted) return;
     final sm = context.read<SessionManager>();
+    final screenTime = context.read<ScreenTimeService>();
     if (state == AppLifecycleState.resumed) {
       sm.setAppForeground(true);
+      screenTime.startTracking();
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.detached) {
       sm.setAppForeground(false);
+      screenTime.stopTracking();
     }
   }
 
@@ -130,6 +216,22 @@ class _MainWebViewPageState extends State<MainWebViewPage>
       if (sm.isAppSessionExpired && !_extensionDialogShown) {
         _extensionDialogShown = true;
         _showSessionExpiredDialog(sm);
+      }
+    });
+  }
+
+  // FIX 4: Cancel any existing loading timeout and start a fresh one.
+  // If onLoadStop or onReceivedError haven't fired after 12 seconds,
+  // force-clear the loading/skeleton state so the app never appears stuck.
+  void _resetLoadingTimeout() {
+    _loadingTimeout?.cancel();
+    _loadingTimeout = Timer(const Duration(seconds: 12), () {
+      if (!mounted) return;
+      if (_isLoading || _showSkeleton) {
+        setState(() {
+          _isLoading = false;
+          _showSkeleton = false;
+        });
       }
     });
   }
@@ -194,242 +296,45 @@ class _MainWebViewPageState extends State<MainWebViewPage>
     );
   }
 
-  void _initWebView() {
-    final settings = context.read<SettingsService>();
-    _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setUserAgent(InjectionController.iOSUserAgent)
-      ..setBackgroundColor(settings.isDarkMode ? Colors.black : Colors.white);
-
-    if (_controller.platform is AndroidWebViewController) {
-      final androidController =
-          _controller.platform as AndroidWebViewController;
-      AndroidWebViewController.enableDebugging(false);
-      androidController.setMediaPlaybackRequiresUserGesture(false);
-      androidController.setOnShowFileSelector((params) async {
-        try {
-          final picker = ImagePicker();
-          final acceptsVideo = params.acceptTypes.any(
-            (t) => t.contains('video'),
-          );
-          final XFile? file = acceptsVideo
-              ? await picker.pickVideo(source: ImageSource.gallery)
-              : await picker.pickImage(source: ImageSource.gallery);
-          if (file != null) {
-            // WebView expects a content:// URI, not a raw filesystem path.
-            // XFile.path on Android is already a content:// URI string when
-            // picked from the gallery via image_picker >= 0.9, but if it
-            // starts with '/' we need to prefix it with 'file://'.
-            final path = file.path;
-            final uri = path.startsWith('/') ? 'file://$path' : path;
-            return [uri];
-          }
-        } catch (_) {}
-        return <String>[];
-      });
-    }
-
-    _controller
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onPageStarted: (url) {
-            if (mounted) {
-              setState(() {
-                _isLoading = !url.contains('#');
-                _currentUrl = url;
-                // If navigating to reels and no session, block it
-                if (url.contains('/reels/') &&
-                    !context.read<SessionManager>().isSessionActive) {
-                  _reelsBlockedOverlay = true;
-                } else {
-                  _reelsBlockedOverlay = false;
-                }
-              });
-            }
-          },
-          onPageFinished: (url) {
-            if (mounted) {
-              setState(() {
-                _isLoading = false;
-                _currentUrl = url;
-              });
-            }
-            _applyInjections();
-            _controller.runJavaScript(InjectionController.notificationBridgeJS);
-
-            // Set isolated player flag: true only when a single reel is opened
-            // from a DM thread (URL contains /reel/ but we're coming from /direct/).
-            // When the user navigates away, clear the flag.
-            final isIsolatedReel =
-                url.contains('/reel/') && !url.contains('/reels/');
-            _setIsolatedPlayer(isIsolatedReel);
-          },
-          onNavigationRequest: (request) {
-            final uri = Uri.tryParse(request.url);
-            if (uri != null &&
-                uri.host.contains('instagram.com') &&
-                (request.url.contains('accounts/settings') ||
-                    request.url.contains('accounts/edit'))) {
-              return NavigationDecision.navigate;
-            }
-
-            // Block reels feed if no session active
-            if (request.url.contains('/reels/') &&
-                !context.read<SessionManager>().isSessionActive) {
-              setState(() => _reelsBlockedOverlay = true);
-              return NavigationDecision.prevent;
-            }
-
-            if (uri != null &&
-                !uri.host.contains('instagram.com') &&
-                !uri.host.contains('facebook.com') &&
-                !uri.host.contains('cdninstagram.com') &&
-                !uri.host.contains('fbcdn.net')) {
-              launchUrl(uri, mode: LaunchMode.externalApplication);
-              return NavigationDecision.prevent;
-            }
-
-            final decision = NavigationGuard.evaluate(url: request.url);
-            if (decision.blocked) {
-              // Custom handling for reels in overlay instead of snackbar
-              if (request.url.contains('/reels/')) {
-                setState(() => _reelsBlockedOverlay = true);
-                return NavigationDecision.prevent;
-              }
-              return NavigationDecision.prevent;
-            }
-
-            return NavigationDecision.navigate;
-          },
-          onWebResourceError: (error) {
-            if (error.isForMainFrame == true &&
-                (error.errorCode == -2 || error.errorCode == -6)) {
-              if (mounted) setState(() => _hasError = true);
-            }
-          },
-        ),
-      )
-      ..addJavaScriptChannel(
-        'FocusGramNotificationChannel',
-        onMessageReceived: (message) {
-          final settings = context.read<SettingsService>();
-          final msg = message.message;
-
-          // Check if it's a bridge payload (Title: Body) or a simple flag (DM/Activity)
-          String title = '';
-          String body = '';
-          bool isDM = false;
-
-          if (msg.contains(': ')) {
-            final parts = msg.split(': ');
-            title = parts[0];
-            body = parts.sublist(1).join(': ');
-            isDM =
-                title.toLowerCase().contains('message') ||
-                title.toLowerCase().contains('direct');
-          } else {
-            isDM = msg == 'DM';
-            title = isDM ? 'Instagram Message' : 'Instagram Notification';
-            body = isDM
-                ? 'Someone messaged you'
-                : 'New activity in notifications';
-          }
-
-          if (isDM && !settings.notifyDMs) return;
-          if (!isDM && !settings.notifyActivity) return;
-
-          try {
-            NotificationService().showNotification(
-              id: DateTime.now().millisecond,
-              title: title,
-              body: body,
-            );
-          } catch (_) {}
-        },
-      )
-      ..addJavaScriptChannel(
-        'FocusGramShareChannel',
-        onMessageReceived: (message) {
-          try {
-            final data = message.message;
-            String url = data;
-            try {
-              final json = RegExp(r'"url":"([^"]+)"').firstMatch(data);
-              if (json != null) url = json.group(1) ?? data;
-            } catch (_) {}
-            Clipboard.setData(ClipboardData(text: url));
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Link copied (tracking removed)'),
-                  backgroundColor: const Color(0xFF1A1A2E),
-                  behavior: SnackBarBehavior.floating,
-                  margin: const EdgeInsets.fromLTRB(16, 0, 16, 20),
-                ),
-              );
-            }
-          } catch (_) {}
-        },
-      )
-      ..addJavaScriptChannel(
-        'FocusGramThemeChannel',
-        onMessageReceived: (message) {
-          context.read<SettingsService>().setDarkMode(
-            message.message == 'dark',
-          );
-        },
-      )
-      ..addJavaScriptChannel(
-        'FocusGramPathChannel',
-        onMessageReceived: (message) {
-          if (!mounted) return;
-          final path = message.message;
-          final sm = context.read<SessionManager>();
-          if (path.startsWith('/reels') && !sm.isSessionActive) {
-            // SPA navigation landed on Reels without a session — gate it.
-            setState(() => _reelsBlockedOverlay = true);
-            // Navigate back to home feed so the overlay has content behind it.
-            _controller.runJavaScript(
-              'if (window.location.pathname.startsWith("/reels")) window.location.href = "/";',
-            );
-          } else if (_reelsBlockedOverlay && !path.startsWith('/reels')) {
-            setState(() => _reelsBlockedOverlay = false);
-          }
-        },
-      )
-      ..loadRequest(Uri.parse('https://www.instagram.com/accounts/login/'));
+  void _initPullToRefresh() {
+    _pullToRefreshController = PullToRefreshController(
+      settings: PullToRefreshSettings(color: Colors.blue),
+      onRefresh: () async {
+        await _controller?.reload();
+      },
+    );
   }
 
-  void _applyInjections() {
-    if (!mounted) return;
-    if (_isOnOnboardingPage) return;
+  void _initWebView() {
+    // Preloader disabled — keepAlive WebView silently fails when app cold-starts,
+    // leaving _isPreloaded = true with no content, causing permanent black screen.
+    // The fresh load path is reliable; the ~300ms preload gain is not worth it.
+    _isPreloaded = false;
 
-    final sessionManager = context.read<SessionManager>();
-    final settings = context.read<SettingsService>();
-    final js = InjectionController.buildInjectionJS(
-      sessionActive: sessionManager.isSessionActive,
-      blurExplore: settings.blurExplore,
-      blurReels: settings.blurReels,
-      ghostTyping: settings.ghostTyping,
-      ghostSeen: settings.ghostSeen,
-      ghostStories: settings.ghostStories,
-      ghostDmPhotos: settings.ghostDmPhotos,
-      enableTextSelection: settings.enableTextSelection,
-    );
-    _controller.runJavaScript(js);
+    setState(() {
+      _currentUrl = 'https://www.instagram.com/accounts/login/';
+    });
+
+    // If not preloaded, controller will be created in onWebViewCreated
+    _injectionManager = null;
+
+    // Nothing else to do here – configuration is on the InAppWebView widget
   }
 
   Future<void> _signOut() async {
-    final manager = WebViewCookieManager();
-    await manager.clearCookies();
-    await _controller.clearCache();
+    final cookieManager = CookieManager.instance();
+    await cookieManager.deleteAllCookies();
+    await InAppWebViewController.clearAllCache();
     if (mounted) {
       setState(() {
+        _showSkeleton = true;
         _isLoading = true;
         _reelsBlockedOverlay = false;
       });
-      await _controller.loadRequest(
-        Uri.parse('https://www.instagram.com/accounts/login/'),
+      await _controller?.loadUrl(
+        urlRequest: URLRequest(
+          url: WebUri('https://www.instagram.com/accounts/login/'),
+        ),
       );
     }
   }
@@ -513,12 +418,15 @@ class _MainWebViewPageState extends State<MainWebViewPage>
         color: Colors.white24,
         size: 14,
       ),
-      onTap: () {
+      onTap: () async {
         Navigator.pop(context);
         if (sm.startSession(mins)) {
+          HapticFeedback.mediumImpact();
           setState(() => _reelsBlockedOverlay = false);
-          _controller.loadRequest(
-            Uri.parse('https://www.instagram.com/reels/'),
+          await _controller?.loadUrl(
+            urlRequest: URLRequest(
+              url: WebUri('https://www.instagram.com/reels/'),
+            ),
           );
         }
       },
@@ -533,46 +441,44 @@ class _MainWebViewPageState extends State<MainWebViewPage>
         if (didPop) return;
         if (_reelsBlockedOverlay) {
           setState(() => _reelsBlockedOverlay = false);
-          _controller.goBack();
+          await _controller?.goBack();
           return;
         }
-        // Run history.back() in the WebView JS context first.
-        // This properly closes Instagram's comment sheet / modal overlay
-        // (which uses the History API pushState). If the webview itself
-        // can go back in its own page-level history, canGoBack() handles it.
-        // We use a JS promise to detect whether we actually navigated:
-        final didNavigate = await _controller
-            .runJavaScriptReturningResult(
-              '(function(){'
-              '  var before = window.location.href;'
-              '  history.back();'
-              '  return before;'
-              '})()',
-            )
-            .then((_) => true)
-            .catchError((_) => false);
-        if (didNavigate) {
-          // history.back() was called — wait a frame to let the SPA handle it
-          // If the URL didn't change (e.g., no more history states), fall
-          // through to webview-level back or app exit.
+        final didNavigate =
+            await (_controller
+                ?.evaluateJavascript(
+                  source:
+                      '(function(){'
+                      '  var before = window.location.href;'
+                      '  history.back();'
+                      '  return before;'
+                      '})()',
+                )
+                .then((_) => true)
+                .catchError((_) => false)) ??
+            false;
+        if (didNavigate == true) {
           await Future.delayed(const Duration(milliseconds: 120));
           return;
         }
-        if (await _controller.canGoBack()) {
-          await _controller.goBack();
+        if (await (_controller?.canGoBack() ?? Future.value(false))) {
+          await _controller?.goBack();
         } else {
           SystemNavigator.pop();
         }
       },
       child: Scaffold(
-        backgroundColor: context.watch<SettingsService>().isDarkMode
-            ? Colors.black
-            : Colors.white,
+        // FIX 1: Use a solid color that matches the WebView background.
+        // When transparentBackground is false (see WebView settings), the
+        // WebView renders its own white/black background. Using black here
+        // matches the dark-mode WebView bg and prevents "flash of white".
+        backgroundColor: Colors.black,
         body: Stack(
           children: [
             SafeArea(
               child: Column(
                 children: [
+                  const _UpdateBanner(),
                   if (!_isOnOnboardingPage)
                     _BrandedTopBar(
                       onFocusControlTap: () =>
@@ -625,7 +531,325 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                             ),
                           );
                         }
-                        return WebViewWidget(controller: _controller);
+
+                        final settings = context.read<SettingsService>();
+
+                        return Stack(
+                          children: [
+                            InAppWebView(
+                              keepAlive: InstagramPreloader.keepAlive,
+                              initialUrlRequest: _isPreloaded
+                                  ? null
+                                  : URLRequest(
+                                      url: WebUri(
+                                        'https://www.instagram.com/accounts/login/',
+                                      ),
+                                    ),
+                              initialSettings: InAppWebViewSettings(
+                                userAgent: InjectionController.iOSUserAgent,
+                                mediaPlaybackRequiresUserGesture:
+                                    settings.blockAutoplay,
+                                useHybridComposition: true,
+                                cacheEnabled: true,
+                                cacheMode: CacheMode.LOAD_CACHE_ELSE_NETWORK,
+                                domStorageEnabled: true,
+                                databaseEnabled: true,
+                                hardwareAcceleration: true,
+                                // FIX 2: Set to false so the WebView renders
+                                // its own opaque background. When true + black
+                                // Scaffold, you see black until Instagram
+                                // finishes painting — looks like a freeze/hang.
+                                transparentBackground: false,
+                                safeBrowsingEnabled: false,
+                                disableContextMenu: false,
+                                supportZoom: false,
+                                allowsInlineMediaPlayback: true,
+                                verticalScrollBarEnabled: false,
+                                horizontalScrollBarEnabled: false,
+                              ),
+                              initialUserScripts: UnmodifiableListView([
+                                UserScript(
+                                  source:
+                                      'window.__fgBlockAutoplay = ${settings.blockAutoplay};',
+                                  injectionTime:
+                                      UserScriptInjectionTime.AT_DOCUMENT_START,
+                                ),
+                                UserScript(
+                                  source: kAutoplayBlockerJS,
+                                  injectionTime:
+                                      UserScriptInjectionTime.AT_DOCUMENT_START,
+                                ),
+                                UserScript(
+                                  source: kSpaNavigationMonitorScript,
+                                  injectionTime:
+                                      UserScriptInjectionTime.AT_DOCUMENT_START,
+                                ),
+                                UserScript(
+                                  source: kNativeFeelingScript,
+                                  injectionTime:
+                                      UserScriptInjectionTime.AT_DOCUMENT_START,
+                                ),
+                                if (settings.minimalModeEnabled)
+                                  UserScript(
+                                    source: kMinimalModeCssScript,
+                                    injectionTime: UserScriptInjectionTime
+                                        .AT_DOCUMENT_START,
+                                  )
+                                else ...[
+                                  if (settings.disableReelsEntirely)
+                                    UserScript(
+                                      source: kDisableReelsEntirelyCssScript,
+                                      injectionTime: UserScriptInjectionTime
+                                          .AT_DOCUMENT_START,
+                                    ),
+                                  if (settings.disableExploreEntirely)
+                                    UserScript(
+                                      source: kDisableExploreEntirelyCssScript,
+                                      injectionTime: UserScriptInjectionTime
+                                          .AT_DOCUMENT_START,
+                                    ),
+                                ],
+                                UserScript(
+                                  source: kHapticBridgeScript,
+                                  injectionTime:
+                                      UserScriptInjectionTime.AT_DOCUMENT_START,
+                                ),
+                              ]),
+                              pullToRefreshController: _pullToRefreshController,
+                              onWebViewCreated: (controller) async {
+                                _controller = controller;
+
+                                // Capture settingsService before async gap to avoid BuildContext warning
+                                final settingsService = context
+                                    .read<SettingsService>();
+                                final prefs =
+                                    await SharedPreferences.getInstance();
+                                _injectionManager = InjectionManager(
+                                  controller: controller,
+                                  prefs: prefs,
+                                  sessionManager: sm,
+                                );
+                                _injectionManager!.setSettingsService(
+                                  settingsService,
+                                );
+
+                                _registerJavaScriptHandlers(controller);
+
+                                // Start safety timeout — clears loading state
+                                // if onLoadStop never fires (e.g. network stall).
+                                _resetLoadingTimeout();
+                              },
+                              onLoadStart: (controller, url) {
+                                if (!mounted) return;
+                                final u = url?.toString() ?? '';
+                                final lower = u.toLowerCase();
+                                final isOnboardingUrl =
+                                    lower.contains('/accounts/login') ||
+                                    lower.contains('/accounts/emailsignup') ||
+                                    lower.contains('/accounts/signup') ||
+                                    lower.contains('/legal/') ||
+                                    lower.contains('/help/');
+                                setState(() {
+                                  _isLoading = true;
+                                  _lastMainFrameLoadStartedAt = DateTime.now();
+                                  _currentUrl = u;
+                                  _hasError = false;
+                                  _showSkeleton = !isOnboardingUrl;
+                                  // Update skeleton type based on the URL being loaded
+                                  _skeletonType = getSkeletonTypeFromUrl(u);
+                                });
+                                // FIX 4: Reset the safety timeout on each new load
+                                _resetLoadingTimeout();
+                              },
+                              onLoadStop: (controller, url) async {
+                                _pullToRefreshController.endRefreshing();
+                                if (!mounted) return;
+
+                                // FIX 4: Cancel the safety timeout — load completed normally
+                                _loadingTimeout?.cancel();
+
+                                final current = url?.toString() ?? '';
+                                setState(() {
+                                  _isLoading = false;
+                                  _currentUrl = current;
+                                  _hasError = false;
+                                });
+
+                                await _injectionManager
+                                    ?.runAllPostLoadInjections(current);
+
+                                await controller.evaluateJavascript(
+                                  source:
+                                      InjectionController.notificationBridgeJS,
+                                );
+
+                                final isIsolatedReel =
+                                    current.contains('/reel/') &&
+                                    !current.contains('/reels/');
+                                await _setIsolatedPlayer(isIsolatedReel);
+
+                                await controller.evaluateJavascript(
+                                  source: kNativeFeelingPostLoadScript,
+                                );
+
+                                await Future.delayed(
+                                  const Duration(milliseconds: 100),
+                                );
+                                if (mounted) {
+                                  setState(() => _showSkeleton = false);
+                                }
+                              },
+                              shouldOverrideUrlLoading:
+                                  (controller, navigationAction) async {
+                                    final url =
+                                        navigationAction.request.url
+                                            ?.toString() ??
+                                        '';
+                                    final uri = navigationAction.request.url;
+                                    final appSettings = context
+                                        .read<SettingsService>();
+
+                                    final minimal =
+                                        appSettings.minimalModeEnabled;
+                                    final disableReels =
+                                        appSettings.disableReelsEntirely ||
+                                        minimal;
+                                    final disableExplore =
+                                        appSettings.disableExploreEntirely ||
+                                        minimal;
+
+                                    bool isReelsUrl(String u) =>
+                                        u.contains('/reel/') ||
+                                        u.contains('/reels/');
+                                    bool isExploreUrl(String u) =>
+                                        u.contains('/explore/');
+
+                                    void showBlocked(String msg) {
+                                      if (!mounted) return;
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text(msg),
+                                          behavior: SnackBarBehavior.floating,
+                                          margin: const EdgeInsets.fromLTRB(
+                                            16,
+                                            0,
+                                            16,
+                                            20,
+                                          ),
+                                        ),
+                                      );
+                                    }
+
+                                    if (disableReels && isReelsUrl(url)) {
+                                      showBlocked('Reels are disabled');
+                                      return NavigationActionPolicy.CANCEL;
+                                    }
+
+                                    if (disableExplore && isExploreUrl(url)) {
+                                      showBlocked('Explore is disabled');
+                                      return NavigationActionPolicy.CANCEL;
+                                    }
+
+                                    if (uri != null &&
+                                        uri.host.contains('instagram.com') &&
+                                        (url.contains('accounts/settings') ||
+                                            url.contains('accounts/edit'))) {
+                                      return NavigationActionPolicy.ALLOW;
+                                    }
+
+                                    if (url.contains('/reels/') &&
+                                        !context
+                                            .read<SessionManager>()
+                                            .isSessionActive) {
+                                      setState(
+                                        () => _reelsBlockedOverlay = true,
+                                      );
+                                      return NavigationActionPolicy.CANCEL;
+                                    }
+
+                                    if (uri != null &&
+                                        !uri.host.contains('instagram.com') &&
+                                        !uri.host.contains('facebook.com') &&
+                                        !uri.host.contains(
+                                          'cdninstagram.com',
+                                        ) &&
+                                        !uri.host.contains('fbcdn.net')) {
+                                      await launchUrl(
+                                        uri,
+                                        mode: LaunchMode.externalApplication,
+                                      );
+                                      return NavigationActionPolicy.CANCEL;
+                                    }
+
+                                    final decision = NavigationGuard.evaluate(
+                                      url: url,
+                                    );
+                                    if (decision.blocked) {
+                                      if (url.contains('/reels/')) {
+                                        setState(
+                                          () => _reelsBlockedOverlay = true,
+                                        );
+                                        return NavigationActionPolicy.CANCEL;
+                                      }
+                                      return NavigationActionPolicy.CANCEL;
+                                    }
+
+                                    return NavigationActionPolicy.ALLOW;
+                                  },
+                              onReceivedError: (controller, request, error) {
+                                // FIX 5: Clear loading state on ANY main-frame
+                                // error, not just HOST_LOOKUP and TIMEOUT.
+                                // Previously, errors like CONNECTION_REFUSED or
+                                // FAILED_URL_BLOCKED left _isLoading = true
+                                // forever, causing the apparent "hang".
+                                if (request.isForMainFrame == true) {
+                                  _loadingTimeout?.cancel();
+                                  if (mounted) {
+                                    setState(() {
+                                      _isLoading = false;
+                                      _showSkeleton = false;
+                                      // Only show the full error screen for
+                                      // network-level failures, not blocked URLs
+                                      if (error.type ==
+                                              WebResourceErrorType
+                                                  .HOST_LOOKUP ||
+                                          error.type ==
+                                              WebResourceErrorType.TIMEOUT) {
+                                        _hasError = true;
+                                      }
+                                    });
+                                  }
+                                }
+                              },
+                            ),
+
+                            if (_showSkeleton)
+                              SkeletonScreen(skeletonType: _skeletonType),
+
+                            if (!_isOnOnboardingPage &&
+                                settings.minimalModeEnabled &&
+                                !_minimalModeBannerDismissed)
+                              Positioned(
+                                left: 12,
+                                right: 12,
+                                top: 12,
+                                child: _MinimalModeBanner(
+                                  onDismiss: () {
+                                    HapticFeedback.lightImpact();
+                                    setState(
+                                      () => _minimalModeBannerDismissed = true,
+                                    );
+                                  },
+                                ),
+                              ),
+
+                            // Instagram's native bottom nav is used directly.
+                            // NativeBottomNav overlay removed — faster, looks native,
+                            // and reels tap naturally hits shouldOverrideUrlLoading.
+                          ],
+                        );
                       },
                     ),
                   ),
@@ -636,17 +860,19 @@ class _MainWebViewPageState extends State<MainWebViewPage>
               _NoInternetScreen(
                 onRetry: () {
                   setState(() => _hasError = false);
-                  _controller.reload();
+                  _controller?.reload();
                 },
               ),
             if (_isLoading)
               Positioned(
-                top: 60 + MediaQuery.of(context).padding.top,
+                top:
+                    (_isOnOnboardingPage ? 0 : 60) +
+                    MediaQuery.of(context).padding.top,
                 left: 0,
                 right: 0,
                 child: const _InstagramGradientProgressBar(),
               ),
-            _EdgePanel(key: _edgePanelKey, controller: _controller),
+            _EdgePanel(key: _edgePanelKey),
 
             if (_reelsBlockedOverlay)
               Positioned.fill(
@@ -665,6 +891,9 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                         builder: (ctx, sm, _) {
                           final onCooldown = sm.isCooldownActive;
                           final quotaFinished = sm.dailyRemainingSeconds <= 0;
+                          final reelsHardDisabled =
+                              settings.disableReelsEntirely ||
+                              settings.minimalModeEnabled;
 
                           return Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -682,7 +911,9 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                               Text(
                                 quotaFinished
                                     ? 'Daily Quota Finished'
-                                    : 'Reels are Blocked',
+                                    : (reelsHardDisabled
+                                          ? 'Reels are Disabled'
+                                          : 'Reels are Blocked'),
                                 style: GoogleFonts.grandHotel(
                                   color: textMain,
                                   fontSize: 42,
@@ -692,7 +923,9 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                               Text(
                                 quotaFinished
                                     ? 'You have reached your planned limit for today. Step away and focus on what matters most.'
-                                    : 'Start a planned reel session to access the feed. Use Instagram for connection, not distraction.',
+                                    : (reelsHardDisabled
+                                          ? 'Reels are disabled in your settings.'
+                                          : 'Start a planned reel session to access the feed. Use Instagram for connection, not distraction.'),
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                   color: textDim,
@@ -714,6 +947,15 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                                 const SizedBox(height: 24),
                                 Text(
                                   'To adjust your daily limit, go to Settings > Guardrails.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: textSub,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ] else if (reelsHardDisabled) ...[
+                                Text(
+                                  'You can re-enable Reels in Settings > Focus.',
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
                                     color: textSub,
@@ -792,7 +1034,7 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                               TextButton(
                                 onPressed: () {
                                   setState(() => _reelsBlockedOverlay = false);
-                                  _controller.goBack();
+                                  _controller?.goBack();
                                 },
                                 child: Text(
                                   'Go Back',
@@ -812,11 +1054,223 @@ class _MainWebViewPageState extends State<MainWebViewPage>
       ),
     );
   }
+
+  void _registerJavaScriptHandlers(InAppWebViewController controller) {
+    controller.addJavaScriptHandler(
+      handlerName: 'FocusGramNotificationChannel',
+      callback: (args) {
+        if (!mounted) return null;
+        final settings = context.read<SettingsService>();
+        final msg = (args.isNotEmpty ? args[0] : '') as String;
+
+        if (DateTime.now().difference(_lastMainFrameLoadStartedAt).inSeconds <
+            6) {
+          return null;
+        }
+
+        String title = '';
+        String body = '';
+        bool isDM = false;
+
+        if (msg.contains(': ')) {
+          final parts = msg.split(': ');
+          title = parts[0];
+          body = parts.sublist(1).join(': ');
+          isDM =
+              title.toLowerCase().contains('message') ||
+              title.toLowerCase().contains('direct');
+        } else {
+          isDM = msg == 'DM';
+          title = isDM ? 'Instagram Message' : 'Instagram Notification';
+          body = isDM
+              ? 'Someone messaged you'
+              : 'New activity in notifications';
+        }
+
+        if (isDM && !settings.notifyDMs) return null;
+        if (!isDM && !settings.notifyActivity) return null;
+
+        try {
+          NotificationService().showNotification(
+            id: DateTime.now().millisecond,
+            title: title,
+            body: body,
+          );
+        } catch (_) {}
+        return null;
+      },
+    );
+
+    controller.addJavaScriptHandler(
+      handlerName: 'FocusGramBlocked',
+      callback: (args) {
+        if (!mounted) return null;
+        final what = (args.isNotEmpty ? args[0] : '') as String? ?? '';
+        final text = what == 'reels'
+            ? 'Reels are disabled'
+            : (what == 'explore' ? 'Explore is disabled' : 'Content disabled');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(text),
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+          ),
+        );
+        return null;
+      },
+    );
+
+    controller.addJavaScriptHandler(
+      handlerName: 'FocusGramShareChannel',
+      callback: (args) {
+        if (!mounted) return;
+        try {
+          final data = (args.isNotEmpty ? args[0] : '') as String;
+          String url = data;
+          try {
+            final match = RegExp(r'"url":"([^"]+)"').firstMatch(data);
+            if (match != null) url = match.group(1) ?? data;
+          } catch (_) {}
+          Clipboard.setData(ClipboardData(text: url));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Link copied (tracking removed)'),
+              backgroundColor: Color(0xFF1A1A2E),
+              behavior: SnackBarBehavior.floating,
+              margin: EdgeInsets.fromLTRB(16, 0, 16, 20),
+            ),
+          );
+        } catch (_) {}
+      },
+    );
+
+    controller.addJavaScriptHandler(
+      handlerName: 'FocusGramThemeChannel',
+      callback: (args) {
+        final value = (args.isNotEmpty ? args[0] : '') as String;
+        context.read<SettingsService>().setDarkMode(value == 'dark');
+      },
+    );
+
+    controller.addJavaScriptHandler(
+      handlerName: 'Haptic',
+      callback: (args) {
+        HapticFeedback.lightImpact();
+        return null;
+      },
+    );
+
+    controller.addJavaScriptHandler(
+      handlerName: 'UrlChange',
+      callback: (args) async {
+        final url = (args.isNotEmpty ? args[0] : '') as String? ?? '';
+        await _injectionManager?.runAllPostLoadInjections(url);
+        if (!mounted) return;
+        setState(() {
+          _currentUrl = url;
+          // SPA navigations never fire onLoadStop — clear skeleton here
+          // so it doesn't stay visible forever (e.g. when navigating to DMs)
+          _showSkeleton = false;
+          _isLoading = false;
+        });
+
+        final settings = context.read<SettingsService>();
+        final minimal = settings.minimalModeEnabled;
+        final disableReels = settings.disableReelsEntirely || minimal;
+        final disableExplore = settings.disableExploreEntirely || minimal;
+
+        final path = Uri.tryParse(url)?.path ?? url;
+        final isReels = path.startsWith('/reels') || path.startsWith('/reel/');
+        final isExplore = path.startsWith('/explore');
+
+        // Block reel navigation that slipped through (e.g. DM-embedded reels)
+        if (disableReels && isReels) {
+          setState(() => _reelsBlockedOverlay = true);
+          await _controller?.goBack();
+          return;
+        }
+
+        if (_controller != null) {
+          if (disableExplore && isExplore) {
+            await _controller!.loadUrl(
+              urlRequest: URLRequest(url: WebUri('https://www.instagram.com/')),
+            );
+          }
+        }
+
+        // Update isolated player flag for DM-embedded reels
+        final isIsolatedReel =
+            path.contains('/reel/') && !path.startsWith('/reels');
+        await _setIsolatedPlayer(isIsolatedReel);
+
+        return null;
+      },
+    );
+  }
+}
+
+// ─── Supporting widgets (unchanged) ──────────────────────────────────────────
+
+class _MinimalModeBanner extends StatelessWidget {
+  final VoidCallback onDismiss;
+
+  const _MinimalModeBanner({required this.onDismiss});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: (isDark ? Colors.black : Colors.white).withValues(alpha: 0.92),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isDark ? Colors.white12 : Colors.black12,
+            width: 0.5,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.12),
+              blurRadius: 18,
+              spreadRadius: 2,
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Minimal mode — Feed & DMs only 🎯',
+                style: TextStyle(
+                  color: isDark ? Colors.white : Colors.black,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+            InkWell(
+              onTap: onDismiss,
+              borderRadius: BorderRadius.circular(20),
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(
+                  Icons.close,
+                  size: 18,
+                  color: isDark ? Colors.white70 : Colors.black54,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _EdgePanel extends StatefulWidget {
-  final WebViewController controller;
-  const _EdgePanel({super.key, required this.controller});
+  const _EdgePanel({super.key});
   @override
   State<_EdgePanel> createState() => _EdgePanelState();
 }
@@ -838,6 +1292,8 @@ class _EdgePanelState extends State<_EdgePanel> {
 
     final settings = context.watch<SettingsService>();
     final isDark = settings.isDarkMode;
+    final reelsHardDisabled =
+        settings.disableReelsEntirely || settings.minimalModeEnabled;
     final panelBg = isDark ? const Color(0xFF121212) : Colors.white;
     final textDim = isDark ? Colors.white70 : Colors.black87;
     final textSub = isDark ? Colors.white30 : Colors.black38;
@@ -951,7 +1407,9 @@ class _EdgePanelState extends State<_EdgePanel> {
                   isWarning: sm.isCooldownActive,
                   isDark: isDark,
                 ),
-                if (!sm.isSessionActive && sm.dailyRemainingSeconds > 0) ...[
+                if (!reelsHardDisabled &&
+                    !sm.isSessionActive &&
+                    sm.dailyRemainingSeconds > 0) ...[
                   const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
@@ -977,6 +1435,12 @@ class _EdgePanelState extends State<_EdgePanel> {
                         ),
                       ),
                     ),
+                  ),
+                ] else if (reelsHardDisabled) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    'Reels disabled in settings',
+                    style: TextStyle(color: textSub, fontSize: 11),
                   ),
                 ],
                 const SizedBox(height: 32),
@@ -1154,6 +1618,80 @@ class _InstagramGradientProgressBar extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _UpdateBanner extends StatelessWidget {
+  const _UpdateBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<UpdateCheckerService>(
+      builder: (context, update, _) {
+        if (!update.hasUpdate) return const SizedBox.shrink();
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Colors.blue.shade700, Colors.blue.shade900],
+            ),
+          ),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.system_update_alt,
+                color: Colors.white,
+                size: 18,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Update Available: ${update.updateInfo?.latestVersion ?? ''}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    InkWell(
+                      onTap: () {
+                        final url = update.updateInfo?.releaseUrl;
+                        if (url != null && url.isNotEmpty) {
+                          launchUrl(
+                            Uri.parse(url),
+                            mode: LaunchMode.externalApplication,
+                          );
+                        }
+                      },
+                      child: const Text(
+                        'Download on GitHub →',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                onPressed: () => update.dismissUpdate(),
+                icon: const Icon(Icons.close, color: Colors.white70, size: 18),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

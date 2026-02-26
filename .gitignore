@@ -12,6 +12,8 @@
 .swiftpm/
 migrate_working_dir/
 PRD.md 
+.agents/
+TODO.md
 
 # IntelliJ related
 *.iml
@@ -25,6 +27,7 @@ PRD.md
 #.vscode/
 RELEASE_GUIDE.md
 android/key.properties
+android/fdroid-config.properties
 android/app/*.jks
 
 # Flutter/Dart/Pub related
@@ -47,3 +50,5 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+.flutter/

@@ -1,17 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/session_manager.dart';
 import '../services/settings_service.dart';
 import '../services/focusgram_router.dart';
+import '../features/screen_time/screen_time_screen.dart';
 import 'guardrails_page.dart';
-import 'about_page.dart';
+
+// ─── Main Settings Page ───────────────────────────────────────────────────────
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // Watching services ensures the UI rebuilds when settings or session state change.
     final sm = context.watch<SessionManager>();
     final settings = context.watch<SettingsService>();
     final isDark = settings.isDarkMode;
@@ -19,7 +23,7 @@ class SettingsPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text(
-          'FocusGram',
+          'Settings',
           style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
         ),
         centerTitle: true,
@@ -30,48 +34,110 @@ class SettingsPage extends StatelessWidget {
       ),
       body: ListView(
         children: [
-          // ── Stats row ───────────────────────────────────────────
           _buildStatsRow(sm),
 
-          // ── Settings Subsections ──────────────────────────────
-          _buildSettingsTile(
-            context: context,
-            title: 'Guardrails',
-            subtitle: 'Daily limit, cooldown, and scheduled blocking',
-            icon: Icons.shield_outlined,
-            destination: const GuardrailsPage(),
+          const _SectionHeader(title: 'FOCUS & BLOCKING'),
+          _SubmoduleTile(
+            icon: Icons.block_rounded,
+            iconColor: Colors.redAccent,
+            title: 'Focus Mode',
+            subtitle: settings.minimalModeEnabled
+                ? 'Minimal mode on'
+                : settings.disableReelsEntirely
+                ? 'Reels fully disabled'
+                : 'Blocking, friction, media',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const FocusSettingsPage()),
+            ),
           ),
-          _buildSettingsTile(
-            context: context,
-            title: 'Distraction Management',
-            subtitle: 'Blur explore and reel controls',
-            icon: Icons.visibility_off_outlined,
-            destination: const _DistractionSettingsPage(),
+          _SubmoduleTile(
+            icon: Icons.timer_outlined,
+            iconColor: Colors.blueAccent,
+            title: 'Time Control & Guardrails',
+            subtitle: 'Daily limit, cooldown, scheduled blocking',
+            enabled:
+                !(settings.disableReelsEntirely || settings.minimalModeEnabled),
+            disabledSubtitle: 'Reels are fully disabled',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const GuardrailsPage()),
+            ),
           ),
-          _buildSettingsTile(
-            context: context,
-            title: 'Extras',
-            subtitle: 'Ghost mode, text selection and experimental features',
-            icon: Icons.extension_outlined,
-            destination: const _ExtrasSettingsPage(),
+
+          const _SectionHeader(title: 'APPEARANCE'),
+          _SubmoduleTile(
+            icon: Icons.palette_outlined,
+            iconColor: Colors.purpleAccent,
+            title: 'Appearance',
+            subtitle: settings.grayscaleEnabled
+                ? 'Grayscale on'
+                : settings.grayscaleScheduleEnabled
+                ? 'Grayscale scheduled at ${settings.grayscaleScheduleTime}'
+                : 'Theme, grayscale',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const AppearancePage()),
+            ),
           ),
-          _buildSettingsTile(
-            context: context,
-            title: 'Notifications',
-            subtitle: 'Manage message and activity alerts',
-            icon: Icons.notifications_active_outlined,
-            destination: const _NotificationSettingsPage(),
+
+          const _SectionHeader(title: 'PRIVACY & NOTIFICATIONS'),
+          _SubmoduleTile(
+            icon: Icons.lock_outline,
+            iconColor: Colors.tealAccent,
+            title: 'Privacy & Notifications',
+            subtitle: 'Link sanitization, session end alerts',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const PrivacyNotificationsPage(),
+              ),
+            ),
           ),
-          _buildSettingsTile(
-            context: context,
-            title: 'About',
-            subtitle: 'Developer info and GitHub',
-            icon: Icons.info_outline,
-            destination: const AboutPage(),
+
+          const _SectionHeader(title: 'STATS & HISTORY'),
+          _SubmoduleTile(
+            icon: Icons.bar_chart_rounded,
+            iconColor: Colors.greenAccent,
+            title: 'Screen Time Dashboard',
+            subtitle: 'Daily & weekly usage',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ScreenTimeScreen()),
+            ),
+          ),
+
+          const _SectionHeader(title: 'ABOUT'),
+          FutureBuilder<PackageInfo>(
+            future: PackageInfo.fromPlatform(),
+            builder: (context, snapshot) => ListTile(
+              title: const Text('Version'),
+              trailing: Text(
+                snapshot.data?.version ?? '…',
+                style: const TextStyle(color: Colors.grey),
+              ),
+            ),
+          ),
+          ListTile(
+            title: const Text('GitHub'),
+            trailing: const Icon(Icons.open_in_new, size: 14),
+            onTap: () => launchUrl(
+              Uri.parse('https://github.com/Ujwal223/FocusGram'),
+              mode: LaunchMode.externalApplication,
+            ),
+          ),
+          ListTile(
+            title: const Text('Legal Disclaimer'),
+            trailing: const Icon(Icons.info_outline, size: 14),
+            onTap: () => _showLegalDisclaimer(context),
+          ),
+          ListTile(
+            title: const Text('Open Source Licenses'),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 14),
+            onTap: () => showLicensePage(context: context),
           ),
 
           const Divider(height: 40, indent: 16, endIndent: 16),
-
           ListTile(
             leading: const Icon(
               Icons.settings_outlined,
@@ -88,17 +154,15 @@ class SettingsPage extends StatelessWidget {
               size: 14,
             ),
             onTap: () {
-              // Bug 6 fix: navigate inside the WebView instead of external browser
               Navigator.pop(context);
               FocusGramRouter.pendingUrl.value =
                   'https://www.instagram.com/accounts/settings/?entrypoint=profile';
             },
           ),
-
           const SizedBox(height: 40),
           Center(
             child: Text(
-              'FocusGram · Built for discipline',
+              'FocusGram · Built with 💖 by Ujwal Chapagain',
               style: TextStyle(
                 color: isDark ? Colors.white12 : Colors.black12,
                 fontSize: 12,
@@ -107,25 +171,6 @@ class SettingsPage extends StatelessWidget {
           ),
           const SizedBox(height: 24),
         ],
-      ),
-    );
-  }
-
-  Widget _buildSettingsTile({
-    required BuildContext context,
-    required String title,
-    required String subtitle,
-    required IconData icon,
-    required Widget destination,
-  }) {
-    return ListTile(
-      leading: Icon(icon, color: Colors.blue),
-      title: Text(title),
-      subtitle: Text(subtitle, style: const TextStyle(fontSize: 13)),
-      trailing: const Icon(Icons.arrow_forward_ios, size: 14),
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => destination),
       ),
     );
   }
@@ -160,78 +205,47 @@ class SettingsPage extends StatelessWidget {
     );
   }
 
-  Widget _statCell(String label, String value, Color color) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: TextStyle(
-            color: color,
-            fontSize: 22,
-            fontWeight: FontWeight.bold,
-          ),
+  Widget _statCell(String label, String value, Color color) => Column(
+    children: [
+      Text(
+        value,
+        style: TextStyle(
+          color: color,
+          fontSize: 22,
+          fontWeight: FontWeight.bold,
         ),
-        const SizedBox(height: 4),
-        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 11)),
-      ],
-    );
-  }
+      ),
+      const SizedBox(height: 4),
+      Text(label, style: const TextStyle(color: Colors.grey, fontSize: 11)),
+    ],
+  );
 
   Widget _dividerCell() => Container(
     width: 1,
     height: 36,
     color: Colors.blue.withValues(alpha: 0.1),
   );
-}
 
-class _DistractionSettingsPage extends StatelessWidget {
-  const _DistractionSettingsPage();
-
-  @override
-  Widget build(BuildContext context) {
-    final settings = context.watch<SettingsService>();
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'Distraction Management',
-          style: TextStyle(fontSize: 17),
-        ),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, size: 18),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
-      body: ListView(
-        children: [
-          SwitchListTile(
-            title: const Text('Blur Posts and Explore'),
-            subtitle: const Text(
-              'Blurs images and videos on the home feed and Explore page',
-              style: TextStyle(fontSize: 13),
-            ),
-            value: settings.blurExplore,
-            onChanged: (v) => settings.setBlurExplore(v),
-            activeThumbColor: Colors.blue,
+  void _showLegalDisclaimer(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Legal Disclaimer'),
+        content: const SingleChildScrollView(
+          child: Text(
+            'FocusGram is an independent, free, and open-source productivity tool '
+            'licensed under AGPL-3.0. Not affiliated with Meta or Instagram.\n\n'
+            'How it works: FocusGram embeds a standard Android System WebView that loads instagram.com. \n'
+            'All user-facing features are implemented exclusively via client-side modifications and are never transmitted to or processed by Meta servers.\n\n'
+            'All features are client-side only. We do not use private APIs, '
+            'intercept credentials, scrape, harvest or collect any user data.',
+            style: TextStyle(fontSize: 13, height: 1.4),
           ),
-          SwitchListTile(
-            title: const Text('Mindfulness Gate'),
-            subtitle: const Text(
-              'Show breathing exercise before opening',
-              style: TextStyle(fontSize: 13),
-            ),
-            value: settings.showBreathGate,
-            onChanged: (v) => settings.setShowBreathGate(v),
-            activeThumbColor: Colors.blue,
-          ),
-          SwitchListTile(
-            title: const Text('Strict Changes (Word Challenge)'),
-            subtitle: const Text(
-              'Requires 15-word typing challenge before lax changes',
-              style: TextStyle(fontSize: 13),
-            ),
-            value: settings.requireWordChallenge,
-            onChanged: (v) => settings.setRequireWordChallenge(v),
-            activeThumbColor: Colors.blue,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
           ),
         ],
       ),
@@ -239,209 +253,339 @@ class _DistractionSettingsPage extends StatelessWidget {
   }
 }
 
-class _FrictionSliderTile extends StatefulWidget {
+// ─── Focus Settings ───────────────────────────────────────────────────────────
+
+class FocusSettingsPage extends StatelessWidget {
+  const FocusSettingsPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = context.watch<SettingsService>();
+    return Scaffold(
+      appBar: _subAppBar(context, 'Focus Mode'),
+      body: ListView(
+        children: [
+          const _SectionHeader(title: 'BLOCKING'),
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.blue.withValues(alpha: 0.07),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.blue.withValues(alpha: 0.12)),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.info_outline, size: 14, color: Colors.blueAccent),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Blocking changes apply immediately. The page reloads automatically in the background.',
+                    style: TextStyle(fontSize: 11, color: Colors.blueAccent),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          _SwitchTile(
+            title: 'Minimal Mode',
+            subtitle:
+                'Feed and DMs only — blocks Reels, Explore, Stories, Suggested',
+            value: settings.minimalModeEnabled,
+            onChanged: (v) async {
+              await settings.setMinimalModeEnabled(v);
+              HapticFeedback.selectionClick();
+            },
+          ),
+          _SwitchTile(
+            title: 'Disable Reels Entirely',
+            subtitle: 'Block all Reels with no session option',
+            value: settings.disableReelsEntirely,
+            enabled: !settings.minimalModeEnabled,
+            disabledSubtitle: 'Included in Minimal Mode',
+            onChanged: (v) => settings.setDisableReelsEntirely(v),
+          ),
+
+          const _SectionHeader(title: 'FRICTION'),
+          _SwitchTile(
+            title: 'Mindfulness Gate',
+            subtitle: 'Breath / intention screen before opening Instagram',
+            value: settings.showBreathGate,
+            onChanged: (v) => settings.setShowBreathGate(v),
+          ),
+          _SwitchTile(
+            title: 'Strict Mode (Word Challenge)',
+            subtitle: 'Must type a phrase before starting a Reel session',
+            value: settings.requireWordChallenge,
+            onChanged: (v) => settings.setRequireWordChallenge(v),
+          ),
+          const _SectionHeader(title: 'MEDIA'),
+          _SwitchTile(
+            title: 'Block Autoplay Videos',
+            subtitle: 'Videos won\'t play until you tap them',
+            value: settings.blockAutoplay,
+            onChanged: (v) => settings.setBlockAutoplay(v),
+          ),
+          _SwitchTile(
+            title: 'Blur Feed & Explore',
+            subtitle: 'Blurs post thumbnails until tapped',
+            value: settings.blurExplore,
+            onChanged: (v) => settings.setBlurExplore(v),
+          ),
+
+          const SizedBox(height: 40),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Appearance ───────────────────────────────────────────────────────────────
+
+class AppearancePage extends StatelessWidget {
+  const AppearancePage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = context.watch<SettingsService>();
+    return Scaffold(
+      appBar: _subAppBar(context, 'Appearance'),
+      body: ListView(
+        children: [
+          const _SectionHeader(title: 'DISPLAY'),
+          _SwitchTile(
+            title: 'Grayscale Mode',
+            subtitle:
+                'Makes Instagram black & white — reduces dopamine response',
+            value: settings.grayscaleEnabled,
+            onChanged: (v) => settings.setGrayscaleEnabled(v),
+          ),
+          const _SectionHeader(title: 'GRAYSCALE SCHEDULE'),
+          _SwitchTile(
+            title: 'Schedule Grayscale',
+            subtitle: 'Auto-enable grayscale at a set time each day',
+            value: settings.grayscaleScheduleEnabled,
+            onChanged: (v) => settings.setGrayscaleScheduleEnabled(v),
+          ),
+          if (settings.grayscaleScheduleEnabled)
+            ListTile(
+              leading: const Icon(
+                Icons.access_time,
+                color: Colors.blueAccent,
+                size: 20,
+              ),
+              title: const Text('Start Time'),
+              subtitle: const Text(
+                'Grayscale activates at this time and stays on until midnight',
+                style: TextStyle(fontSize: 12),
+              ),
+              trailing: Text(
+                settings.grayscaleScheduleTime,
+                style: const TextStyle(
+                  color: Colors.blueAccent,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              onTap: () async {
+                final parts = settings.grayscaleScheduleTime.split(':');
+                final time = await showTimePicker(
+                  context: context,
+                  initialTime: TimeOfDay(
+                    hour: int.parse(parts[0]),
+                    minute: int.parse(parts[1]),
+                  ),
+                );
+                if (time != null) {
+                  settings.setGrayscaleScheduleTime(
+                    '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
+                  );
+                }
+              },
+            ),
+          if (settings.grayscaleScheduleEnabled)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                settings.isGrayscaleActiveNow
+                    ? '● Grayscale is active now'
+                    : '○ Grayscale will activate at ${settings.grayscaleScheduleTime}',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: settings.isGrayscaleActiveNow
+                      ? Colors.greenAccent
+                      : Colors.grey,
+                ),
+              ),
+            ),
+          const SizedBox(height: 40),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Privacy & Notifications ──────────────────────────────────────────────────
+
+class PrivacyNotificationsPage extends StatelessWidget {
+  const PrivacyNotificationsPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = context.watch<SettingsService>();
+    return Scaffold(
+      appBar: _subAppBar(context, 'Privacy & Notifications'),
+      body: ListView(
+        children: [
+          const _SectionHeader(title: 'NOTIFICATIONS'),
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.blue.withValues(alpha: 0.07),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.blue.withValues(alpha: 0.15)),
+            ),
+            child: const Text(
+              'FocusGram can show notifications when your Focus session ends. '
+              'Instagram\'s own notification system handles background alerts.',
+              style: TextStyle(fontSize: 12, height: 1.5),
+            ),
+          ),
+          _SwitchTile(
+            title: 'Session End Notification',
+            subtitle: 'Notify when Focus session time is up',
+            value: settings.notifySessionEnd,
+            onChanged: (v) => settings.setNotifySessionEnd(v),
+          ),
+
+          const _SectionHeader(title: 'INSTA NOTIFICATIONS'),
+          _SwitchTile(
+            title: 'DM Notifications',
+            subtitle: 'Show notification when someone messages you',
+            value: settings.notifyDMs,
+            onChanged: (v) => settings.setNotifyDMs(v),
+          ),
+          _SwitchTile(
+            title: 'Activity Notifications',
+            subtitle: 'Likes, comments, follows and other activity',
+            value: settings.notifyActivity,
+            onChanged: (v) => settings.setNotifyActivity(v),
+          ),
+
+          const SizedBox(height: 40),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Shared widgets ───────────────────────────────────────────────────────────
+
+PreferredSizeWidget _subAppBar(BuildContext context, String title) => AppBar(
+  title: Text(
+    title,
+    style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+  ),
+  centerTitle: true,
+  leading: IconButton(
+    icon: const Icon(Icons.arrow_back_ios_new, size: 18),
+    onPressed: () => Navigator.pop(context),
+  ),
+);
+
+class _SubmoduleTile extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
   final String title;
   final String subtitle;
-  final double value;
-  final double min;
-  final double max;
-  final int divisor;
-  final String warningText;
-  final Future<void> Function(double) onConfirmed;
+  final String? disabledSubtitle;
+  final bool enabled;
+  final VoidCallback onTap;
 
-  const _FrictionSliderTile({
+  const _SubmoduleTile({
+    required this.icon,
+    required this.iconColor,
     required this.title,
     required this.subtitle,
-    required this.value,
-    required this.min,
-    required this.max,
-    required this.divisor,
-    required this.warningText,
-    required this.onConfirmed,
+    this.disabledSubtitle,
+    this.enabled = true,
+    required this.onTap,
   });
 
   @override
-  State<_FrictionSliderTile> createState() => _FrictionSliderTileState();
-}
-
-class _FrictionSliderTileState extends State<_FrictionSliderTile> {
-  late double _draftValue;
-  bool _pendingConfirm = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _draftValue = widget.value;
-  }
-
-  @override
-  void didUpdateWidget(_FrictionSliderTile old) {
-    super.didUpdateWidget(old);
-    // Keep draft in sync if external value changed (e.g. after reset)
-    if (!_pendingConfirm) _draftValue = widget.value;
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final divisions = ((widget.max - widget.min) / widget.divisor).round();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        ListTile(
-          title: Text(widget.title),
-          subtitle: Text(
-            '${_draftValue.toInt()} min',
-            style: const TextStyle(fontSize: 13),
-          ),
-          trailing: _pendingConfirm
-              ? Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextButton(
-                      onPressed: () {
-                        setState(() {
-                          _draftValue = widget.value;
-                          _pendingConfirm = false;
-                        });
-                      },
-                      child: const Text('Cancel'),
-                    ),
-                    ElevatedButton(
-                      onPressed: () async {
-                        setState(() => _pendingConfirm = false);
-                        await widget.onConfirmed(_draftValue);
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      child: const Text(
-                        'Apply',
-                        style: TextStyle(fontSize: 12),
-                      ),
-                    ),
-                  ],
-                )
-              : null,
+    return ListTile(
+      leading: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: (enabled ? iconColor : Colors.grey).withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(10),
         ),
-        if (_pendingConfirm)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Text(
-              widget.warningText,
-              style: TextStyle(
-                color: Colors.orangeAccent.withValues(alpha: 0.8),
-                fontSize: 12,
-              ),
-            ),
-          ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0),
-          child: Slider(
-            value: _draftValue,
-            min: widget.min,
-            max: widget.max,
-            divisions: divisions,
-            activeColor: _pendingConfirm ? Colors.orange : Colors.blue,
-            onChanged: (v) {
-              setState(() {
-                _draftValue = v;
-                // Show friction warning when moving to a larger (more permissive) value
-                _pendingConfirm = v > widget.value;
-              });
-            },
-            onChangeEnd: (v) {
-              // If decreasing (more strict), apply immediately without dialog
-              if (v <= widget.value) {
-                widget.onConfirmed(v);
-                setState(() => _pendingConfirm = false);
-              }
-            },
-          ),
+        child: Icon(icon, color: enabled ? iconColor : Colors.grey, size: 20),
+      ),
+      title: Text(
+        title,
+        style: TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w500,
+          color: enabled ? null : Colors.grey,
         ),
-      ],
+      ),
+      subtitle: Text(
+        enabled ? subtitle : (disabledSubtitle ?? subtitle),
+        style: const TextStyle(fontSize: 12),
+      ),
+      trailing: const Icon(
+        Icons.arrow_forward_ios,
+        size: 14,
+        color: Colors.grey,
+      ),
+      onTap: enabled ? onTap : null,
     );
   }
 }
 
-class _ExtrasSettingsPage extends StatelessWidget {
-  const _ExtrasSettingsPage();
-
-  @override
-  Widget build(BuildContext context) {
-    final settings = context.watch<SettingsService>();
-    final isDark = settings.isDarkMode;
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Extras', style: TextStyle(fontSize: 17)),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, size: 18),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
-      body: ListView(
-        children: [
-          const _SettingsSectionHeader(title: 'EXPERIMENT'),
-          ListTile(
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const _GhostModeSettingsPage()),
-            ),
-            leading: Icon(
-              Icons.visibility_off_outlined,
-              color: isDark ? Colors.white70 : Colors.black87,
-            ),
-            title: const Text('Ghost Mode'),
-            subtitle: Text(
-              settings.anyGhostModeEnabled
-                  ? 'Active — some receipts are hidden'
-                  : 'Disabled',
-              style: TextStyle(
-                color: settings.anyGhostModeEnabled
-                    ? Colors.blue
-                    : (isDark ? Colors.white38 : Colors.black38),
-                fontSize: 13,
-              ),
-            ),
-            trailing: const Icon(Icons.chevron_right),
-          ),
-          SwitchListTile(
-            title: const Text('Enable Text Selection'),
-            subtitle: const Text(
-              'Allows copying text from posts and captions',
-              style: TextStyle(fontSize: 13),
-            ),
-            value: settings.enableTextSelection,
-            onChanged: (v) => settings.setEnableTextSelection(v),
-            activeThumbColor: Colors.blue,
-          ),
-          const SizedBox(height: 24),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              'Experimental features: Some features may break if Instagram updates their website.',
-              style: TextStyle(
-                color: isDark ? Colors.white24 : Colors.black26,
-                fontSize: 11,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SettingsSectionHeader extends StatelessWidget {
+class _SwitchTile extends StatelessWidget {
   final String title;
-  const _SettingsSectionHeader({required this.title});
+  final String? subtitle;
+  final String? disabledSubtitle;
+  final bool value;
+  final bool enabled;
+  final ValueChanged<bool> onChanged;
+
+  const _SwitchTile({
+    required this.title,
+    this.subtitle,
+    this.disabledSubtitle,
+    required this.value,
+    this.enabled = true,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SwitchListTile(
+      title: Text(
+        title,
+        style: TextStyle(fontSize: 15, color: enabled ? null : Colors.grey),
+      ),
+      subtitle: (subtitle != null || (!enabled && disabledSubtitle != null))
+          ? Text(
+              enabled ? (subtitle ?? '') : (disabledSubtitle ?? subtitle ?? ''),
+              style: const TextStyle(fontSize: 12),
+            )
+          : null,
+      value: value,
+      onChanged: enabled ? onChanged : null,
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  const _SectionHeader({required this.title});
 
   @override
   Widget build(BuildContext context) {
@@ -450,251 +594,11 @@ class _SettingsSectionHeader extends StatelessWidget {
       child: Text(
         title,
         style: const TextStyle(
-          color: Colors.blue,
+          color: Colors.grey,
           fontSize: 11,
           fontWeight: FontWeight.bold,
           letterSpacing: 1.2,
         ),
-      ),
-    );
-  }
-}
-
-class _GhostModeSettingsPage extends StatelessWidget {
-  const _GhostModeSettingsPage();
-
-  @override
-  Widget build(BuildContext context) {
-    final settings = context.watch<SettingsService>();
-    final isDark = settings.isDarkMode;
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Ghost Mode', style: TextStyle(fontSize: 17)),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, size: 18),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
-      body: ListView(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-            child: Text(
-              'Control which activity receipts are hidden from other users. ',
-              style: TextStyle(
-                color: isDark ? Colors.white38 : Colors.black45,
-                fontSize: 12,
-                height: 1.4,
-              ),
-            ),
-          ),
-          const _SettingsSectionHeader(title: 'MESSAGING'),
-          SwitchListTile(
-            secondary: Icon(
-              Icons.keyboard_outlined,
-              color: isDark ? Colors.white54 : Colors.black54,
-            ),
-            title: const Text('Hide typing indicator'),
-            subtitle: Text(
-              "Others won't see the 'typing...' status when you write a message",
-              style: TextStyle(
-                color: isDark ? Colors.white38 : Colors.black45,
-                fontSize: 12,
-              ),
-            ),
-            value: settings.ghostTyping,
-            onChanged: (v) => settings.setGhostTyping(v),
-            activeThumbColor: Colors.blue,
-          ),
-          Stack(
-            children: [
-              AbsorbPointer(
-                child: Opacity(
-                  opacity: 0.5,
-                  child: SwitchListTile(
-                    secondary: Icon(
-                      Icons.done_all_rounded,
-                      color: isDark ? Colors.white54 : Colors.black54,
-                    ),
-                    title: const Text('Hide seen status'),
-                    subtitle: Text(
-                      "Others won't see when you've read their DMs",
-                      style: TextStyle(
-                        color: isDark ? Colors.white38 : Colors.black45,
-                        fontSize: 12,
-                      ),
-                    ),
-                    value: settings.ghostSeen,
-                    onChanged: (v) => settings.setGhostSeen(v),
-                    activeThumbColor: Colors.blue,
-                  ),
-                ),
-              ),
-              Positioned(
-                right: 16,
-                top: 0,
-                bottom: 0,
-                child: Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(4),
-                      border: Border.all(color: Colors.blue, width: 0.5),
-                    ),
-                    child: const Text(
-                      'COMING SOON',
-                      style: TextStyle(
-                        color: Colors.blue,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          SwitchListTile(
-            secondary: Icon(
-              Icons.image_outlined,
-              color: isDark ? Colors.white54 : Colors.black54,
-            ),
-            title: const Text('Hide DM photo seen status'),
-            subtitle: Text(
-              'Prevents Instagram from marking photos/videos in DMs as viewed',
-              style: TextStyle(
-                color: isDark ? Colors.white38 : Colors.black45,
-                fontSize: 12,
-              ),
-            ),
-            value: settings.ghostDmPhotos,
-            onChanged: (v) => settings.setGhostDmPhotos(v),
-            activeThumbColor: Colors.blue,
-          ),
-          const _SettingsSectionHeader(title: 'STORIES'),
-          SwitchListTile(
-            secondary: Icon(
-              Icons.auto_stories_outlined,
-              color: isDark ? Colors.white54 : Colors.black54,
-            ),
-            title: const Text('Story ghost mode'),
-            subtitle: Text(
-              'Watch stories without appearing in the viewer list',
-              style: TextStyle(
-                color: isDark ? Colors.white38 : Colors.black45,
-                fontSize: 12,
-              ),
-            ),
-            value: settings.ghostStories,
-            onChanged: (v) => settings.setGhostStories(v),
-            activeThumbColor: Colors.blue,
-          ),
-          const SizedBox(height: 32),
-        ],
-      ),
-    );
-  }
-}
-
-class _NotificationSettingsPage extends StatelessWidget {
-  const _NotificationSettingsPage();
-
-  @override
-  Widget build(BuildContext context) {
-    final settings = context.watch<SettingsService>();
-    final isDark = settings.isDarkMode;
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Notifications', style: TextStyle(fontSize: 17)),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, size: 18),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
-      body: ListView(
-        children: [
-          Container(
-            margin: const EdgeInsets.all(16),
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.blue.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
-            ),
-            child: Column(
-              children: [
-                const Row(
-                  children: [
-                    Icon(
-                      Icons.info_outline,
-                      color: Colors.blueAccent,
-                      size: 20,
-                    ),
-                    SizedBox(width: 12),
-                    Text(
-                      'Important Note',
-                      style: TextStyle(
-                        color: Colors.blueAccent,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'FocusGram monitors your session locally. For notifications to work, the app must be running in the background (minimized). If you force-close or swipe away the app from your task switcher, notifications will stop until you reopen it.',
-                  style: TextStyle(
-                    color: isDark ? Colors.white70 : Colors.black87,
-                    fontSize: 13,
-                    height: 1.4,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          SwitchListTile(
-            secondary: const Icon(Icons.mail_outline, color: Colors.blueAccent),
-            title: const Text('Direct Messages'),
-            subtitle: const Text(
-              'Notify when you receive a new DM',
-              style: TextStyle(fontSize: 13),
-            ),
-            value: settings.notifyDMs,
-            onChanged: (v) => settings.setNotifyDMs(v),
-            activeThumbColor: Colors.blue,
-          ),
-          SwitchListTile(
-            secondary: const Icon(
-              Icons.favorite_border,
-              color: Colors.blueAccent,
-            ),
-            title: const Text('General Activity'),
-            subtitle: const Text(
-              'Likes, mentions, and other interactions',
-              style: TextStyle(fontSize: 13),
-            ),
-            value: settings.notifyActivity,
-            onChanged: (v) => settings.setNotifyActivity(v),
-            activeThumbColor: Colors.blue,
-          ),
-          const SizedBox(height: 24),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              'Note: Push notifications are generated by the app local service by monitoring the web sessions. This does not rely on Instagram servers sending notifications to your device.',
-              style: TextStyle(
-                color: isDark ? Colors.white24 : Colors.black26,
-                fontSize: 11,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
