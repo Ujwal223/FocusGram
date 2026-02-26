@@ -2,7 +2,7 @@
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
 [![Flutter](https://img.shields.io/badge/Flutter-stable-blue?logo=flutter)](https://flutter.dev)
-[![GitHub Downloads](https://img.shields.io/github/downloads/Ujwal223/FocusGram/total?label=total%20installs&color=blue)](https://github.com/Ujwal223/FocusGram/releases)
+[![Downloads](https://img.shields.io/github/downloads/ujwal223/focusgram/total?label=downloads&color=blue&cacheSeconds=300)](https://github.com/ujwal223/focusgram/releases)
 
 **Take back your time.** FocusGram is a distraction-free client for Instagram on Android that hides Reels and Explore, so you can stay connected without getting lost in the scroll.
 
