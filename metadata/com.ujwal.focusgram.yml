@@ -1,25 +1,29 @@
 Categories:
-  - Multimedia
+  - Connectivity
   - Social Network
 License: AGPL-3.0-only
+AuthorName: Ujwal Chapagain
+AuthorEmail: notujwal@proton.me
 SourceCode: https://github.com/Ujwal223/FocusGram
 IssueTracker: https://github.com/Ujwal223/FocusGram/issues
+Changelog: https://github.com/Ujwal223/FocusGram/blob/main/CHANGELOG.md
+
 AutoName: FocusGram
+
 RepoType: git
 Repo: https://github.com/Ujwal223/FocusGram
+
 Builds:
   - versionName: 1.0.0
     versionCode: 3
     commit: v1.0.0
-    submodules: true
     output: build/app/outputs/flutter-apk/app-release.apk
-    rm:
-      - ios
-      - linux
-      - macos
-      - web
-      - windows
+    srclibs:
+      - flutter@stable
     prebuild:
+      - flutterVersion=$(sed -n -E "s/.*flutter-version:\ '(.*)'/\1/p" .github/workflows/release.yml)
+      - '[[ $flutterVersion ]]'
+      - git -C $$flutter$$ checkout -f $flutterVersion
       - export PUB_CACHE=$(pwd)/.pub-cache
       - .flutter/bin/flutter config --no-analytics
       - .flutter/bin/flutter pub get
@@ -31,9 +35,11 @@ Builds:
     build:
       - export PUB_CACHE=$(pwd)/.pub-cache
       - .flutter/bin/flutter build apk --release --split-per-abi --target-platform="android-arm64"
-    ndk: 28.2.13676358
+
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
+VercodeOperation:
+  - '%c * 10 + 1'
 UpdateCheckData: pubspec.yaml|version:\s.+\+(\d+)|.|version:\s(.+)\+
 CurrentVersion: 1.0.0
 CurrentVersionCode: 3
