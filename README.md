@@ -10,9 +10,9 @@
 [![Flutter](https://img.shields.io/badge/Flutter-3.38-blue?logo=flutter&logoColor=white)](https://flutter.dev)
 [![Downloads](https://img.shields.io/github/downloads/ujwal223/focusgram/total?label=downloads&color=blue&cacheSeconds=300)](https://github.com/ujwal223/focusgram/releases)
 
-<a href='https://focusgram.en.uptodown.com/android' title='Download FocusGram' >
-                <img src='https://stc.utdstc.com/img/mediakit/download-gio-small.png' alt='Download FocusGram'>
-                </a>
+<a href='https://focusgram.en.uptodown.com/android' title='Download FocusGram'>
+  <img src='https://stc.utdstc.com/img/mediakit/download-gio-small.png' alt='Download FocusGram on Uptodown'>
+</a>
 
 [Download APK](https://github.com/ujwal223/focusgram/releases) · [View Changelog](CHANGELOG.md) · [Report a Bug](https://github.com/ujwal223/focusgram/issues/new)
 
@@ -24,8 +24,11 @@ Most people don't want to quit Instagram. They want to check their messages, pos
 
 FocusGram is an Android app that loads the Instagram website with the distracting parts removed. No private APIs. No data collection. No accounts. Just a cleaner way to use a platform you already use.
 
-<img width="1920" height="1080" alt="FocusGram App Screenshots" src="https://github.com/user-attachments/assets/cffd4012-4cf3-4ba8-aa1a-883e1f85478e" />
+> FocusGram is free and always will be. If it's saved you some time, show your support by buying me a momo 👉👈.
+>
+> [![Buy Me a Momo](https://img.shields.io/badge/-%F0%9F%A5%9F%20Buy%20Me%20a%20Momo-FF6B35?style=for-the-badge&labelColor=1a1a1a)](https://buymemomo.com/ujwal)
 
+<img width="1920" height="1080" alt="FocusGram App Screenshots" src="https://github.com/user-attachments/assets/cffd4012-4cf3-4ba8-aa1a-883e1f85478e" />
 
 ---
 
@@ -41,7 +44,7 @@ FocusGram is an Android app that loads the Instagram website with the distractin
 
 - Hide the Explore tab, Reels tab, or Shop tab individually
 - Disable Explore and suggested content entirely
-- Disable Reels Entirely
+- Disable Reels entirely
 
 **Habit tools**
 
@@ -51,7 +54,7 @@ FocusGram is an Android app that loads the Instagram website with the distractin
 
 **The app itself**
 
-- Feels (almost) like a native app, not a browser.
+- Feels (almost) like a native app, not a browser
 - No blank loading screen — content loads in the background before you get there
 - Instant updates via pull-to-refresh
 - Dark mode follows your system
@@ -66,10 +69,10 @@ FocusGram is an Android app that loads the Instagram website with the distractin
 3. Open the file and allow "Install from unknown sources" if prompted
 
 ### Uptodown
-Go to the [Focusgram - Uptodown](https://focusgram.en.uptodown.com/android) page<br>
-2. Click "Get the Latest Version"<br>
-3. Click "Download"<br>
-3. Open the file and allow "Install from unknown sources" if prompted
+1. Go to the [FocusGram on Uptodown](https://focusgram.en.uptodown.com/android) page
+2. Click "Get the Latest Version"
+3. Click "Download"
+4. Open the file and allow "Install from unknown sources" if prompted
 
 ---
 
@@ -88,7 +91,7 @@ FocusGram has no access to your Instagram account credentials. It loads `instagr
 ## Frequently asked questions
 
 **Will this get my account banned?**
-Unlikely. FocusGram's traffic is indistinguishable from someone using Instagram in Chrome. It does not use Instagram's private API, does not automate any actions, and does not intercept credentials. See the technical details below for specifics.
+Unlikely. FocusGram's traffic is indistinguishable from someone using Instagram in Chrome. It does not use Instagram's private API, does not automate any actions, and does not intercept credentials.
 
 **Is this a mod of Instagram's app?**
 No. FocusGram is a separate app that loads `instagram.com` in a WebView. It does not modify Instagram's APK or use any of Meta's proprietary code.
@@ -112,8 +115,7 @@ Because it should be. FocusGram is built and maintained by [Ujwal Chapagain](htt
 - JDK 17 (Eclipse Adoptium 17.0.17+)
 
 ### Build
-```
-bash
+```bash
 flutter pub get
 flutter build apk --release
 ```
@@ -127,6 +129,7 @@ FocusGram uses a standard Android System WebView to load `instagram.com`. All fe
 Nothing is modified server-side. The app never reads, intercepts, or stores Instagram content beyond what is explicitly listed (Reel URL, title, and thumbnail URL for the local history feature).
 
 ### Permissions
+
 | Permission | Reason |
 |---|---|
 | `INTERNET` | Load instagram.com |
@@ -135,6 +138,7 @@ Nothing is modified server-side. The app never reads, intercepts, or stores Inst
 | `FOREGROUND_SERVICE` | Run background service for session tracking |
 
 ### Stack
+
 | | |
 |---|---|
 | Framework | Flutter (Dart) |
