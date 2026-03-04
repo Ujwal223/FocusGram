@@ -84,7 +84,6 @@ FocusGram has no access to your Instagram account credentials. It loads `instagr
 - No crash reporting
 - No third-party SDKs
 - No data leaves your device
-- All settings and history are stored locally using Android's standard storage APIs
 
 ---
 
@@ -126,7 +125,7 @@ FocusGram uses a standard Android System WebView to load `instagram.com`. All fe
 - CSS injection (element hiding, grayscale, scroll behaviour)
 - URL interception via NavigationDelegate (Reels blocking, Explore blocking)
 
-Nothing is modified server-side. The app never reads, intercepts, or stores Instagram content beyond what is explicitly listed (Reel URL, title, and thumbnail URL for the local history feature).
+Nothing is modified server-side. The app never reads, intercepts, or stores Instagram content beyond what is explicitly listed 
 
 ### Permissions
 
