@@ -1,0 +1,67 @@
+name: focusgram
+description: "FocusGram is a free, open-source digital wellness tool for Android. Blocks distracting content, sets time limits, and helps you use social media intentionally."
+publish_to: 'none'
+
+version: 1.1.0
+
+environment:
+  sdk: ^3.10.7
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # WebView engine — Apache 2.0, F-Droid safe, replaces webview_flutter entirely
+  flutter_inappwebview: ^6.1.5
+
+  # Local key-value persistence — latest stable
+  shared_preferences: ^2.5.4
+
+  # Date/time formatting for daily resets — latest stable
+  intl: ^0.20.2
+
+  # Reactive state management — latest stable
+  provider: ^6.1.5
+
+  # Local notifications for session reminders — latest stable
+  flutter_local_notifications: ^20.1.0
+
+  # URL launcher for About page links — latest stable
+  url_launcher: ^6.3.2
+  package_info_plus: ^8.1.2
+  # Handling Instagram deep links — latest stable
+  app_links: ^6.3.2
+  # Open system settings — latest stable
+  app_settings: ^6.1.1
+  google_fonts: ^8.0.2
+  http: ^1.3.0
+  permission_handler: ^12.0.1
+  # Image/file picker for story uploads on Android
+  image_picker: ^1.1.2
+  flutter_windowmanager_plus: ^1.0.1
+
+  # Charts for on-device screen time dashboard (MIT)
+  fl_chart: ^0.69.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/focusgram.png
+    - assets/images/focusgram.ico
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/images/focusgram.png"
+  adaptive_icon_background: "#000000"
+  adaptive_icon_foreground: "assets/images/focusgram.png"
+  min_sdk_android: 24
+
+    

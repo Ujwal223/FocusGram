@@ -1,0 +1,10 @@
+FocusGram is a free and open-source Android app designed to help you regain control over your social media usage. It wraps the mobile version of Instagram in a secure WebView and injects features to minimize distractions.
+
+Features:
+- **Focus Mode**: Blur explore posts and hide reel buttons.
+- **Guardrails**: Set daily usage limits and session cooldowns.
+- **Mindfulness**: A mandatory breathing exercise before entering the app.
+- **Privacy First**: No analytics, no tracking, and no proprietary Google Play Services requirements.
+- **Hybrid Composition**: Optimized WebView performance for smooth scrolling.
+
+FocusGram is NOT an Instagram mod. It uses the standard web version of Instagram and applies client-side CSS and JS modifications only.

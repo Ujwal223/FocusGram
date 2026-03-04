@@ -1,0 +1,6 @@
+What's new
+- Reordered Settings Page.
+- Added "Click to Unblur" for posts.
+- Added Persistent Notification
+- Improved Grayscale Scheduling. 
+and more. 
