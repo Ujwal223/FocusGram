@@ -43,7 +43,7 @@ FocusGram is an Android app that loads the Instagram website with the distractin
 **Content filtering**
 
 - Hide the Explore tab, Reels tab, or Shop tab individually
-- Disable Explore and suggested content entirely
+- Disable Explore and blur posts entirely
 - Disable Reels entirely
 
 **Habit tools**
