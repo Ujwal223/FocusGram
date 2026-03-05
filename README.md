@@ -8,7 +8,7 @@
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_3.0-blue.svg)](LICENSE)
 [![Flutter](https://img.shields.io/badge/Flutter-3.38-blue?logo=flutter&logoColor=white)](https://flutter.dev)
-[![Downloads](https://img.shields.io/github/downloads/ujwal223/focusgram/total?label=downloads&color=blue&cacheSeconds=300)](https://github.com/ujwal223/focusgram/releases)
+[![Downloads](https://img.shields.io/github/downloads/ujwal223/focusgram/total?label=downloads&color=blue&cacheSeconds=30)](https://github.com/ujwal223/focusgram/releases)
 
 <a href='https://focusgram.en.uptodown.com/android' title='Download FocusGram'>
   <img src='https://stc.utdstc.com/img/mediakit/download-gio-small.png' alt='Download FocusGram on Uptodown'>
