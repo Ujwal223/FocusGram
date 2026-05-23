@@ -1,0 +1,66 @@
+# ── pubspec.yaml additions for FocusGram Phase 1 ──────────────────────────
+#
+# Merge these into your existing pubspec.yaml
+#
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # WebView — already in project
+  flutter_inappwebview: ^6.1.5
+
+  # Persistence
+  shared_preferences: ^2.3.2
+  sqflite: ^2.3.3+1          # Phase 2 history DB — add now, use later
+  path_provider: ^2.1.4
+
+  # Network (Phase 2 download manager — add now)
+  dio: ^5.7.0
+
+  # Gallery save (Phase 2)
+  gal: ^2.3.0
+
+  # Permissions (Phase 2)
+  permission_handler: ^11.3.1
+
+
+flutter:
+  assets:
+    - assets/scripts/ghost_mode.js
+    - assets/scripts/theme_detector.js
+    - assets/scripts/ad_blocker_dom.js
+    - assets/scripts/content_hider.js
+    - assets/scripts/media_detector.js      # empty for now
+    - assets/scripts/history_tracker.js     # empty for now
+    - assets/blocklists/easylist_mini.txt   # Phase 1.5 — download and bundle
+
+
+# ── AndroidManifest.xml additions ─────────────────────────────────────────
+#
+# In android/app/src/main/AndroidManifest.xml, inside <application>:
+#
+# <activity
+#   android:name=".MainActivity"
+#   android:windowSoftInputMode="adjustResize"
+#   android:hardwareAccelerated="true"    ← ADD THIS
+#   android:exported="true">
+#
+# Also add permissions:
+#   <uses-permission android:name="android.permission.INTERNET"/>
+#   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+#                    android:maxSdkVersion="28"/>
+#   <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+#   <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
+
+
+# ── android/app/src/main/res/values/styles.xml ────────────────────────────
+#
+# Add to your launch theme for true edge-to-edge:
+#
+# <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+# <item name="android:statusBarColor">@android:color/transparent</item>
+# <item name="android:navigationBarColor">@android:color/transparent</item>
+# <item name="android:windowTranslucentStatus">false</item>
+# <item name="android:windowTranslucentNavigation">false</item>
+# <item name="android:enforceNavigationBarContrast">false</item>  ← Android 10+
