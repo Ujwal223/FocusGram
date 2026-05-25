@@ -37,7 +37,6 @@ jobs:
             "platforms;android-35" \
             "build-tools;34.0.0" \
             "build-tools;35.0.0" \
-            "ndk;28.2.12676356"
       - name: Get dependencies
         run: flutter pub get
       - name: Resolve version and tag
