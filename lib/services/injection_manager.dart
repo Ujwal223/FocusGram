@@ -6,6 +6,7 @@ import 'injection_controller.dart';
 import '../scripts/grayscale.dart' as grayscale;
 import '../scripts/ui_hider.dart' as ui_hider;
 import '../scripts/content_disabling.dart' as content_disabling;
+import '../scripts/video_downloader.dart' as video_downloader;
 
 // Core JS and CSS payloads injected into the Instagram WebView.
 //
@@ -386,18 +387,39 @@ const String kLinkSanitizationJS = r'''
 
 // ── InjectionManager class ─────────────────────────────────────────────────
 
-class InjectionManager {
+abstract class JsEvaluator {
+  Future<void> evaluateJavascript({required String source});
+}
+
+class _WebViewJsEvaluator implements JsEvaluator {
   final InAppWebViewController controller;
+  _WebViewJsEvaluator(this.controller);
+
+  @override
+  Future<void> evaluateJavascript({required String source}) {
+    return controller.evaluateJavascript(source: source);
+  }
+}
+
+class InjectionManager {
+  final JsEvaluator _jsEvaluator;
   final SharedPreferences prefs;
   final SessionManager sessionManager;
 
   SettingsService? _settingsService;
 
   InjectionManager({
-    required this.controller,
+    required InAppWebViewController controller,
     required this.prefs,
     required this.sessionManager,
-  });
+    JsEvaluator? jsEvaluator,
+  }) : _jsEvaluator = jsEvaluator ?? _WebViewJsEvaluator(controller);
+
+  InjectionManager.forTest({
+    required JsEvaluator jsEvaluator,
+    required this.prefs,
+    required this.sessionManager,
+  }) : _jsEvaluator = jsEvaluator;
 
   void setSettingsService(SettingsService settingsService) {
     _settingsService = settingsService;
@@ -415,18 +437,19 @@ class InjectionManager {
     final blurExplore = settings.blurExplore || settings.minimalModeEnabled;
     final tapToUnblur = settings.tapToUnblur;
     final enableTextSelection = settings.enableTextSelection;
-    final hideSponsoredPosts = settings.hideSponsoredPosts;
+
+    // Per request: remove ALL “Hide Suggested Posts” behavior/UI/JS injection.
+    final hideSuggestedPosts = false;
     final hideLikeCounts = settings.hideLikeCounts;
     final hideFollowerCounts = settings.hideFollowerCounts;
-    // Stories hiding functionality removed per user request
     // Tab hiding is controlled by disableExploreEntirely and disableReelsEntirely
     // These are now only controllable via minimal mode submenu
     final disableExploreEntirely = settings.disableExploreEntirely;
     final disableReelsEntirely = settings.disableReelsEntirely;
+    final blockHomeFeedScroll = settings.blockHomeFeedScroll;
     final hideExploreTab = disableExploreEntirely;
     final hideReelsTab = disableReelsEntirely;
     final hideShopTab = settings.hideShopTab;
-    final isGrayscaleActive = settings.isGrayscaleActiveNow;
 
     final injectionJS = InjectionController.buildInjectionJS(
       sessionActive: sessionActive,
@@ -434,33 +457,35 @@ class InjectionManager {
       blurReels: false, // Blur reels feature removed
       tapToUnblur: blurExplore && tapToUnblur,
       enableTextSelection: enableTextSelection,
-      hideSuggestedPosts: false, // Feature removed
-      hideSponsoredPosts: hideSponsoredPosts,
+      hideSuggestedPosts: hideSuggestedPosts,
+      hideSponsoredPosts: false, // Removed - using V2 DOM Ad Blocker instead
       hideLikeCounts: hideLikeCounts,
       hideFollowerCounts: hideFollowerCounts,
-      // hideStoriesBar removed per user request
       hideExploreTab: hideExploreTab,
       hideReelsTab: hideReelsTab,
       hideShopTab: hideShopTab,
       disableReelsEntirely: disableReelsEntirely,
+      blockHomeFeedScroll: blockHomeFeedScroll,
     );
 
     try {
-      await controller.evaluateJavascript(source: injectionJS);
+      await _jsEvaluator.evaluateJavascript(source: injectionJS);
     } catch (e) {
       // Silently handle injection errors
     }
 
     // Inject grayscale when active, remove when not active
-    if (isGrayscaleActive) {
+    if (settings.isGrayscaleActiveNow) {
       try {
-        await controller.evaluateJavascript(source: grayscale.kGrayscaleJS);
+        await _jsEvaluator.evaluateJavascript(source: grayscale.kGrayscaleJS);
       } catch (e) {
         // Silently handle injection errors
       }
     } else {
       try {
-        await controller.evaluateJavascript(source: grayscale.kGrayscaleOffJS);
+        await _jsEvaluator.evaluateJavascript(
+          source: grayscale.kGrayscaleOffJS,
+        );
       } catch (e) {
         // Silently handle injection errors
       }
@@ -469,7 +494,9 @@ class InjectionManager {
     // Inject hide like counts JS when enabled
     if (hideLikeCounts) {
       try {
-        await controller.evaluateJavascript(source: ui_hider.kHideLikeCountsJS);
+        await _jsEvaluator.evaluateJavascript(
+          source: ui_hider.kHideLikeCountsJS,
+        );
       } catch (e) {
         // Silently handle injection errors
       }
@@ -478,11 +505,11 @@ class InjectionManager {
     // Stories hiding functionality removed per user request
     // No stories overlay injection needed
 
-    // Inject hide sponsored posts JS when enabled
-    if (hideSponsoredPosts) {
+    // Inject video downloader UI when enabled
+    if (settings.videoDownloadEnabled) {
       try {
-        await controller.evaluateJavascript(
-          source: ui_hider.kHideSponsoredPostsJS,
+        await _jsEvaluator.evaluateJavascript(
+          source: video_downloader.kVideoDownloadJS,
         );
       } catch (e) {
         // Silently handle injection errors
@@ -492,7 +519,7 @@ class InjectionManager {
     // Inject DM Reel blocker when disableReelsEntirely is enabled
     if (disableReelsEntirely) {
       try {
-        await controller.evaluateJavascript(
+        await _jsEvaluator.evaluateJavascript(
           source: content_disabling.kDmReelBlockerJS,
         );
       } catch (e) {

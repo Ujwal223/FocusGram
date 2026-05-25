@@ -27,7 +27,25 @@ class _AppSessionPickerScreenState extends State<AppSessionPickerScreen> {
     55,
     60,
   ];
-  int _selectedIndex = 2; // default: 15 min
+  int _selectedIndex = 0; // default: 5 min unless a previous choice exists
+  late final FixedExtentScrollController _scrollController;
+
+  @override
+  void initState() {
+    super.initState();
+    final lastMinutes = context.read<SessionManager>().lastAppSessionMinutes;
+    final lastIndex = _minuteOptions.indexOf(lastMinutes);
+    _selectedIndex = lastIndex >= 0 ? lastIndex : 0;
+    _scrollController = FixedExtentScrollController(
+      initialItem: _selectedIndex,
+    );
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -118,12 +136,10 @@ class _AppSessionPickerScreenState extends State<AppSessionPickerScreen> {
                       perspective: 0.003,
                       squeeze: 1.1,
                       diameterRatio: 2.5,
+                      controller: _scrollController,
                       onSelectedItemChanged: (i) {
                         setState(() => _selectedIndex = i);
                       },
-                      controller: FixedExtentScrollController(
-                        initialItem: _selectedIndex,
-                      ),
                       childDelegate: ListWheelChildListDelegate(
                         children: _minuteOptions.asMap().entries.map((entry) {
                           final isSelected = entry.key == _selectedIndex;

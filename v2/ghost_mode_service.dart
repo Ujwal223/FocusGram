@@ -3,7 +3,7 @@
 // Three-layer ghost mode:
 //   1. AT_DOCUMENT_START JS injection  — overrides fetch/XHR/WS before IG code runs
 //   2. shouldInterceptRequest           — native Android intercept (catches SW requests too)
-//   3. FLAG_SECURE                      — anti-screenshot at OS level
+//   3. FLAG_SECURE                      — anti-screenshot at OS level (disabled per user request)
 //
 // Usage:
 //   final service = GhostModeService();
@@ -15,8 +15,8 @@
 //     shouldInterceptRequest: service.shouldInterceptRequest,
 //   )
 //
-//   // Anti-screenshot: call from initState after WidgetsBinding.instance.addPostFrameCallback
-//   service.applyWindowFlags(context);
+//   // Anti-screenshot: disabled per user request
+//   // service.applyWindowFlags(context);
 
 import 'dart:typed_data';
 
@@ -36,55 +36,50 @@ class GhostFeatures {
   bool hideVoiceListened;
   bool hideReplyImageViewed;
   bool disableAnalytics;
-  bool antiScreenshot;
 
   GhostFeatures({
-    this.hideStoryViews       = true,
-    this.hideReadReceipts     = true,
-    this.hideLiveJoin         = true,
-    this.hideTypingIndicator  = true,
-    this.hideVoiceListened    = true,
+    this.hideStoryViews = true,
+    this.hideReadReceipts = true,
+    this.hideLiveJoin = true,
+    this.hideTypingIndicator = true,
+    this.hideVoiceListened = true,
     this.hideReplyImageViewed = true,
-    this.disableAnalytics     = true,
-    this.antiScreenshot       = false, // Off by default — user must opt in
+    this.disableAnalytics = true,
   });
 
   static const _keys = {
-    'hideStoryViews':       'gm_story',
-    'hideReadReceipts':     'gm_read',
-    'hideLiveJoin':         'gm_live',
-    'hideTypingIndicator':  'gm_typing',
-    'hideVoiceListened':    'gm_voice',
+    'hideStoryViews': 'gm_story',
+    'hideReadReceipts': 'gm_read',
+    'hideLiveJoin': 'gm_live',
+    'hideTypingIndicator': 'gm_typing',
+    'hideVoiceListened': 'gm_voice',
     'hideReplyImageViewed': 'gm_reply',
-    'disableAnalytics':     'gm_analytics',
-    'antiScreenshot':       'gm_screenshot',
+    'disableAnalytics': 'gm_analytics',
   };
 
   Future<void> save() async {
     final p = await SharedPreferences.getInstance();
     await Future.wait([
-      p.setBool(_keys['hideStoryViews']!,       hideStoryViews),
-      p.setBool(_keys['hideReadReceipts']!,     hideReadReceipts),
-      p.setBool(_keys['hideLiveJoin']!,         hideLiveJoin),
-      p.setBool(_keys['hideTypingIndicator']!,  hideTypingIndicator),
-      p.setBool(_keys['hideVoiceListened']!,    hideVoiceListened),
+      p.setBool(_keys['hideStoryViews']!, hideStoryViews),
+      p.setBool(_keys['hideReadReceipts']!, hideReadReceipts),
+      p.setBool(_keys['hideLiveJoin']!, hideLiveJoin),
+      p.setBool(_keys['hideTypingIndicator']!, hideTypingIndicator),
+      p.setBool(_keys['hideVoiceListened']!, hideVoiceListened),
       p.setBool(_keys['hideReplyImageViewed']!, hideReplyImageViewed),
-      p.setBool(_keys['disableAnalytics']!,     disableAnalytics),
-      p.setBool(_keys['antiScreenshot']!,       antiScreenshot),
+      p.setBool(_keys['disableAnalytics']!, disableAnalytics),
     ]);
   }
 
   static Future<GhostFeatures> load() async {
     final p = await SharedPreferences.getInstance();
     return GhostFeatures(
-      hideStoryViews:       p.getBool(_keys['hideStoryViews']!)       ?? true,
-      hideReadReceipts:     p.getBool(_keys['hideReadReceipts']!)     ?? true,
-      hideLiveJoin:         p.getBool(_keys['hideLiveJoin']!)         ?? true,
-      hideTypingIndicator:  p.getBool(_keys['hideTypingIndicator']!)  ?? true,
-      hideVoiceListened:    p.getBool(_keys['hideVoiceListened']!)    ?? true,
+      hideStoryViews: p.getBool(_keys['hideStoryViews']!) ?? true,
+      hideReadReceipts: p.getBool(_keys['hideReadReceipts']!) ?? true,
+      hideLiveJoin: p.getBool(_keys['hideLiveJoin']!) ?? true,
+      hideTypingIndicator: p.getBool(_keys['hideTypingIndicator']!) ?? true,
+      hideVoiceListened: p.getBool(_keys['hideVoiceListened']!) ?? true,
       hideReplyImageViewed: p.getBool(_keys['hideReplyImageViewed']!) ?? true,
-      disableAnalytics:     p.getBool(_keys['disableAnalytics']!)     ?? true,
-      antiScreenshot:       p.getBool(_keys['antiScreenshot']!)       ?? false,
+      disableAnalytics: p.getBool(_keys['disableAnalytics']!) ?? true,
     );
   }
 }
@@ -110,23 +105,18 @@ final _nativeBlocklist = [
   RegExp(r'/ajax/logging/'),
 ];
 
-final Uint8List _fakeOkBody = Uint8List.fromList(
-  '{"status":"ok"}'.codeUnits,
-);
+final Uint8List _fakeOkBody = Uint8List.fromList('{"status":"ok"}'.codeUnits);
 
 // ─── Main service ─────────────────────────────────────────────────────────────
 class GhostModeService {
   GhostFeatures features = GhostFeatures();
   InAppWebViewController? _controller;
 
-  // Platform channel for FLAG_SECURE (anti-screenshot)
-  static const _channel = MethodChannel('com.focusgram/window_flags');
-
   Future<void> load() async {
     features = await GhostFeatures.load();
   }
 
-  // ─── WebView setup ──────────────────────────────────────────────────────────
+  // ─── WebView setup ────────────────────────────────────────────────────────
 
   /// Call from InAppWebView.onWebViewCreated
   void onWebViewCreated(InAppWebViewController controller) {
@@ -170,34 +160,28 @@ class GhostModeService {
   /// InAppWebViewSettings required for shouldInterceptRequest to fire
   InAppWebViewSettings buildWebViewSettings() {
     return InAppWebViewSettings(
-      useShouldInterceptRequest: true,      // Enable native intercept callback
+      useShouldInterceptRequest: true, // Enable native intercept callback
       useShouldOverrideUrlLoading: true,
       javaScriptEnabled: true,
       disableDefaultErrorPage: true,
-      useHybridComposition: true,           // Needed for FLAG_SECURE to work
+      useHybridComposition:
+          true, // Needed for FLAG_SECURE to work (though disabled)
       // Disable service worker cache that can replay seen-events offline
-      cacheEnabled: false,                  // Start clean — optional, tradeoff vs perf
+      cacheEnabled: false, // Start clean — optional, tradeoff vs perf
     );
   }
 
   // ─── Anti-screenshot ────────────────────────────────────────────────────────
+  // Anti-screenshot disabled per user request
 
-  /// Call from initState → addPostFrameCallback
   Future<void> applyWindowFlags(BuildContext context) async {
-    if (!features.antiScreenshot) return;
-    try {
-      await _channel.invokeMethod('setSecure', {'secure': true});
-    } on MissingPluginException {
-      // Platform channel not registered — use plugin fallback below
-      debugPrint('[GhostMode] FLAG_SECURE: platform channel missing. '
-          'Add flutter_windowmanager or implement MainActivity channel.');
-    }
+    // Anti-screenshot disabled per user request
+    return;
   }
 
   Future<void> clearWindowFlags() async {
-    try {
-      await _channel.invokeMethod('setSecure', {'secure': false});
-    } catch (_) {}
+    // Anti-screenshot disabled per user request
+    return;
   }
 
   // ─── Re-inject after page nav (SPA navigation doesn't re-run userScripts) ──

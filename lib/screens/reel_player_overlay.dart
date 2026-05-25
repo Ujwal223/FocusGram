@@ -115,6 +115,7 @@ class _ReelPlayerOverlayState extends State<ReelPlayerOverlay> {
               hideReelsTab: false,
               hideShopTab: false,
               disableReelsEntirely: false,
+              blockHomeFeedScroll: false,
             ),
           );
         },

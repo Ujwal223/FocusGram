@@ -277,13 +277,15 @@ const String kReelsMutationObserverJS = r'''
     const MODAL_SEL = '[role="dialog"],[role="menu"],[role="listbox"],[class*="Modal"],[class*="Sheet"],[class*="Drawer"],._aano,[class*="caption"]';
 
     function lockMode() {
-      // Only lock scroll when: DM reel playing OR disableReelsEntirely enabled with reel present
+      // Lock DM reels to prevent swipe-to-next, and optionally lock the home
+      // feed as a separate Minimal Mode control.
       const isDmReel = window.location.pathname.includes('/direct/') &&
                        !!document.querySelector('[class*="ReelsVideoPlayer"]');
       if (isDmReel) return 'dm_reel';
-      // Only lock scroll when reel element is actually present on the page
-      if (window.__fgDisableReelsEntirely === true && 
-          !!document.querySelector('[class*="ReelsVideoPlayer"], video')) return 'disabled';
+      if (window.__fgBlockHomeFeedScroll === true &&
+          (window.location.pathname === '/' || window.location.pathname === '')) {
+        return 'home_feed';
+      }
       return null;
     }
 
@@ -338,8 +340,7 @@ const String kReelsMutationObserverJS = r'''
       try {
         const mode = lockMode();
         const hasReel = !!document.querySelector(REEL_SEL);
-        // Apply lock for dm_reel or disabled modes when reel is present
-        if ((mode === 'dm_reel' || mode === 'disabled') && hasReel) {
+        if ((mode === 'dm_reel' && hasReel) || mode === 'home_feed') {
           if (__fgOrigHtmlOverflow === null) {
             __fgOrigHtmlOverflow = document.documentElement.style.overflow || '';
             __fgOrigBodyOverflow = document.body ? (document.body.style.overflow || '') : '';

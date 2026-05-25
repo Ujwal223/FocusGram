@@ -18,7 +18,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
   final PageController _pageController = PageController();
   int _currentPage = 0;
 
-  // Pages: Welcome, Session Management, Link Handling, Blur Settings, Notifications
+  // Pages: Welcome, Focus controls, Link Handling, Blur Settings, Notifications
   static const int _kTotalPages = 5;
 
   static const int _kBlurPage = 3;
@@ -32,26 +32,26 @@ class _OnboardingPageState extends State<OnboardingPage> {
     final List<Widget> slides = [
       // ── Page 0: Welcome ─────────────────────────────────────────────────
       _StaticSlide(
-        icon: Icons.auto_awesome,
-        color: Colors.blue,
+        icon: Icons.auto_awesome_rounded,
+        color: const Color(0xFF4F8DFF),
         title: 'Welcome to FocusGram',
         description:
-            'The distraction-free way to use Instagram. We help you stay focused by blocking Reels and Explore content.',
+            'Use Instagram with guardrails: timed Reel sessions, calmer feeds, optional media tools, and privacy-first controls that stay on your device.',
       ),
 
-      // ── Page 1: Session Management ───────────────────────────────────────
+      // ── Page 1: Focus controls ───────────────────────────────────────────
       _StaticSlide(
-        icon: Icons.timer,
-        color: Colors.orange,
-        title: 'Session Management',
+        icon: Icons.timer_outlined,
+        color: const Color(0xFFFFB74D),
+        title: 'Time With Intent',
         description:
-            'Plan your usage. Set daily limits and use timed sessions to stay in control of your time.',
+            'Set daily limits, cooldowns, scheduled focus hours, and short Reel sessions when you choose to watch.',
       ),
 
       // ── Page 2: Open links ───────────────────────────────────────────────
       _StaticSlide(
-        icon: Icons.link,
-        color: Colors.cyan,
+        icon: Icons.link_rounded,
+        color: const Color(0xFF35C2D6),
         title: 'Open Links in FocusGram',
         description:
             'To open Instagram links directly here: Tap "Configure", then "Open by default" → "Add link" and select all.',
@@ -63,11 +63,11 @@ class _OnboardingPageState extends State<OnboardingPage> {
 
       // ── Page 4: Notifications ────────────────────────────────────────────
       _StaticSlide(
-        icon: Icons.notifications_active,
-        color: Colors.green,
-        title: 'Stay Notified',
+        icon: Icons.notifications_active_outlined,
+        color: const Color(0xFF5DD18A),
+        title: 'Useful Alerts Only',
         description:
-            'We need notification permissions to alert you when your session is over or a new message arrives.',
+            'Enable notifications only if you want session-end or persistent focus reminders. FocusGram will ask here, not before onboarding.',
         isPermissionPage: true,
         permission: Permission.notification,
       ),
@@ -108,7 +108,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 28),
                 // CTA button
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -123,14 +123,14 @@ class _OnboardingPageState extends State<OnboardingPage> {
                         final isBlur = _currentPage == _kBlurPage;
 
                         String label;
-                        if (isLast) {
-                          label = 'Get Started';
+                        if (isNotif) {
+                          label = 'Allow & Start';
                         } else if (isLink) {
                           label = 'Configure';
-                        } else if (isNotif) {
-                          label = 'Allow Notifications';
                         } else if (isBlur) {
                           label = 'Save & Continue';
+                        } else if (isLast) {
+                          label = 'Get Started';
                         } else {
                           label = 'Next';
                         }
@@ -143,7 +143,8 @@ class _OnboardingPageState extends State<OnboardingPage> {
                               );
                             } else if (isNotif) {
                               await Permission.notification.request();
-                              await NotificationService().init();
+                              await NotificationService()
+                                  .requestPermissionsNow();
                             }
 
                             if (!context.mounted) return;
@@ -178,9 +179,19 @@ class _OnboardingPageState extends State<OnboardingPage> {
                 // Skip button (available on all pages except last)
                 if (_currentPage < _kTotalPages - 1)
                   TextButton(
-                    onPressed: () => _finish(context),
+                    onPressed: () {
+                      if (_currentPage == _kNotifPage) {
+                        _finish(context);
+                      } else {
+                        _pageController.animateToPage(
+                          _kTotalPages - 1,
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeInOut,
+                        );
+                      }
+                    },
                     child: const Text(
-                      'Skip',
+                      'Skip setup',
                       style: TextStyle(color: Colors.white38, fontSize: 14),
                     ),
                   ),
@@ -222,18 +233,27 @@ class _StaticSlide extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(40, 40, 40, 160),
+      padding: const EdgeInsets.fromLTRB(28, 40, 28, 160),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, size: 120, color: color),
-          const SizedBox(height: 48),
+          Container(
+            width: 112,
+            height: 112,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: color.withValues(alpha: 0.28)),
+            ),
+            child: Icon(icon, size: 54, color: color),
+          ),
+          const SizedBox(height: 36),
           Text(
             title,
             textAlign: TextAlign.center,
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 32,
+              fontSize: 30,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -243,10 +263,28 @@ class _StaticSlide extends StatelessWidget {
             textAlign: TextAlign.center,
             style: const TextStyle(
               color: Colors.white70,
-              fontSize: 18,
+              fontSize: 16,
               height: 1.5,
             ),
           ),
+          if (isPermissionPage || isAppSettingsPage) ...[
+            const SizedBox(height: 24),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white10),
+              ),
+              child: Text(
+                isPermissionPage
+                    ? 'Permission is optional and can be changed later.'
+                    : 'This opens Android settings; return here when done.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+            ),
+          ],
         ],
       ),
     );

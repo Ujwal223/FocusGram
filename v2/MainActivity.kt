@@ -1,41 +1,16 @@
 // android/app/src/main/kotlin/com/focusgram/focusgram/MainActivity.kt
 //
-// Adds:
-//   1. Platform channel for FLAG_SECURE (anti-screenshot at OS level)
-//   2. Ghost mode WebView integration notes
+// Ghost mode WebView integration notes
 
 package com.focusgram.focusgram
 
 import android.os.Bundle
-import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
-
-    private val CHANNEL = "com.focusgram/window_flags"
-
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-
-        MethodChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            CHANNEL
-        ).setMethodCallHandler { call, result ->
-            when (call.method) {
-                "setSecure" -> {
-                    val secure = call.argument<Boolean>("secure") ?: false
-                    if (secure) {
-                        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-                    } else {
-                        window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-                    }
-                    result.success(null)
-                }
-                else -> result.notImplemented()
-            }
-        }
     }
 }
 
@@ -56,9 +31,6 @@ class MainActivity : FlutterActivity() {
 //     super.initState();
 //     _ghost = GhostModeService();
 //     _ghost.load().then((_) {
-//       WidgetsBinding.instance.addPostFrameCallback((_) {
-//         _ghost.applyWindowFlags(context);
-//       });
 //       setState(() {});
 //     });
 //   }

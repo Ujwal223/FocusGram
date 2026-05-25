@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -10,11 +12,7 @@ import '../services/session_manager.dart';
 import '../services/settings_service.dart';
 import '../services/injection_controller.dart';
 import '../services/injection_manager.dart';
-import '../scripts/autoplay_blocker.dart';
 import '../scripts/native_feel.dart';
-import '../scripts/haptic_bridge.dart';
-import '../scripts/spa_navigation_monitor.dart';
-import '../scripts/content_disabling.dart';
 import '../services/screen_time_service.dart';
 import '../services/navigation_guard.dart';
 import '../services/focusgram_router.dart';
@@ -25,6 +23,48 @@ import '../utils/discipline_challenge.dart';
 import 'settings_page.dart';
 import '../features/loading/skeleton_screen.dart';
 import '../features/preloader/instagram_preloader.dart';
+import '../v2_integration/script_engine_v2_overlay.dart';
+import '../v2_integration/script_registry_v2_overlay.dart';
+import '../scripts/focus_scripts.dart';
+import '../focus_settings.dart';
+import 'package:http/http.dart' as http;
+
+import '../services/adblock/adblock_content_blocker_loader.dart';
+
+/// Core validator/dispatcher for the JS → Flutter bridge:
+/// `window.flutter_inappwebview.callHandler('FocusGramMediaDownload', JSON)`
+Future<bool> handleFocusGramMediaDownload({
+  required String raw,
+  required Future<void> Function(Uri uri) launch,
+}) async {
+  try {
+    final payload = jsonDecode(raw) as Map<String, dynamic>;
+
+    final url = payload['url'] as String?;
+    if (url == null || url.isEmpty) return false;
+
+    final uri = Uri.tryParse(url);
+    if (uri == null || !(uri.isScheme('http') || uri.isScheme('https'))) {
+      return false;
+    }
+
+    // Best-effort origin allow-list (Instagram/CDN). Kept permissive to avoid
+    // breaking legitimate downloads while still blocking obvious abuse.
+    final host = uri.host.toLowerCase();
+    final looksInstagramCdn =
+        host.contains('cdninstagram.com') ||
+        host.contains('fbcdn.net') ||
+        host.contains('instagram.com');
+
+    if (!looksInstagramCdn) return false;
+
+    await launch(uri);
+    return true;
+  } catch (_) {
+    // Best-effort only; never crash UI.
+    return false;
+  }
+}
 
 class MainWebViewPage extends StatefulWidget {
   const MainWebViewPage({super.key});
@@ -35,9 +75,15 @@ class MainWebViewPage extends StatefulWidget {
 
 class _MainWebViewPageState extends State<MainWebViewPage>
     with WidgetsBindingObserver {
+  static const String _donationPopupShownKey = 'donation_popup_shown_once';
+  static final Uri _donateUri = Uri.parse('https://buymemomo.com/ujwal');
+
   InAppWebViewController? _controller;
+
+  AdblockContentBlockerData? _adblockData;
   late final PullToRefreshController _pullToRefreshController;
   InjectionManager? _injectionManager;
+  ScriptEngineV2Overlay? _v2Engine;
   final GlobalKey<_EdgePanelState> _edgePanelKey = GlobalKey<_EdgePanelState>();
   bool _showSkeleton =
       true; // true from the start so skeleton covers black Scaffold before WebView first paints
@@ -49,10 +95,12 @@ class _MainWebViewPageState extends State<MainWebViewPage>
   bool _lastSessionActive = false;
   String _currentUrl = 'https://www.instagram.com/';
   bool _hasError = false;
-bool _reelsBlockedOverlay = false;
+  bool _reelsBlockedOverlay = false;
   bool _exploreBlockedOverlay = false;
   bool _isPreloaded = false;
   bool _minimalModeBannerDismissed = false;
+  bool _isInDirectThread = false;
+  bool _dmThreadCdnBlockArmed = false;
   DateTime _lastMainFrameLoadStartedAt = DateTime.fromMillisecondsSinceEpoch(0);
   SkeletonType _skeletonType = SkeletonType.generic;
 
@@ -79,16 +127,34 @@ bool _reelsBlockedOverlay = false;
     // Check for updates on launch
     context.read<UpdateCheckerService>().checkForUpdates();
 
+    unawaited(_loadAdblockerData());
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<SessionManager>().addListener(_onSessionChanged);
       context.read<SettingsService>().addListener(_onSettingsChanged);
+      context.read<ScreenTimeService>().addListener(_onScreenTimeChanged);
+      context.read<ScreenTimeService>().startTracking();
       _lastSessionActive = context.read<SessionManager>().isSessionActive;
       // Initialise structural snapshots so first change is detected correctly
       final settings = context.read<SettingsService>();
       _lastMinimalMode = settings.minimalModeEnabled;
       _lastDisableReels = settings.disableReelsEntirely;
       _lastDisableExplore = settings.disableExploreEntirely;
+      _lastBlockHomeFeedScroll = settings.blockHomeFeedScroll;
       _lastBlockAutoplay = settings.blockAutoplay;
+      _lastGhostMode = settings.ghostMode;
+      _lastNoAds = settings.noAds;
+      _lastNoStories = settings.noStories;
+      _lastNoReels = settings.noReels;
+      _lastNoAutoplay = settings.noAutoplay;
+      _lastNoDMs = settings.noDMs;
+      _lastV2GhostModeEnabled = settings.ghostMode;
+      _lastV2AdBlockerDomEnabled = settings.v2AdBlockerDomEnabled;
+      _lastV2ContentHiderEnabled = settings.v2ContentHiderEnabled;
+      _lastV2FetchInterceptorEnabled = _shouldEnableFetchInterceptor(settings);
+      _lastV2AutoplayBlockerEnabled = settings.blockAutoplay;
+      _lastAdblockToggleValue = settings.v2AdBlockerDomEnabled;
+      _onScreenTimeChanged();
     });
 
     FocusGramRouter.pendingUrl.addListener(_onPendingUrlChanged);
@@ -100,6 +166,51 @@ bool _reelsBlockedOverlay = false;
       FocusGramRouter.pendingUrl.value = null;
       _controller?.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
     }
+  }
+
+  bool _shouldEnableFetchInterceptor(SettingsService settings) {
+    return settings.ghostMode ||
+        settings.noAds ||
+        settings.v2AdBlockerDomEnabled ||
+        settings.noReels ||
+        settings.hideSuggestedPosts ||
+        (settings.v2ContentHiderEnabled &&
+            (settings.contentPosts ||
+                settings.contentReels ||
+                settings.contentSuggested));
+  }
+
+  Future<void> _onScreenTimeChanged() async {
+    if (!mounted) return;
+    if (context.read<ScreenTimeService>().totalSeconds < 300) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_donationPopupShownKey) ?? false) return;
+    await prefs.setBool(_donationPopupShownKey, true);
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Support FocusGram'),
+        content: const Text(
+          'Please donate to support the development of this project.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Not now'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              launchUrl(_donateUri, mode: LaunchMode.externalApplication);
+            },
+            child: const Text('Donate'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Sets the isolated reel player flag in the WebView so the scroll-lock
@@ -141,16 +252,102 @@ bool _reelsBlockedOverlay = false;
   bool _lastMinimalMode = false;
   bool _lastDisableReels = false;
   bool _lastDisableExplore = false;
+  bool _lastBlockHomeFeedScroll = false;
   bool _lastBlockAutoplay = false;
+  bool _lastGhostMode = false;
+  bool _lastNoAds = false;
+  bool _lastNoStories = false;
+  bool _lastNoReels = false;
+  bool _lastNoAutoplay = false;
+  bool _lastNoDMs = false;
+  bool _lastV2GhostModeEnabled = false;
+  bool _lastV2AdBlockerDomEnabled = false;
+  bool _lastV2ContentHiderEnabled = false;
+  bool _lastV2FetchInterceptorEnabled = false;
+  bool _lastV2AutoplayBlockerEnabled = false;
+
+  // Tracks v2 adblock toggle to know when to reload WebView for ContentBlocker changes
+  bool _lastAdblockToggleValue = false;
 
   void _onSettingsChanged() {
     if (!mounted) return;
     final settings = context.read<SettingsService>();
 
+    // If adblock toggle flipped, rebuild WebView so `contentBlockers` applies.
+    // IMPORTANT: do NOT early-return, otherwise we skip the v2 overlay prefs sync
+    // (which is what enables the DOM fallback script + other v2 toggles).
+    if (_lastAdblockToggleValue != settings.v2AdBlockerDomEnabled) {
+      _lastAdblockToggleValue = settings.v2AdBlockerDomEnabled;
+      _adblockData = null;
+      _loadAdblockerData();
+      _controller?.reload();
+    }
+
+    // 0. V2 overlay sync (prefs must be updated before toggling)
+    unawaited(() async {
+      final prefs = await SharedPreferences.getInstance();
+      if (_v2Engine != null) {
+        await prefs.setBool(
+          'fg_v2_${V2OverlayScriptId.ghostMode.name}_enabled',
+          settings.ghostMode,
+        );
+        await prefs.setBool(
+          'fg_v2_${V2OverlayScriptId.adBlockerDom.name}_enabled',
+          settings.v2AdBlockerDomEnabled,
+        );
+        await prefs.setBool(
+          'fg_v2_${V2OverlayScriptId.contentHider.name}_enabled',
+          settings.v2ContentHiderEnabled,
+        );
+
+        final bool fetchInterceptorEnabled = _shouldEnableFetchInterceptor(
+          settings,
+        );
+        final bool autoplayBlockerEnabled = settings.blockAutoplay;
+
+        await prefs.setBool(
+          'fg_v2_${V2OverlayScriptId.fetchInterceptor.name}_enabled',
+          fetchInterceptorEnabled,
+        );
+        await prefs.setBool(
+          'fg_v2_${V2OverlayScriptId.autoplayBlocker.name}_enabled',
+          autoplayBlockerEnabled,
+        );
+
+        await prefs.setBool('content_stories', settings.contentStories);
+        await prefs.setBool('content_posts', settings.contentPosts);
+        await prefs.setBool('content_reels', settings.contentReels);
+        await prefs.setBool('content_suggested', settings.contentSuggested);
+
+        final shouldReloadV2 =
+            _lastV2GhostModeEnabled != settings.ghostMode ||
+            _lastV2AdBlockerDomEnabled != settings.v2AdBlockerDomEnabled ||
+            _lastV2ContentHiderEnabled != settings.v2ContentHiderEnabled ||
+            _lastV2FetchInterceptorEnabled != fetchInterceptorEnabled ||
+            _lastV2AutoplayBlockerEnabled != autoplayBlockerEnabled;
+
+        _lastV2GhostModeEnabled = settings.ghostMode;
+        _lastV2AdBlockerDomEnabled = settings.v2AdBlockerDomEnabled;
+        _lastV2ContentHiderEnabled = settings.v2ContentHiderEnabled;
+        _lastV2FetchInterceptorEnabled = fetchInterceptorEnabled;
+        _lastV2AutoplayBlockerEnabled = autoplayBlockerEnabled;
+
+        if (shouldReloadV2) {
+          _reloadDebounce?.cancel();
+          _reloadDebounce = Timer(const Duration(milliseconds: 600), () {
+            if (mounted) _controller?.reload();
+          });
+        } else {
+          await _v2Engine?.injectDocumentEndScripts();
+        }
+      }
+    }());
+
     // 1. Apply all cosmetic changes immediately via injection
     if (_controller != null) {
       _controller!.evaluateJavascript(
-        source: 'window.__fgBlockAutoplay = ${settings.blockAutoplay}; window.__fgTapToUnblur = ${settings.blurExplore && settings.tapToUnblur};',
+        source:
+            'window.__fgSetBlockAutoplay?.(${settings.blockAutoplay}); window.__fgBlockAutoplay = ${settings.blockAutoplay}; window.__fgTapToUnblur = ${settings.blurExplore && settings.tapToUnblur};',
       );
     }
     if (_controller != null && _injectionManager != null) {
@@ -166,12 +363,26 @@ bool _reelsBlockedOverlay = false;
         settings.minimalModeEnabled != _lastMinimalMode ||
         settings.disableReelsEntirely != _lastDisableReels ||
         settings.disableExploreEntirely != _lastDisableExplore ||
-        settings.blockAutoplay != _lastBlockAutoplay;
+        settings.blockHomeFeedScroll != _lastBlockHomeFeedScroll ||
+        settings.blockAutoplay != _lastBlockAutoplay ||
+        settings.ghostMode != _lastGhostMode ||
+        settings.noAds != _lastNoAds ||
+        settings.noStories != _lastNoStories ||
+        settings.noReels != _lastNoReels ||
+        settings.noAutoplay != _lastNoAutoplay ||
+        settings.noDMs != _lastNoDMs;
 
     _lastMinimalMode = settings.minimalModeEnabled;
     _lastDisableReels = settings.disableReelsEntirely;
     _lastDisableExplore = settings.disableExploreEntirely;
+    _lastBlockHomeFeedScroll = settings.blockHomeFeedScroll;
     _lastBlockAutoplay = settings.blockAutoplay;
+    _lastGhostMode = settings.ghostMode;
+    _lastNoAds = settings.noAds;
+    _lastNoStories = settings.noStories;
+    _lastNoReels = settings.noReels;
+    _lastNoAutoplay = settings.noAutoplay;
+    _lastNoDMs = settings.noDMs;
 
     if (structuralChange && _controller != null) {
       // Debounce: if user toggles rapidly, only reload once they stop
@@ -191,6 +402,8 @@ bool _reelsBlockedOverlay = false;
     FocusGramRouter.pendingUrl.removeListener(_onPendingUrlChanged);
     context.read<SessionManager>().removeListener(_onSessionChanged);
     context.read<SettingsService>().removeListener(_onSettingsChanged);
+    context.read<ScreenTimeService>().removeListener(_onScreenTimeChanged);
+    context.read<ScreenTimeService>().stopTracking();
     super.dispose();
   }
 
@@ -200,7 +413,7 @@ bool _reelsBlockedOverlay = false;
     final sm = context.read<SessionManager>();
     final screenTime = context.read<ScreenTimeService>();
     final settings = context.read<SettingsService>();
-    
+
     if (state == AppLifecycleState.resumed) {
       sm.setAppForeground(true);
       screenTime.startTracking();
@@ -211,12 +424,12 @@ bool _reelsBlockedOverlay = false;
         state == AppLifecycleState.detached) {
       sm.setAppForeground(false);
       screenTime.stopTracking();
-      
+
       // Show persistent notification when schedules are active (if enabled)
       if (settings.notifyPersistent) {
         final isScheduleActive = sm.isScheduledBlockActive;
         final isGrayscaleActive = settings.isGrayscaleActiveNow;
-        
+
         if (isScheduleActive) {
           NotificationService().showPersistentNotification(
             id: 5001,
@@ -282,7 +495,9 @@ bool _reelsBlockedOverlay = false;
         },
         child: AlertDialog(
           backgroundColor: const Color(0xFF1A1A1A),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
           title: const Text(
             'Session Complete ✓',
             style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
@@ -342,6 +557,44 @@ bool _reelsBlockedOverlay = false;
     );
   }
 
+  Future<AdblockContentBlockerData> _loadAdblockerData() async {
+    final settings = context.read<SettingsService>();
+    final prefs = await SharedPreferences.getInstance();
+    final previousHosts = _adblockData?.blockedHosts;
+
+    final loader = AdblockContentBlockerLoader();
+    final data = await loader.loadOrUpdateIfNeeded(
+      enabled: settings.v2AdBlockerDomEnabled,
+      prefs: prefs,
+    );
+
+    if (mounted) {
+      setState(() => _adblockData = data);
+      if (settings.v2AdBlockerDomEnabled &&
+          data.blockedHosts.isNotEmpty &&
+          _controller != null &&
+          (previousHosts == null ||
+              !setEquals(previousHosts, data.blockedHosts))) {
+        unawaited(_controller?.reload());
+      }
+    }
+    return data;
+  }
+
+  bool _isBlockedByAdblockHostList(WebUri uri, Set<String>? blockedHosts) {
+    if (blockedHosts == null || blockedHosts.isEmpty) return false;
+
+    var host = uri.host.toLowerCase();
+    if (blockedHosts.contains(host)) return true;
+
+    while (true) {
+      final dot = host.indexOf('.');
+      if (dot < 0 || dot == host.length - 1) return false;
+      host = host.substring(dot + 1);
+      if (blockedHosts.contains(host)) return true;
+    }
+  }
+
   void _initWebView() {
     // Preloader disabled — keepAlive WebView silently fails when app cold-starts,
     // leaving _isPreloaded = true with no content, causing permanent black screen.
@@ -383,10 +636,37 @@ bool _reelsBlockedOverlay = false;
     return '$m:$s';
   }
 
+  static bool _isHomeFeedUrl(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return url == '/' || url.isEmpty;
+    final path = uri.path.isEmpty ? '/' : uri.path;
+    return uri.host.contains('instagram.com') && path == '/';
+  }
+
+  static bool _isDirectThreadUrl(String url) {
+    final path = Uri.tryParse(url)?.path ?? url;
+    return RegExp(r'^/direct/t/[^/]+/?$').hasMatch(path);
+  }
+
+  static bool _isFktmInstagramCdn(String url) {
+    final host = Uri.tryParse(url)?.host.toLowerCase() ?? '';
+    return RegExp(r'^instagram\.fktm\d+-\d+\.fna\.fbcdn\.net$').hasMatch(host);
+  }
+
+  void _syncDirectThreadState(String url) {
+    final active = _isDirectThreadUrl(url);
+    if (_isInDirectThread == active) return;
+    _isInDirectThread = active;
+    _dmThreadCdnBlockArmed = false;
+  }
+
   Future<void> _showReelSessionPicker() async {
     final settings = context.read<SettingsService>();
     if (settings.requireWordChallenge) {
-      final passed = await DisciplineChallenge.show(context);
+      final passed = await DisciplineChallenge.show(
+        context,
+        count: settings.resolvedWordChallengeCount(),
+      );
       if (!passed || !mounted) return;
     }
     _showReelSessionPickerBottomSheet();
@@ -426,9 +706,13 @@ bool _reelsBlockedOverlay = false;
               child: ListView(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 children: [
+                  _buildReelSessionTile(1),
+                  _buildReelSessionTile(3),
                   _buildReelSessionTile(5),
                   _buildReelSessionTile(10),
                   _buildReelSessionTile(15),
+                  _buildReelSessionTile(20),
+                  _buildReelSessionTile(30),
                   const SizedBox(height: 40),
                   TextButton(
                     onPressed: () => Navigator.pop(context),
@@ -479,6 +763,10 @@ bool _reelsBlockedOverlay = false;
         if (_reelsBlockedOverlay) {
           setState(() => _reelsBlockedOverlay = false);
           await _controller?.goBack();
+          return;
+        }
+        if (_isHomeFeedUrl(_currentUrl)) {
+          SystemNavigator.pop();
           return;
         }
         final didNavigate =
@@ -591,6 +879,7 @@ bool _reelsBlockedOverlay = false;
                                 cacheMode: CacheMode.LOAD_CACHE_ELSE_NETWORK,
                                 domStorageEnabled: true,
                                 databaseEnabled: true,
+                                thirdPartyCookiesEnabled: false,
                                 hardwareAcceleration: true,
                                 // FIX 2: Set to false so the WebView renders
                                 // its own opaque background. When true + black
@@ -603,48 +892,143 @@ bool _reelsBlockedOverlay = false;
                                 allowsInlineMediaPlayback: true,
                                 verticalScrollBarEnabled: false,
                                 horizontalScrollBarEnabled: false,
+                                contentBlockers:
+                                    _adblockData?.contentBlockers ?? const [],
                               ),
                               initialUserScripts: UnmodifiableListView([
-                                UserScript(
-                                  source:
-                                      'window.__fgBlockAutoplay = ${settings.blockAutoplay}; window.__fgTapToUnblur = ${settings.blurExplore && settings.tapToUnblur}; window.__focusgramSessionActive = ${sm.isSessionActive};',
-                                  injectionTime:
-                                      UserScriptInjectionTime.AT_DOCUMENT_START,
-                                ),
-                                UserScript(
-                                  source: kAutoplayBlockerJS,
-                                  injectionTime:
-                                      UserScriptInjectionTime.AT_DOCUMENT_START,
-                                ),
-                                UserScript(
-                                  source: kSpaNavigationMonitorScript,
-                                  injectionTime:
-                                      UserScriptInjectionTime.AT_DOCUMENT_START,
-                                ),
-                                UserScript(
-                                  source: kNativeFeelingScript,
-                                  injectionTime:
-                                      UserScriptInjectionTime.AT_DOCUMENT_START,
-                                ),
-                                if (settings.disableReelsEntirely)
-                                  UserScript(
-                                    source: kDisableReelsEntirelyCssScript,
-                                    injectionTime:
-                                        UserScriptInjectionTime.AT_DOCUMENT_START,
+                                ...const <UserScript>[],
+                                ...buildUserScripts(
+                                  FocusSettings(
+                                    ghostMode: settings.ghostMode,
+                                    noAds: settings.noAds,
+                                    noStories: settings.noStories,
+                                    noReels: settings.noReels,
+                                    noAutoplay: settings.noAutoplay,
+                                    noDMs: settings.noDMs,
                                   ),
-                                if (settings.disableExploreEntirely)
-                                  UserScript(
-                                    source: kDisableExploreEntirelyCssScript,
-                                    injectionTime:
-                                        UserScriptInjectionTime.AT_DOCUMENT_START,
-                                  ),
-                                UserScript(
-                                  source: kHapticBridgeScript,
-                                  injectionTime:
-                                      UserScriptInjectionTime.AT_DOCUMENT_START,
                                 ),
                               ]),
                               pullToRefreshController: _pullToRefreshController,
+                              shouldInterceptRequest: (controller, request) async {
+                                final url = request.url.toString();
+                                final referrer =
+                                    request.headers?['Referer'] ??
+                                    request.headers?['referer'];
+                                if (referrer != null &&
+                                    _isDirectThreadUrl(referrer)) {
+                                  _syncDirectThreadState(referrer);
+                                }
+
+                                if (_isInDirectThread &&
+                                    _isFktmInstagramCdn(url)) {
+                                  if (_dmThreadCdnBlockArmed) {
+                                    return WebResourceResponse(
+                                      data: Uint8List(0),
+                                    );
+                                  }
+                                  _dmThreadCdnBlockArmed = true;
+                                }
+
+                                // Strict/high-priority domain blocking from uBlock-style lists.
+                                final adblockHosts = _adblockData?.blockedHosts;
+                                if (_isBlockedByAdblockHostList(
+                                  request.url,
+                                  adblockHosts,
+                                )) {
+                                  return WebResourceResponse(
+                                    data: Uint8List(0),
+                                  );
+                                }
+
+                                // Block trackers + paid pixel iframes (hardcoded safety)
+                                const blockedDomains = [
+                                  'fbsbx.com/paid_ads_pixel',
+                                  'fbsbx.com/paid_ads',
+                                  'facebook.com/tr',
+                                  'instagram.com/paid_ads',
+                                  'analytics.facebook.com',
+                                  'facebook.com/tracking',
+                                ];
+                                if (blockedDomains.any(
+                                  (d) => url.contains(d),
+                                )) {
+                                  return WebResourceResponse(
+                                    data: Uint8List(0),
+                                  );
+                                }
+
+                                // Also block any IG paid-pixel iframe HTML documents
+                                if (url.contains('/paid_ads_pixel/iframe/') ||
+                                    url.contains('/generete_pixels/')) {
+                                  return WebResourceResponse(
+                                    data: Uint8List(0),
+                                  );
+                                }
+
+                                // Block Reels API
+                                if (settings.noReels &&
+                                    (url.contains('/api/v1/clips/') ||
+                                        url.contains('/api/v1/discover/'))) {
+                                  return WebResourceResponse(
+                                    data: Uint8List(0),
+                                  );
+                                }
+
+                                // Block DMs API
+                                if (settings.noDMs &&
+                                    (url.contains('edge-chat.instagram.com') ||
+                                        url.contains('/api/v1/direct_v2/'))) {
+                                  return WebResourceResponse(
+                                    data: Uint8List(0),
+                                  );
+                                }
+
+                                // Strip ads from feed
+                                if (settings.noAds &&
+                                    url.contains(
+                                      'instagram.com/graphql/query',
+                                    )) {
+                                  try {
+                                    final res = await http.post(
+                                      Uri.parse(url),
+                                      headers: Map<String, String>.from(
+                                        request.headers ?? {},
+                                      ),
+                                    );
+
+                                    final json = jsonDecode(res.body);
+                                    final connection =
+                                        json['data']?['xdt_api__v1__feed__timeline__connection'];
+
+                                    if (connection != null &&
+                                        connection['edges'] is List) {
+                                      final edges = connection['edges'] as List;
+                                      edges.removeWhere((e) {
+                                        final node = e['node'];
+                                        if (node == null) return false;
+                                        return node['ad'] != null ||
+                                            node['explore_story'] != null ||
+                                            node['media']?['inventory_source'] ==
+                                                'mixed_unconnected';
+                                      });
+                                    }
+
+                                    return WebResourceResponse(
+                                      data: Uint8List.fromList(
+                                        utf8.encode(jsonEncode(json)),
+                                      ),
+                                      headers: res.headers,
+                                      statusCode: 200,
+                                      contentType: 'application/json',
+                                    );
+                                  } catch (e) {
+                                    // if anything fails, pass through original request unmodified
+                                    return null;
+                                  }
+                                }
+
+                                return null;
+                              },
                               onWebViewCreated: (controller) async {
                                 _controller = controller;
 
@@ -664,6 +1048,61 @@ bool _reelsBlockedOverlay = false;
 
                                 _registerJavaScriptHandlers(controller);
 
+                                // ── FocusGram v2 overlay initial sync ───────────────
+                                // ScriptEngineV2Overlay reads enabled state from prefs keys:
+                                //   fg_v2_{scriptName}_enabled
+                                // Set them BEFORE DOCUMENT_START scripts are injected.
+                                // V2 overlay toggles:
+                                // - ghost_mode: user FocusGram "ghostMode" controls it
+                                // - others: keep using existing v2 toggles
+                                await prefs.setBool(
+                                  'fg_v2_${V2OverlayScriptId.ghostMode.name}_enabled',
+                                  settingsService.ghostMode,
+                                );
+                                await prefs.setBool(
+                                  'fg_v2_${V2OverlayScriptId.adBlockerDom.name}_enabled',
+                                  settingsService.v2AdBlockerDomEnabled,
+                                );
+                                await prefs.setBool(
+                                  'fg_v2_${V2OverlayScriptId.contentHider.name}_enabled',
+                                  settingsService.v2ContentHiderEnabled,
+                                );
+                                await prefs.setBool(
+                                  'fg_v2_${V2OverlayScriptId.fetchInterceptor.name}_enabled',
+                                  _shouldEnableFetchInterceptor(
+                                    settingsService,
+                                  ),
+                                );
+                                await prefs.setBool(
+                                  'fg_v2_${V2OverlayScriptId.autoplayBlocker.name}_enabled',
+                                  settingsService.blockAutoplay,
+                                );
+
+                                // Content hider flags consumed by v2/content_hider.js
+                                await prefs.setBool(
+                                  'content_stories',
+                                  settingsService.contentStories,
+                                );
+                                await prefs.setBool(
+                                  'content_posts',
+                                  settingsService.contentPosts,
+                                );
+                                await prefs.setBool(
+                                  'content_reels',
+                                  settingsService.contentReels,
+                                );
+                                await prefs.setBool(
+                                  'content_suggested',
+                                  settingsService.contentSuggested,
+                                );
+
+                                // Phase 1 V2 overlay engine (theme + best-effort ad DOM cleanup)
+                                _v2Engine = ScriptEngineV2Overlay(
+                                  controller: controller,
+                                  prefs: prefs,
+                                );
+                                await _v2Engine!.initDocumentStartScripts();
+
                                 // Start safety timeout — clears loading state
                                 // if onLoadStop never fires (e.g. network stall).
                                 _resetLoadingTimeout();
@@ -671,6 +1110,7 @@ bool _reelsBlockedOverlay = false;
                               onLoadStart: (controller, url) {
                                 if (!mounted) return;
                                 final u = url?.toString() ?? '';
+                                _syncDirectThreadState(u);
                                 final lower = u.toLowerCase();
                                 final isOnboardingUrl =
                                     lower.contains('/accounts/login') ||
@@ -698,6 +1138,7 @@ bool _reelsBlockedOverlay = false;
                                 _loadingTimeout?.cancel();
 
                                 final current = url?.toString() ?? '';
+                                _syncDirectThreadState(current);
                                 setState(() {
                                   _isLoading = false;
                                   _currentUrl = current;
@@ -706,6 +1147,9 @@ bool _reelsBlockedOverlay = false;
 
                                 await _injectionManager
                                     ?.runAllPostLoadInjections(current);
+
+                                // Phase 1 V2 overlay DOM scripts
+                                await _v2Engine?.injectDocumentEndScripts();
 
                                 await controller.evaluateJavascript(
                                   source:
@@ -737,6 +1181,7 @@ bool _reelsBlockedOverlay = false;
                                     final uri = navigationAction.request.url;
                                     final appSettings = context
                                         .read<SettingsService>();
+                                    _syncDirectThreadState(url);
 
                                     final disableReels =
                                         appSettings.disableReelsEntirely;
@@ -774,7 +1219,9 @@ bool _reelsBlockedOverlay = false;
 
                                     if (disableExplore && isExploreUrl(url)) {
                                       // Show overlay immediately without navigating away
-                                      setState(() => _exploreBlockedOverlay = true);
+                                      setState(
+                                        () => _exploreBlockedOverlay = true,
+                                      );
                                       // Don't go back - just block the navigation
                                       return NavigationActionPolicy.CANCEL;
                                     }
@@ -899,7 +1346,7 @@ bool _reelsBlockedOverlay = false;
                 right: 0,
                 child: const _InstagramGradientProgressBar(),
               ),
-_EdgePanel(key: _edgePanelKey),
+            _EdgePanel(key: _edgePanelKey),
 
             if (_exploreBlockedOverlay)
               Positioned.fill(
@@ -944,10 +1391,7 @@ _EdgePanel(key: _edgePanelKey),
                           Text(
                             'You can re-enable Explore in Settings > Focus.',
                             textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: textSub,
-                              fontSize: 12,
-                            ),
+                            style: TextStyle(color: textSub, fontSize: 12),
                           ),
                           const SizedBox(height: 20),
                           TextButton(
@@ -1238,6 +1682,47 @@ _EdgePanel(key: _edgePanelKey),
     );
 
     controller.addJavaScriptHandler(
+      handlerName: 'FocusGramMediaDownload',
+      callback: (args) async {
+        if (!mounted) return null;
+
+        final raw = (args.isNotEmpty ? args[0] : '') as String;
+
+        // We still want to show a tailored snackbar message, but the heavy
+        // JSON + security validation is delegated to the pure helper.
+        String type = 'video';
+        try {
+          final payload = jsonDecode(raw) as Map<String, dynamic>;
+          type = (payload['type'] as String? ?? 'video').toString();
+        } catch (_) {
+          // If payload isn't parseable, helper will reject anyway.
+        }
+
+        final ok = await handleFocusGramMediaDownload(
+          raw: raw,
+          launch: (uri) => launchUrl(uri, mode: LaunchMode.externalApplication),
+        );
+
+        if (!mounted) return null;
+
+        if (!ok) return null;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              type == 'photo'
+                  ? 'Opening photo download…'
+                  : 'Opening video download…',
+            ),
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+          ),
+        );
+        return null;
+      }, // closes callback
+    ); // closes addJavaScriptHandler
+
+    controller.addJavaScriptHandler(
       handlerName: 'FocusGramThemeChannel',
       callback: (args) {
         final value = (args.isNotEmpty ? args[0] : '') as String;
@@ -1257,7 +1742,12 @@ _EdgePanel(key: _edgePanelKey),
       handlerName: 'UrlChange',
       callback: (args) async {
         final url = (args.isNotEmpty ? args[0] : '') as String? ?? '';
+        _syncDirectThreadState(url);
         await _injectionManager?.runAllPostLoadInjections(url);
+
+        // Phase 1 V2 overlay re-inject on SPA route changes
+        await _v2Engine?.injectDocumentEndScripts();
+
         if (!mounted) return;
         setState(() {
           _currentUrl = url;
@@ -1267,9 +1757,12 @@ _EdgePanel(key: _edgePanelKey),
           _isLoading = false;
         });
 
-        final settings = context.read<SettingsService>();
-                                        final disableReels = settings.disableReelsEntirely;
-                                        final disableExplore = settings.disableExploreEntirely;
+        final disableReels = context
+            .read<SettingsService>()
+            .disableReelsEntirely;
+        final disableExplore = context
+            .read<SettingsService>()
+            .disableExploreEntirely;
 
         final path = Uri.tryParse(url)?.path ?? url;
         final isReels = path.startsWith('/reels') || path.startsWith('/reel/');
@@ -1374,22 +1867,37 @@ class _EdgePanelState extends State<_EdgePanel> {
   @override
   Widget build(BuildContext context) {
     final sm = context.watch<SessionManager>();
-    final int remaining = sm.remainingSessionSeconds;
-    final double progress = sm.perSessionSeconds > 0
-        ? (remaining / sm.perSessionSeconds).clamp(0.0, 1.0)
-        : 0;
-    Color barColor = progress < 0.2
-        ? Colors.redAccent
-        : (progress < 0.5 ? Colors.yellowAccent : Colors.blueAccent);
-
     final settings = context.watch<SettingsService>();
     final isDark = settings.isDarkMode;
-    final reelsHardDisabled =
-        settings.disableReelsEntirely;
-    final panelBg = isDark ? const Color(0xFF121212) : Colors.white;
-    final textDim = isDark ? Colors.white70 : Colors.black87;
-    final textSub = isDark ? Colors.white30 : Colors.black38;
+    final reelsHardDisabled = settings.disableReelsEntirely;
+    final panelBg = isDark ? const Color(0xFF111214) : Colors.white;
+    final textMain = isDark ? Colors.white : Colors.black87;
+    final textSub = isDark ? Colors.white60 : Colors.black54;
     final border = isDark ? Colors.white12 : Colors.black12;
+    final canStart =
+        !reelsHardDisabled &&
+        !sm.isSessionActive &&
+        !sm.isCooldownActive &&
+        sm.dailyRemainingSeconds > 0;
+    final statusColor = reelsHardDisabled
+        ? Colors.redAccent
+        : sm.isSessionActive
+        ? Colors.greenAccent
+        : sm.isCooldownActive
+        ? Colors.orangeAccent
+        : Colors.blueAccent;
+    final statusText = reelsHardDisabled
+        ? 'Reels blocked'
+        : sm.isSessionActive
+        ? 'Session active'
+        : sm.isCooldownActive
+        ? 'Cooldown'
+        : sm.dailyRemainingSeconds <= 0
+        ? 'Daily limit reached'
+        : 'Ready';
+    final sessionProgress = sm.isSessionActive && sm.perSessionSeconds > 0
+        ? (sm.remainingSessionSeconds / sm.perSessionSeconds).clamp(0.0, 1.0)
+        : 0.0;
 
     return Stack(
       children: [
@@ -1404,164 +1912,247 @@ class _EdgePanelState extends State<_EdgePanel> {
             ),
           ),
         AnimatedPositioned(
-          duration: const Duration(milliseconds: 350),
-          curve: Curves.easeOutQuart,
-          left: _isExpanded ? 0 : -220,
-          top: MediaQuery.of(context).size.height * 0.25 + 30,
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic,
+          right: _isExpanded ? 12 : -328,
+          top: MediaQuery.of(context).padding.top + 72,
           child: Container(
-            width: 210,
-            padding: const EdgeInsets.all(24),
+            width: 316,
+            constraints: BoxConstraints(
+              maxHeight:
+                  MediaQuery.of(context).size.height -
+                  MediaQuery.of(context).padding.top -
+                  96,
+            ),
+            padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: panelBg.withValues(alpha: 0.98),
-              borderRadius: const BorderRadius.only(
-                topRight: Radius.circular(28),
-                bottomRight: Radius.circular(28),
-              ),
+              borderRadius: BorderRadius.circular(20),
               border: Border.all(color: border, width: 0.5),
               boxShadow: [
                 BoxShadow(
                   color: (isDark ? Colors.black : Colors.black12).withValues(
                     alpha: 0.3,
                   ),
-                  blurRadius: 30,
-                  spreadRadius: 5,
+                  blurRadius: 24,
+                  offset: const Offset(0, 12),
                 ),
               ],
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'FOCUS CONTROL',
-                      style: TextStyle(
-                        color: Colors.blueAccent,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.5,
-                      ),
-                    ),
-                    IconButton(
-                      icon: Icon(
-                        Icons.chevron_left_rounded,
-                        color: textDim,
-                        size: 28,
-                      ),
-                      onPressed: _toggleExpansion,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 32),
-                Text(
-                  'REEL SESSION',
-                  style: TextStyle(
-                    color: textSub,
-                    fontSize: 11,
-                    letterSpacing: 1,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  sm.isSessionActive
-                      ? _formatTime(sm.remainingSessionSeconds)
-                      : 'Off',
-                  style: TextStyle(
-                    color: barColor,
-                    fontSize: 40,
-                    fontWeight: FontWeight.w200,
-                    letterSpacing: 2,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                _buildStatRow(
-                  'REEL QUOTA',
-                  '${sm.dailyRemainingSeconds ~/ 60}m Left',
-                  Icons.timer_outlined,
-                  isDark: isDark,
-                ),
-                _buildStatRow(
-                  'AUTO-CLOSE',
-                  _formatTime(sm.appSessionRemainingSeconds),
-                  Icons.hourglass_empty_rounded,
-                  isDark: isDark,
-                ),
-                _buildStatRow(
-                  'COOLDOWN',
-                  sm.isCooldownActive
-                      ? _formatTime(sm.cooldownRemainingSeconds)
-                      : 'Off',
-                  Icons.coffee_rounded,
-                  isWarning: sm.isCooldownActive,
-                  isDark: isDark,
-                ),
-                if (!reelsHardDisabled &&
-                    !sm.isSessionActive &&
-                    sm.dailyRemainingSeconds > 0) ...[
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        context
-                            .findAncestorStateOfType<_MainWebViewPageState>()
-                            ?._showReelSessionPicker();
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blueAccent,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: statusColor.withValues(alpha: 0.14),
                           borderRadius: BorderRadius.circular(12),
                         ),
+                        child: Icon(Icons.timer_outlined, color: statusColor),
                       ),
-                      child: const Text(
-                        'Start Session',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Focus Control',
+                              style: TextStyle(
+                                color: textMain,
+                                fontSize: 17,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              statusText,
+                              style: TextStyle(
+                                color: statusColor,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
+                      IconButton(
+                        tooltip: 'Close',
+                        icon: Icon(
+                          Icons.close_rounded,
+                          color: textSub,
+                          size: 22,
+                        ),
+                        onPressed: _toggleExpansion,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: (isDark ? Colors.white : Colors.black).withValues(
+                        alpha: 0.05,
+                      ),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Reel session',
+                          style: TextStyle(color: textSub, fontSize: 12),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          sm.isSessionActive
+                              ? _formatTime(sm.remainingSessionSeconds)
+                              : 'Not running',
+                          style: TextStyle(
+                            color: sm.isSessionActive ? statusColor : textMain,
+                            fontSize: sm.isSessionActive ? 38 : 24,
+                            fontWeight: FontWeight.w700,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(999),
+                          child: LinearProgressIndicator(
+                            value: sm.isSessionActive ? sessionProgress : 0,
+                            minHeight: 6,
+                            backgroundColor: isDark
+                                ? Colors.white10
+                                : Colors.black12,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              statusColor,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ] else if (reelsHardDisabled) ...[
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildStatCard(
+                          'Quota',
+                          '${sm.dailyRemainingSeconds ~/ 60}m',
+                          Icons.hourglass_bottom_rounded,
+                          isDark: isDark,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _buildStatCard(
+                          'Auto-close app',
+                          sm.appSessionRemainingSeconds > 0
+                              ? _formatTime(sm.appSessionRemainingSeconds)
+                              : 'Off',
+                          Icons.lock_clock_rounded,
+                          isDark: isDark,
+                        ),
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 10),
-                  Text(
-                    'Reels disabled in settings',
-                    style: TextStyle(color: textSub, fontSize: 11),
+                  _buildStatusRow(
+                    icon: Icons.local_cafe_outlined,
+                    label: 'Cooldown',
+                    value: sm.isCooldownActive
+                        ? _formatTime(sm.cooldownRemainingSeconds)
+                        : 'Inactive',
+                    color: sm.isCooldownActive ? Colors.orangeAccent : textSub,
+                    isDark: isDark,
+                  ),
+                  _buildStatusRow(
+                    icon: Icons.block_rounded,
+                    label: 'Hard block',
+                    value: reelsHardDisabled ? 'On' : 'Off',
+                    color: reelsHardDisabled ? Colors.redAccent : textSub,
+                    isDark: isDark,
+                  ),
+                  const SizedBox(height: 16),
+                  if (sm.isSessionActive)
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: () {
+                          context.read<SessionManager>().endSession();
+                          HapticFeedback.mediumImpact();
+                        },
+                        icon: const Icon(Icons.stop_circle_outlined, size: 18),
+                        label: const Text('End Session'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.redAccent,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    )
+                  else
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: canStart
+                            ? () {
+                                _toggleExpansion();
+                                context
+                                    .findAncestorStateOfType<
+                                      _MainWebViewPageState
+                                    >()
+                                    ?._showReelSessionPicker();
+                              }
+                            : null,
+                        icon: const Icon(Icons.play_arrow_rounded, size: 20),
+                        label: const Text('Start Session'),
+                      ),
+                    ),
+                  const SizedBox(height: 8),
+                  if (!canStart && !sm.isSessionActive)
+                    Text(
+                      reelsHardDisabled
+                          ? 'Turn off hard Reels blocking in Focus Mode to use timed sessions.'
+                          : sm.isCooldownActive
+                          ? 'A cooldown is active before the next Reel session.'
+                          : 'Your daily Reel quota is used up.',
+                      style: TextStyle(
+                        color: textSub,
+                        fontSize: 12,
+                        height: 1.35,
+                      ),
+                    ),
+                  const SizedBox(height: 10),
+                  Divider(color: border),
+                  ListTile(
+                    onTap: () {
+                      _toggleExpansion();
+                      context
+                          .findAncestorStateOfType<_MainWebViewPageState>()
+                          ?._signOut();
+                    },
+                    leading: const Icon(
+                      Icons.logout_rounded,
+                      color: Colors.redAccent,
+                      size: 20,
+                    ),
+                    title: const Text(
+                      'Switch Account',
+                      style: TextStyle(
+                        color: Colors.redAccent,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
                   ),
                 ],
-                const SizedBox(height: 32),
-                Divider(color: isDark ? Colors.white10 : Colors.black12),
-                const SizedBox(height: 8),
-                ListTile(
-                  onTap: () {
-                    _toggleExpansion();
-                    context
-                        .findAncestorStateOfType<_MainWebViewPageState>()
-                        ?._signOut();
-                  },
-                  leading: const Icon(
-                    Icons.logout_rounded,
-                    color: Colors.redAccent,
-                    size: 20,
-                  ),
-                  title: const Text(
-                    'Switch Account',
-                    style: TextStyle(
-                      color: Colors.redAccent,
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                ),
-              ],
+              ),
             ),
           ),
         ),
@@ -1569,61 +2160,66 @@ class _EdgePanelState extends State<_EdgePanel> {
     );
   }
 
-  Widget _buildStatRow(
+  Widget _buildStatCard(
     String label,
     String value,
     IconData icon, {
-    bool isWarning = false,
     bool isDark = true,
   }) {
     final textMain = isDark ? Colors.white : Colors.black;
-    final textSub = isDark ? Colors.white38 : Colors.black38;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 20),
-      child: Row(
+    final textSub = isDark ? Colors.white54 : Colors.black54;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: isWarning
-                  ? Colors.redAccent.withValues(alpha: 0.1)
-                  : (isDark ? Colors.white : Colors.black).withValues(
-                      alpha: 0.05,
-                    ),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              icon,
-              color: isWarning
-                  ? Colors.redAccent
-                  : (isDark ? Colors.white70 : Colors.black54),
-              size: 16,
+          Icon(icon, color: textSub, size: 18),
+          const SizedBox(height: 8),
+          Text(label, style: TextStyle(color: textSub, fontSize: 11)),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            style: TextStyle(
+              color: textMain,
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              fontFeatures: const [FontFeature.tabularFigures()],
             ),
           ),
-          const SizedBox(width: 16),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  color: textSub,
-                  fontSize: 9,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                value,
-                style: TextStyle(
-                  color: isWarning ? Colors.redAccent : textMain,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
-              ),
-            ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusRow({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+    bool isDark = true,
+  }) {
+    final textMain = isDark ? Colors.white : Colors.black87;
+    final textSub = isDark ? Colors.white54 : Colors.black54;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(label, style: TextStyle(color: textSub, fontSize: 13)),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              color: color == textSub ? textMain : color,
+              fontWeight: FontWeight.w600,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
           ),
         ],
       ),

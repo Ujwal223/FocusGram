@@ -35,12 +35,36 @@ class ScriptEngine {
         );
       }
     }
+
+    // Initialize script configurations after scripts are loaded
+    await _initializeScriptConfigs();
+  }
+
+  // ── Initialize script configurations from saved preferences ────────────────
+  Future<void> _initializeScriptConfigs() async {
+    // Fetch interceptor config
+    final fetchInterceptor = ScriptRegistry.byId(ScriptId.fetchInterceptor);
+    if (fetchInterceptor.enabled) {
+      await _updateFetchInterceptorConfig();
+    }
+
+    // Autoplay blocker config
+    final autoplayBlocker = ScriptRegistry.byId(ScriptId.autoplayBlocker);
+    if (autoplayBlocker.enabled) {
+      await _updateAutoplayBlockerConfig();
+    }
+
+    // Content hider flags
+    await _pushContentFlags();
   }
 
   // ── Called from onLoadStop: inject all DOCUMENT_END enabled scripts ────────
   Future<void> injectDocumentEndScripts() async {
-    for (final script in ScriptRegistry.all
-        .where((s) => s.injectionTime == UserScriptInjectionTime.AT_DOCUMENT_END && s.enabled)) {
+    for (final script in ScriptRegistry.all.where(
+      (s) =>
+          s.injectionTime == UserScriptInjectionTime.AT_DOCUMENT_END &&
+          s.enabled,
+    )) {
       await _inject(script);
     }
     // After content_hider is injected, push saved content flags
@@ -77,6 +101,9 @@ class ScriptEngine {
     } else {
       await _inject(script);
     }
+
+    // Re-initialize configurations after toggle
+    await _initializeScriptConfigs();
   }
 
   // ── Content hider flags ────────────────────────────────────────────────────
@@ -100,15 +127,80 @@ class ScriptEngine {
     );
   }
 
+  // ── Fetch interceptor configuration ────────────────────────────────────────
+  Future<void> setFetchInterceptorConfig({
+    bool? blockAds,
+    bool? blockSponsored,
+    bool? blockSuggested,
+    bool? blockVideos,
+    bool? blockAutoplay,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final config = {
+      'blockAds': blockAds ?? prefs.getBool('fetch_block_ads') ?? false,
+      'blockSponsored':
+          blockSponsored ?? prefs.getBool('fetch_block_sponsored') ?? false,
+      'blockSuggested':
+          blockSuggested ?? prefs.getBool('fetch_block_suggested') ?? false,
+      'blockVideos':
+          blockVideos ?? prefs.getBool('fetch_block_videos') ?? false,
+      'blockAutoplay':
+          blockAutoplay ?? prefs.getBool('fetch_block_autoplay') ?? false,
+    };
+
+    // Save individual prefs
+    await prefs.setBool('fetch_block_ads', config['blockAds']!);
+    await prefs.setBool('fetch_block_sponsored', config['blockSponsored']!);
+    await prefs.setBool('fetch_block_suggested', config['blockSuggested']!);
+    await prefs.setBool('fetch_block_videos', config['blockVideos']!);
+    await prefs.setBool('fetch_block_autoplay', config['blockAutoplay']!);
+
+    // Apply to webview
+    await controller.evaluateJavascript(
+      source: 'window.__fgSetFilterConfig?.(${jsonEncode(config)})',
+    );
+  }
+
+  Future<void> _updateFetchInterceptorConfig() async {
+    final prefs = await SharedPreferences.getInstance();
+    await setFetchInterceptorConfig(
+      blockAds: prefs.getBool('fetch_block_ads'),
+      blockSponsored: prefs.getBool('fetch_block_sponsored'),
+      blockSuggested: prefs.getBool('fetch_block_suggested'),
+      blockVideos: prefs.getBool('fetch_block_videos'),
+      blockAutoplay: prefs.getBool('fetch_block_autoplay'),
+    );
+  }
+
+  // ── Autoplay blocker configuration ─────────────────────────────────────────
+  Future<void> setAutoplayBlockerEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('autoplay_blocker_enabled', enabled);
+
+    // Apply to webview
+    await controller.evaluateJavascript(
+      source: 'window.__fgSetBlockAutoplay?.(${jsonEncode(enabled)})',
+    );
+  }
+
+  Future<void> _updateAutoplayBlockerConfig() async {
+    final prefs = await SharedPreferences.getInstance();
+    await setAutoplayBlockerEnabled(
+      prefs.getBool('autoplay_blocker_enabled') ?? false,
+    );
+  }
+
   // ── Online status hide ─────────────────────────────────────────────────────
   Future<void> setOnlineHide(bool enabled) async {
     await prefs.setBool('ghost_online_hide', enabled);
     if (enabled) {
       await controller.evaluateJavascript(
-          source: 'window.__fgEnableOnlineHide?.()');
+        source: 'window.__fgEnableOnlineHide?.()',
+      );
     } else {
       await controller.evaluateJavascript(
-          source: 'window.__fgDisableOnlineHide?.()');
+        source: 'window.__fgDisableOnlineHide?.()',
+      );
     }
   }
 

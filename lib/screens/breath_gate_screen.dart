@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 
-/// A mindfulness screen shown before the app opens.
-/// Forces the user to take a deep 10-second breath.
+/// A mindfulness screen shown before Instagram opens.
 class BreathGateScreen extends StatefulWidget {
   final VoidCallback onFinish;
+  final int durationSeconds;
 
-  const BreathGateScreen({super.key, required this.onFinish});
+  const BreathGateScreen({
+    super.key,
+    required this.onFinish,
+    this.durationSeconds = 10,
+  });
 
   @override
   State<BreathGateScreen> createState() => _BreathGateScreenState();
@@ -16,15 +20,15 @@ class _BreathGateScreenState extends State<BreathGateScreen>
     with TickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _scaleAnimation;
-  int _secondsRemaining = 10;
+  late int _secondsRemaining;
   Timer? _timer;
   bool _canContinue = false;
 
   @override
   void initState() {
     super.initState();
+    _secondsRemaining = widget.durationSeconds.clamp(3, 60).toInt();
 
-    // 10-second breathing animation: 5s in, 5s out
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 5),
@@ -71,7 +75,7 @@ class _BreathGateScreenState extends State<BreathGateScreen>
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const Text(
-                'Are you sure you want to open FocusGram?',
+                'Are you sure you want to open Instagram?',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.white,
@@ -131,7 +135,7 @@ class _BreathGateScreenState extends State<BreathGateScreen>
                       borderRadius: BorderRadius.circular(25),
                     ),
                   ),
-                  child: const Text('Continue to FocusGram'),
+                  child: const Text('Continue to Instagram'),
                 ),
               ),
             ],

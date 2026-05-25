@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/session_manager.dart';
+import '../services/settings_service.dart';
 import '../utils/discipline_challenge.dart';
 
 class SessionModal extends StatefulWidget {
@@ -63,23 +64,22 @@ class _SessionModalState extends State<SessionModal> {
             style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [1, 5, 10, 15].map((m) {
-              return Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                  child: ElevatedButton(
-                    onPressed: (sm.isCooldownActive || sm.isDailyLimitExhausted)
-                        ? null
-                        : () => _start(m),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white12,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                    child: Text('${m}m'),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [1, 3, 5, 10, 15, 20, 30].map((m) {
+              return SizedBox(
+                width: 72,
+                child: ElevatedButton(
+                  onPressed: (sm.isCooldownActive || sm.isDailyLimitExhausted)
+                      ? null
+                      : () => _start(m),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white12,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
+                  child: Text('${m}m'),
                 ),
               );
             }).toList(),
@@ -92,8 +92,8 @@ class _SessionModalState extends State<SessionModal> {
           Slider(
             value: _customMinutes,
             min: 1,
-            max: 30,
-            divisions: 29,
+            max: 60,
+            divisions: 59,
             label: '${_customMinutes.toInt()}m',
             onChanged: (v) => setState(() => _customMinutes = v),
           ),
@@ -126,10 +126,15 @@ class _SessionModalState extends State<SessionModal> {
 
   void _start(int minutes) async {
     final sm = context.read<SessionManager>();
+    final settings = context.read<SettingsService>();
 
-    // Always require word challenge for reel sessions (User request)
-    final success = await DisciplineChallenge.show(context);
-    if (!success) return;
+    if (settings.requireWordChallenge) {
+      final success = await DisciplineChallenge.show(
+        context,
+        count: settings.resolvedWordChallengeCount(),
+      );
+      if (!success) return;
+    }
 
     if (sm.startSession(minutes)) {
       if (mounted) Navigator.pop(context);

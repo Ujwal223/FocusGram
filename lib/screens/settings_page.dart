@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -8,6 +9,7 @@ import '../services/settings_service.dart';
 import '../services/focusgram_router.dart';
 import '../features/screen_time/screen_time_screen.dart';
 import 'guardrails_page.dart';
+import 'extras_settings_page.dart';
 
 // ─── Main Settings Page ───────────────────────────────────────────────────────
 
@@ -34,6 +36,7 @@ class SettingsPage extends StatelessWidget {
       ),
       body: ListView(
         children: [
+          const _DonateTile(),
           _buildStatsRow(sm),
 
           const _SectionHeader(title: 'FOCUS & BLOCKING'),
@@ -60,6 +63,19 @@ class SettingsPage extends StatelessWidget {
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const GuardrailsPage()),
+            ),
+          ),
+
+          const _SectionHeader(title: 'EXTRAS'),
+          _SubmoduleTile(
+            icon: Icons.download_rounded,
+            iconColor: Colors.orangeAccent,
+            title: 'Extras',
+            subtitle: 'Download media, Ghost Mode, Ad Blocker',
+            enabled: true,
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ExtrasSettingsPage()),
             ),
           ),
 
@@ -264,6 +280,7 @@ class FocusSettingsPage extends StatelessWidget {
       body: ListView(
         children: [
           const _SectionHeader(title: 'BLOCKING'),
+
           Container(
             margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -293,12 +310,23 @@ class FocusSettingsPage extends StatelessWidget {
                 color: Colors.redAccent.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.shield_rounded, color: Colors.redAccent, size: 20),
+              child: const Icon(
+                Icons.shield_rounded,
+                color: Colors.redAccent,
+                size: 20,
+              ),
             ),
             title: const Text('Minimal Mode', style: TextStyle(fontSize: 15)),
             subtitle: Text(
-              settings.minimalModeEnabled ? 'Enabled - tap to customize' : 'Disabled - tap to configure',
-              style: TextStyle(fontSize: 12, color: settings.minimalModeEnabled ? Colors.greenAccent : Colors.grey),
+              settings.minimalModeEnabled
+                  ? 'Enabled - tap to customize'
+                  : 'Disabled - tap to configure',
+              style: TextStyle(
+                fontSize: 12,
+                color: settings.minimalModeEnabled
+                    ? Colors.greenAccent
+                    : Colors.grey,
+              ),
             ),
             trailing: Switch(
               value: settings.minimalModeEnabled,
@@ -307,22 +335,49 @@ class FocusSettingsPage extends StatelessWidget {
                 HapticFeedback.selectionClick();
               },
             ),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MinimalModeSubmenuPage())),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const MinimalModeSubmenuPage()),
+            ),
           ),
 
           const _SectionHeader(title: 'FRICTION'),
           _SwitchTile(
             title: 'Mindfulness Gate',
-            subtitle: 'Breath screen before opening Instagram',
+            subtitle: '${settings.breathGateSeconds}s before opening Instagram',
             value: settings.showBreathGate,
             onChanged: (v) => settings.setShowBreathGate(v),
           ),
+          if (settings.showBreathGate)
+            _NumberEditTile(
+              title: 'Gate Duration',
+              label: '${settings.breathGateSeconds} seconds',
+              initialValue: settings.breathGateSeconds,
+              min: 3,
+              max: 60,
+              suffix: 'seconds',
+              onSubmitted: (v) => settings.setBreathGateSeconds(v),
+            ),
           _SwitchTile(
-            title: 'Strict Mode (Word Challenge)',
-            subtitle: 'Must type a phrase before starting a Reel session',
+            title: 'Typing Challenge',
+            subtitle: settings.wordChallengeCount == 0
+                ? 'Random: 10-35 words'
+                : '${settings.wordChallengeCount} words',
             value: settings.requireWordChallenge,
             onChanged: (v) => settings.setRequireWordChallenge(v),
           ),
+          if (settings.requireWordChallenge)
+            _ChoiceTile<int>(
+              title: 'Typing Words',
+              value: settings.wordChallengeCount,
+              label: settings.wordChallengeCount == 0
+                  ? 'Random (10-35)'
+                  : '${settings.wordChallengeCount} words',
+              options: const [20, 25, 30, 35, 0],
+              optionLabel: (v) => v == 0 ? 'Random (10-35)' : '$v words',
+              onSelected: (v) => settings.setWordChallengeCount(v),
+            ),
+
           const _SectionHeader(title: 'MEDIA'),
           _SwitchTile(
             title: 'Block Autoplay Videos',
@@ -348,8 +403,94 @@ class FocusSettingsPage extends StatelessWidget {
               ),
             ),
 
+          const _SectionHeader(title: 'FOCUSGRAM V2 OVERLAY'),
+
+          _SwitchTile(
+            title: 'Content Hider',
+            subtitle: 'Hide stories tray, feed posts, reels, suggested content',
+            value: settings.v2ContentHiderEnabled,
+            onChanged: (v) => settings.setV2ContentHiderEnabled(v),
+          ),
+
+          if (settings.v2ContentHiderEnabled)
+            Padding(
+              padding: const EdgeInsets.only(left: 32),
+              child: Column(
+                children: [
+                  _SwitchTile(
+                    title: 'Hide Stories Tray',
+                    subtitle: 'Story bubbles row',
+                    value: settings.contentStories,
+                    onChanged: (v) => settings.setContentStoriesEnabled(v),
+                  ),
+                  _SwitchTile(
+                    title: 'Hide Feed Posts',
+                    subtitle: 'Home feed posts',
+                    value: settings.contentPosts,
+                    onChanged: (v) => settings.setContentPostsEnabled(v),
+                  ),
+                  _SwitchTile(
+                    title: 'Hide Reels (Feed)',
+                    subtitle: 'Reels shown in the feed',
+                    value: settings.contentReels,
+                    onChanged: (v) => settings.setContentReelsEnabled(v),
+                  ),
+                  _SwitchTile(
+                    title: 'Hide Suggested Content',
+                    subtitle: 'Suggested posts and recommendation units',
+                    value: settings.contentSuggested,
+                    onChanged: (v) => settings.setContentSuggestedEnabled(v),
+                  ),
+                ],
+              ),
+            ),
+
           const SizedBox(height: 40),
         ],
+      ),
+    );
+  }
+}
+
+class _DonateTile extends StatelessWidget {
+  const _DonateTile();
+
+  static final Uri _donateUri = Uri.parse('https://buymemomo.com/ujwal');
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+      decoration: BoxDecoration(
+        color: Colors.pinkAccent.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.pinkAccent.withValues(alpha: 0.22)),
+      ),
+      child: ListTile(
+        leading: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: Colors.pinkAccent.withValues(alpha: 0.14),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Icon(
+            Icons.favorite_rounded,
+            color: Colors.pinkAccent,
+            size: 20,
+          ),
+        ),
+        title: const Text(
+          'Please donate to support the development of this project.',
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+        subtitle: const Text(
+          'Your support keeps FocusGram free and maintained.',
+          style: TextStyle(fontSize: 12),
+        ),
+        trailing: const Icon(Icons.open_in_new, size: 14),
+        onTap: () =>
+            launchUrl(_donateUri, mode: LaunchMode.externalApplication),
       ),
     );
   }
@@ -368,6 +509,7 @@ class _MinimalModeSubmenuPageState extends State<MinimalModeSubmenuPage> {
   late bool _blurExplore;
   late bool _disableReelsEntirely;
   late bool _disableExploreEntirely;
+  late bool _blockHomeFeedScroll;
 
   @override
   void initState() {
@@ -376,25 +518,50 @@ class _MinimalModeSubmenuPageState extends State<MinimalModeSubmenuPage> {
     _blurExplore = settings.blurExplore;
     _disableReelsEntirely = settings.disableReelsEntirely;
     _disableExploreEntirely = settings.disableExploreEntirely;
+    _blockHomeFeedScroll = settings.blockHomeFeedScroll;
   }
 
-  void _updateSetting(String key, bool value) {
+  Future<void> _updateSetting(String key, bool value) async {
     final settings = context.read<SettingsService>();
     setState(() {
       switch (key) {
         case 'blurExplore':
           _blurExplore = value;
-          settings.setBlurExplore(value);
           break;
         case 'disableReelsEntirely':
           _disableReelsEntirely = value;
-          settings.setDisableReelsEntirelyInternal(value);
           break;
         case 'disableExploreEntirely':
           _disableExploreEntirely = value;
-          settings.setDisableExploreEntirelyInternal(value);
+          break;
+        case 'blockHomeFeedScroll':
+          _blockHomeFeedScroll = value;
           break;
       }
+    });
+
+    switch (key) {
+      case 'blurExplore':
+        await settings.setBlurExplore(value);
+        break;
+      case 'disableReelsEntirely':
+        await settings.setDisableReelsEntirelyInternal(value);
+        break;
+      case 'disableExploreEntirely':
+        await settings.setDisableExploreEntirelyInternal(value);
+        break;
+      case 'blockHomeFeedScroll':
+        await settings.setBlockHomeFeedScrollInternal(value);
+        break;
+    }
+
+    if (!mounted) return;
+    final latest = context.read<SettingsService>();
+    setState(() {
+      _blurExplore = latest.blurExplore;
+      _disableReelsEntirely = latest.disableReelsEntirely;
+      _disableExploreEntirely = latest.disableExploreEntirely;
+      _blockHomeFeedScroll = latest.blockHomeFeedScroll;
     });
     HapticFeedback.selectionClick();
   }
@@ -406,6 +573,7 @@ class _MinimalModeSubmenuPageState extends State<MinimalModeSubmenuPage> {
       _blurExplore = true;
       _disableReelsEntirely = true;
       _disableExploreEntirely = true;
+      _blockHomeFeedScroll = true;
     });
     HapticFeedback.mediumImpact();
   }
@@ -418,6 +586,7 @@ class _MinimalModeSubmenuPageState extends State<MinimalModeSubmenuPage> {
       _blurExplore = settings.blurExplore;
       _disableReelsEntirely = settings.disableReelsEntirely;
       _disableExploreEntirely = settings.disableExploreEntirely;
+      _blockHomeFeedScroll = settings.blockHomeFeedScroll;
     });
     HapticFeedback.mediumImpact();
   }
@@ -437,61 +606,88 @@ class _MinimalModeSubmenuPageState extends State<MinimalModeSubmenuPage> {
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: isMinimalModeEnabled 
-                    ? [Colors.redAccent.withValues(alpha: 0.2), Colors.red.withValues(alpha: 0.1)]
-                    : [Colors.grey.withValues(alpha: 0.1), Colors.grey.withValues(alpha: 0.05)],
+                colors: isMinimalModeEnabled
+                    ? [
+                        Colors.redAccent.withValues(alpha: 0.2),
+                        Colors.red.withValues(alpha: 0.1),
+                      ]
+                    : [
+                        Colors.grey.withValues(alpha: 0.1),
+                        Colors.grey.withValues(alpha: 0.05),
+                      ],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: isMinimalModeEnabled ? Colors.redAccent.withValues(alpha: 0.3) : Colors.grey.withValues(alpha: 0.2),
+                color: isMinimalModeEnabled
+                    ? Colors.redAccent.withValues(alpha: 0.3)
+                    : Colors.grey.withValues(alpha: 0.2),
               ),
             ),
             child: Column(
               children: [
                 Icon(
-                  isMinimalModeEnabled ? Icons.shield_rounded : Icons.shield_outlined,
+                  isMinimalModeEnabled
+                      ? Icons.shield_rounded
+                      : Icons.shield_outlined,
                   color: isMinimalModeEnabled ? Colors.redAccent : Colors.grey,
                   size: 48,
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  isMinimalModeEnabled ? 'Minimal Mode Active' : 'Minimal Mode Disabled',
+                  isMinimalModeEnabled
+                      ? 'Minimal Mode Active'
+                      : 'Minimal Mode Disabled',
                   style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
-                    color: isMinimalModeEnabled ? Colors.redAccent : Colors.grey,
+                    color: isMinimalModeEnabled
+                        ? Colors.redAccent
+                        : Colors.grey,
                   ),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  isMinimalModeEnabled 
+                  isMinimalModeEnabled
                       ? 'Distractions are blocked. Customize which features stay enabled below.'
                       : 'Turn on to block all distractions at once, or customize individual settings below.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 13, color: isDark ? Colors.white54 : Colors.black54),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: isDark ? Colors.white54 : Colors.black54,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: isMinimalModeEnabled ? _turnOffMinimalMode : _turnOnMinimalMode,
+                    onPressed: isMinimalModeEnabled
+                        ? _turnOffMinimalMode
+                        : _turnOnMinimalMode,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: isMinimalModeEnabled ? Colors.grey : Colors.redAccent,
+                      backgroundColor: isMinimalModeEnabled
+                          ? Colors.grey
+                          : Colors.redAccent,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
-                    child: Text(isMinimalModeEnabled ? 'Turn Off Minimal Mode' : 'Turn On Minimal Mode'),
+                    child: Text(
+                      isMinimalModeEnabled
+                          ? 'Turn Off Minimal Mode'
+                          : 'Turn On Minimal Mode',
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-          
+
           const _SectionHeader(title: 'CUSTOMIZE SETTINGS'),
-          
+
           Container(
             margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -502,7 +698,11 @@ class _MinimalModeSubmenuPageState extends State<MinimalModeSubmenuPage> {
             ),
             child: const Row(
               children: [
-                Icon(Icons.touch_app_rounded, size: 14, color: Colors.blueAccent),
+                Icon(
+                  Icons.touch_app_rounded,
+                  size: 14,
+                  color: Colors.blueAccent,
+                ),
                 SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -513,12 +713,18 @@ class _MinimalModeSubmenuPageState extends State<MinimalModeSubmenuPage> {
               ],
             ),
           ),
-          
+
           _SwitchTile(
             title: 'Blur Feed & Explore',
             subtitle: 'Blurs post thumbnails until tapped',
             value: _blurExplore,
             onChanged: (v) => _updateSetting('blurExplore', v),
+          ),
+          _SwitchTile(
+            title: 'Block Home Feed Scroll',
+            subtitle: 'Freeze vertical scrolling on the home feed only',
+            value: _blockHomeFeedScroll,
+            onChanged: (v) => _updateSetting('blockHomeFeedScroll', v),
           ),
           _SwitchTile(
             title: 'Disable Reels Entirely',
@@ -532,7 +738,7 @@ class _MinimalModeSubmenuPageState extends State<MinimalModeSubmenuPage> {
             value: _disableExploreEntirely,
             onChanged: (v) => _updateSetting('disableExploreEntirely', v),
           ),
-          
+
           const SizedBox(height: 40),
         ],
       ),
@@ -550,43 +756,52 @@ class AppearancePage extends StatefulWidget {
 }
 
 class _AppearancePageState extends State<AppearancePage> {
-  Future<void> _addSchedule(BuildContext context, SettingsService settings) async {
+  Future<void> _addSchedule(
+    BuildContext context,
+    SettingsService settings,
+  ) async {
     TimeOfDay? startTime = await showTimePicker(
       context: context,
       initialTime: const TimeOfDay(hour: 21, minute: 0),
       helpText: 'Select start time',
     );
-    
+
     if (startTime == null || !context.mounted) return;
-    
+
     TimeOfDay? endTime = await showTimePicker(
       context: context,
       initialTime: const TimeOfDay(hour: 6, minute: 0),
       helpText: 'Select end time',
     );
-    
+
     if (endTime == null || !context.mounted) return;
-    
+
     final newSchedule = {
       'enabled': true,
-      'startTime': '${startTime.hour.toString().padLeft(2, '0')}:${startTime.minute.toString().padLeft(2, '0')}',
-      'endTime': '${endTime.hour.toString().padLeft(2, '0')}:${endTime.minute.toString().padLeft(2, '0')}',
+      'startTime':
+          '${startTime.hour.toString().padLeft(2, '0')}:${startTime.minute.toString().padLeft(2, '0')}',
+      'endTime':
+          '${endTime.hour.toString().padLeft(2, '0')}:${endTime.minute.toString().padLeft(2, '0')}',
     };
-    
+
     await settings.addGrayscaleSchedule(newSchedule);
   }
 
-  Future<void> _editSchedule(BuildContext context, SettingsService settings, int index) async {
+  Future<void> _editSchedule(
+    BuildContext context,
+    SettingsService settings,
+    int index,
+  ) async {
     final schedules = settings.grayscaleSchedules;
     if (index >= schedules.length) return;
-    
+
     final current = schedules[index];
     final startParts = (current['startTime'] as String).split(':');
     final endParts = (current['endTime'] as String).split(':');
-    
+
     // Capture context before async gap
     final capturedContext = context;
-    
+
     TimeOfDay? startTime = await showTimePicker(
       context: capturedContext,
       initialTime: TimeOfDay(
@@ -595,9 +810,9 @@ class _AppearancePageState extends State<AppearancePage> {
       ),
       helpText: 'Select start time',
     );
-    
+
     if (startTime == null || !capturedContext.mounted) return;
-    
+
     TimeOfDay? endTime = await showTimePicker(
       context: capturedContext,
       initialTime: TimeOfDay(
@@ -606,27 +821,31 @@ class _AppearancePageState extends State<AppearancePage> {
       ),
       helpText: 'Select end time',
     );
-    
+
     if (endTime == null || !capturedContext.mounted) return;
-    
+
     final updatedSchedule = {
       ...current,
-      'startTime': '${startTime.hour.toString().padLeft(2, '0')}:${startTime.minute.toString().padLeft(2, '0')}',
-      'endTime': '${endTime.hour.toString().padLeft(2, '0')}:${endTime.minute.toString().padLeft(2, '0')}',
+      'startTime':
+          '${startTime.hour.toString().padLeft(2, '0')}:${startTime.minute.toString().padLeft(2, '0')}',
+      'endTime':
+          '${endTime.hour.toString().padLeft(2, '0')}:${endTime.minute.toString().padLeft(2, '0')}',
     };
-    
+
     await settings.updateGrayscaleSchedule(index, updatedSchedule);
   }
 
   Future<void> _toggleSchedule(SettingsService settings, int index) async {
-    final schedules = List<Map<String, dynamic>>.from(settings.grayscaleSchedules);
+    final schedules = List<Map<String, dynamic>>.from(
+      settings.grayscaleSchedules,
+    );
     if (index >= schedules.length) return;
-    
+
     schedules[index] = {
       ...schedules[index],
       'enabled': !(schedules[index]['enabled'] as bool),
     };
-    
+
     await settings.setGrayscaleSchedules(schedules);
   }
 
@@ -648,7 +867,7 @@ class _AppearancePageState extends State<AppearancePage> {
         ],
       ),
     );
-    
+
     if (confirmed == true) {
       await settings.removeGrayscaleSchedule(index);
     }
@@ -669,7 +888,8 @@ class _AppearancePageState extends State<AppearancePage> {
           const _SectionHeader(title: 'DISPLAY'),
           _SwitchTile(
             title: 'Grayscale Mode',
-            subtitle: 'Makes Instagram black & white — reduces dopamine response',
+            subtitle:
+                'Makes Instagram black & white — reduces dopamine response',
             value: settings.grayscaleEnabled,
             onChanged: (v) => settings.setGrayscaleEnabled(v),
           ),
@@ -687,7 +907,7 @@ class _AppearancePageState extends State<AppearancePage> {
               style: TextStyle(fontSize: 12, height: 1.5),
             ),
           ),
-          
+
           // Status indicator
           if (settings.grayscaleSchedules.isNotEmpty)
             Padding(
@@ -695,26 +915,38 @@ class _AppearancePageState extends State<AppearancePage> {
               child: Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: settings.isGrayscaleActiveNow ? Colors.green.withValues(alpha: 0.1) : Colors.orange.withValues(alpha: 0.1),
+                  color: settings.isGrayscaleActiveNow
+                      ? Colors.green.withValues(alpha: 0.1)
+                      : Colors.orange.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: settings.isGrayscaleActiveNow ? Colors.green.withValues(alpha: 0.3) : Colors.orange.withValues(alpha: 0.3)),
+                  border: Border.all(
+                    color: settings.isGrayscaleActiveNow
+                        ? Colors.green.withValues(alpha: 0.3)
+                        : Colors.orange.withValues(alpha: 0.3),
+                  ),
                 ),
                 child: Row(
                   children: [
                     Icon(
-                      settings.isGrayscaleActiveNow ? Icons.check_circle : Icons.schedule, 
-                      color: settings.isGrayscaleActiveNow ? Colors.greenAccent : Colors.orangeAccent, 
-                      size: 20
+                      settings.isGrayscaleActiveNow
+                          ? Icons.check_circle
+                          : Icons.schedule,
+                      color: settings.isGrayscaleActiveNow
+                          ? Colors.greenAccent
+                          : Colors.orangeAccent,
+                      size: 20,
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        settings.isGrayscaleActiveNow 
-                            ? 'Grayscale is active now' 
+                        settings.isGrayscaleActiveNow
+                            ? 'Grayscale is active now'
                             : 'Grayscale is currently inactive',
                         style: TextStyle(
-                          fontSize: 13, 
-                          color: settings.isGrayscaleActiveNow ? Colors.greenAccent : Colors.orangeAccent
+                          fontSize: 13,
+                          color: settings.isGrayscaleActiveNow
+                              ? Colors.greenAccent
+                              : Colors.orangeAccent,
                         ),
                       ),
                     ),
@@ -722,7 +954,7 @@ class _AppearancePageState extends State<AppearancePage> {
                 ),
               ),
             ),
-          
+
           // Schedule list
           ...List.generate(settings.grayscaleSchedules.length, (index) {
             final schedule = settings.grayscaleSchedules[index];
@@ -732,11 +964,14 @@ class _AppearancePageState extends State<AppearancePage> {
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: (isEnabled ? Colors.purpleAccent : Colors.grey).withValues(alpha: 0.12),
+                  color: (isEnabled ? Colors.purpleAccent : Colors.grey)
+                      .withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
-                  isEnabled ? Icons.play_circle_outline : Icons.pause_circle_outline,
+                  isEnabled
+                      ? Icons.play_circle_outline
+                      : Icons.pause_circle_outline,
                   color: isEnabled ? Colors.purpleAccent : Colors.grey,
                   size: 20,
                 ),
@@ -750,7 +985,10 @@ class _AppearancePageState extends State<AppearancePage> {
               ),
               subtitle: Text(
                 isEnabled ? 'Active' : 'Disabled',
-                style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black45),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isDark ? Colors.white54 : Colors.black45,
+                ),
               ),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -795,7 +1033,7 @@ class _AppearancePageState extends State<AppearancePage> {
               onTap: () => _editSchedule(context, settings, index),
             );
           }),
-          
+
           // Add schedule button
           ListTile(
             leading: Container(
@@ -805,16 +1043,26 @@ class _AppearancePageState extends State<AppearancePage> {
                 color: Colors.green.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.add_circle_outline, color: Colors.green, size: 20),
+              child: const Icon(
+                Icons.add_circle_outline,
+                color: Colors.green,
+                size: 20,
+              ),
             ),
-            title: const Text('Add Schedule', style: TextStyle(color: Colors.green)),
+            title: const Text(
+              'Add Schedule',
+              style: TextStyle(color: Colors.green),
+            ),
             subtitle: Text(
               'Add a new grayscale schedule',
-              style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black45),
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.white54 : Colors.black45,
+              ),
             ),
             onTap: () => _addSchedule(context, settings),
           ),
-          
+
           const SizedBox(height: 40),
         ],
       ),
@@ -966,18 +1214,137 @@ class _SwitchTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SwitchListTile(
-      title: Text(
-        title,
-        style: const TextStyle(fontSize: 15),
-      ),
+      title: Text(title, style: const TextStyle(fontSize: 15)),
       subtitle: subtitle != null
-          ? Text(
-              subtitle ?? '',
-              style: const TextStyle(fontSize: 12),
-            )
+          ? Text(subtitle ?? '', style: const TextStyle(fontSize: 12))
           : null,
       value: value,
       onChanged: onChanged,
+    );
+  }
+}
+
+class _ChoiceTile<T> extends StatelessWidget {
+  final String title;
+  final T value;
+  final String label;
+  final List<T> options;
+  final String Function(T value) optionLabel;
+  final ValueChanged<T> onSelected;
+
+  const _ChoiceTile({
+    required this.title,
+    required this.value,
+    required this.label,
+    required this.options,
+    required this.optionLabel,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      title: Text(title, style: const TextStyle(fontSize: 15)),
+      subtitle: Text(label, style: const TextStyle(fontSize: 12)),
+      trailing: PopupMenuButton<T>(
+        initialValue: value,
+        onSelected: onSelected,
+        itemBuilder: (context) => options
+            .map(
+              (option) => PopupMenuItem<T>(
+                value: option,
+                child: Text(optionLabel(option)),
+              ),
+            )
+            .toList(),
+        child: const Icon(Icons.expand_more_rounded, size: 22),
+      ),
+      onTap: () async {
+        final selected = await showModalBottomSheet<T>(
+          context: context,
+          builder: (context) => SafeArea(
+            child: ListView(
+              shrinkWrap: true,
+              children: options
+                  .map(
+                    (option) => ListTile(
+                      title: Text(optionLabel(option)),
+                      trailing: option == value
+                          ? const Icon(Icons.check_rounded)
+                          : null,
+                      onTap: () => Navigator.pop(context, option),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ),
+        );
+        if (selected != null) onSelected(selected);
+      },
+    );
+  }
+}
+
+class _NumberEditTile extends StatelessWidget {
+  final String title;
+  final String label;
+  final int initialValue;
+  final int min;
+  final int max;
+  final String suffix;
+  final ValueChanged<int> onSubmitted;
+
+  const _NumberEditTile({
+    required this.title,
+    required this.label,
+    required this.initialValue,
+    required this.min,
+    required this.max,
+    required this.suffix,
+    required this.onSubmitted,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      title: Text(title, style: const TextStyle(fontSize: 15)),
+      subtitle: Text(label, style: const TextStyle(fontSize: 12)),
+      trailing: const Icon(Icons.edit_outlined, size: 20),
+      onTap: () async {
+        final controller = TextEditingController(text: '$initialValue');
+        final result = await showDialog<int>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: Text(title),
+            content: TextField(
+              controller: controller,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: InputDecoration(
+                suffixText: suffix,
+                helperText: '$min-$max $suffix',
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  final parsed = int.tryParse(controller.text.trim());
+                  if (parsed == null) return;
+                  Navigator.pop(dialogContext, parsed.clamp(min, max).toInt());
+                },
+                child: const Text('Save'),
+              ),
+            ],
+          ),
+        );
+        controller.dispose();
+        if (result != null) onSubmitted(result);
+      },
     );
   }
 }

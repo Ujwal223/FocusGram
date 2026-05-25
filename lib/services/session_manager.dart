@@ -57,6 +57,7 @@ class SessionManager extends ChangeNotifier {
   static const _keyAppSessionEnd = 'app_sess_end_ts';
   static const _keyAppSessionExtUsed = 'app_sess_ext_used';
   static const _keyLastAppSessEnd = 'app_sess_last_end_ts';
+  static const _keyLastAppSessionMinutes = 'app_sess_last_minutes';
   static const _keyDailyOpenCount = 'app_open_count';
   static const _keyScheduleEnabled = 'sched_enabled';
   static const _keyScheduleStartHour = 'sched_start_h';
@@ -81,6 +82,7 @@ class SessionManager extends ChangeNotifier {
   bool _appSessionExpiredFlag =
       false; // set when time runs out, waiting for user action
   int _dailyOpenCount = 0;
+  int _lastAppSessionMinutes = 5;
 
   // ── Scheduled Blocking runtime ─────────────────────────────
   bool _scheduleEnabled = false;
@@ -90,8 +92,10 @@ class SessionManager extends ChangeNotifier {
   int _schedEndMin = 0;
   List<FocusSchedule> _schedules = [];
   bool _lastScheduleState = false;
-  bool _scheduleNotificationShown = false; // Track if schedule notification was shown
-  bool _sessionEndNotificationShown = true; // Default to true to prevent notification on app startup (will be reset when new session starts)
+  bool _scheduleNotificationShown =
+      false; // Track if schedule notification was shown
+  bool _sessionEndNotificationShown =
+      true; // Default to true to prevent notification on app startup (will be reset when new session starts)
 
   bool _isInForeground = true; // Tracking app lifecycle state
   int _cachedRemainingSessionSeconds = 0;
@@ -175,6 +179,7 @@ class SessionManager extends ChangeNotifier {
 
   /// How many times the user has opened the app today.
   int get dailyOpenCount => _dailyOpenCount;
+  int get lastAppSessionMinutes => _lastAppSessionMinutes;
 
   // ── Scheduled Blocking Getters ─────────────────────────────
   bool get scheduleEnabled => _scheduleEnabled;
@@ -309,6 +314,7 @@ class SessionManager extends ChangeNotifier {
       _appSessionEnd = DateTime.fromMillisecondsSinceEpoch(appEndMs);
     }
     _appExtensionUsed = _prefs!.getBool(_keyAppSessionExtUsed) ?? false;
+    _lastAppSessionMinutes = _prefs!.getInt(_keyLastAppSessionMinutes) ?? 5;
 
     final lastAppEndMs = _prefs!.getInt(_keyLastAppSessEnd) ?? 0;
     if (lastAppEndMs > 0) {
@@ -375,12 +381,12 @@ class SessionManager extends ChangeNotifier {
       }
     }
 
-    // App session expiry check
+    // App session countdown / expiry check
     if (_appSessionEnd != null && !_appSessionExpiredFlag) {
       if (DateTime.now().isAfter(_appSessionEnd!)) {
         _appSessionExpiredFlag = true;
-        changed = true;
       }
+      changed = true;
     }
 
     if (isCooldownActive) {
@@ -396,7 +402,7 @@ class SessionManager extends ChangeNotifier {
     if (sched != _lastScheduleState) {
       _lastScheduleState = sched;
       changed = true;
-      
+
       // Show notification when schedule becomes active
       if (sched && !_scheduleNotificationShown) {
         _scheduleNotificationShown = true;
@@ -420,10 +426,11 @@ class SessionManager extends ChangeNotifier {
     // (i.e., when loading an expired session from a previous app session)
     if (showNotification && !_sessionEndNotificationShown) {
       _sessionEndNotificationShown = true;
-      
+
       // Check if user wants session end notifications
-      final notifySessionEnd = _prefs?.getBool('set_notify_session_end') ?? false;
-      
+      final notifySessionEnd =
+          _prefs?.getBool('set_notify_session_end') ?? false;
+
       if (notifySessionEnd) {
         NotificationService().showNotification(
           id: 999,
@@ -432,7 +439,7 @@ class SessionManager extends ChangeNotifier {
         );
       }
     }
-    
+
     _isSessionActive = false;
     _sessionExpiry = null;
     _lastSessionEnd = DateTime.now();
@@ -448,7 +455,8 @@ class SessionManager extends ChangeNotifier {
     final allowed = (minutes * 60).clamp(0, dailyRemainingSeconds);
     _sessionExpiry = DateTime.now().add(Duration(seconds: allowed));
     _isSessionActive = true;
-    _sessionEndNotificationShown = false; // Reset notification flag for new session
+    _sessionEndNotificationShown =
+        false; // Reset notification flag for new session
     _prefs?.setInt(_keySessionExpiry, _sessionExpiry!.millisecondsSinceEpoch);
     notifyListeners();
     return true;
@@ -482,8 +490,10 @@ class SessionManager extends ChangeNotifier {
     _appSessionEnd = end;
     _appSessionExpiredFlag = false;
     _appExtensionUsed = false;
+    _lastAppSessionMinutes = minutes;
     _prefs?.setInt(_keyAppSessionEnd, end.millisecondsSinceEpoch);
     _prefs?.setBool(_keyAppSessionExtUsed, false);
+    _prefs?.setInt(_keyLastAppSessionMinutes, minutes);
     notifyListeners();
   }
 
