@@ -17,21 +17,21 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5.0.0
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Set up Java 17
-        uses: actions/setup-java@v5.2.0
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v4.0.1
+        uses: android-actions/setup-android@v4
 
       - name: Set up Flutter
-        uses: subosito/flutter-action@v2.23.0
+        uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
@@ -106,7 +106,7 @@ PY
         run: flutter build apk --release
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v4
         with:
           name: focusgram-apk-${{ steps.meta.outputs.tag }}
           path: build/app/outputs/flutter-apk/app-release.apk
@@ -131,7 +131,7 @@ PY
           git push origin "${TAG}"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3.0.0
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
           name: FocusGram ${{ steps.meta.outputs.tag }}
