@@ -8,8 +8,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 ///
 /// Storage format (in SharedPreferences, key `screen_time_data`):
 ///   {
-///     "2026-02-26": 3420, // seconds
-///     "2026-02-25": 1800
+///     "2026-05-26": 3420, // seconds
+///     "2026-05-25": 1800
 ///   }
 ///
 /// All data stays on-device only.
@@ -22,6 +22,8 @@ class ScreenTimeService extends ChangeNotifier {
   bool _tracking = false;
 
   Map<String, int> get secondsByDate => Map.unmodifiable(_secondsByDate);
+  int get totalSeconds =>
+      _secondsByDate.values.fold<int>(0, (total, seconds) => total + seconds);
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
@@ -37,9 +39,7 @@ class ScreenTimeService extends ChangeNotifier {
     try {
       final decoded = jsonDecode(raw);
       if (decoded is Map<String, dynamic>) {
-        _secondsByDate = decoded.map(
-          (k, v) => MapEntry(k, (v as num).toInt()),
-        );
+        _secondsByDate = decoded.map((k, v) => MapEntry(k, (v as num).toInt()));
       }
     } catch (_) {
       _secondsByDate = {};
@@ -104,4 +104,3 @@ class ScreenTimeService extends ChangeNotifier {
     super.dispose();
   }
 }
-

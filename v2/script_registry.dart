@@ -3,7 +3,6 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 enum ScriptId {
   ghostMode,
   themeDetector,
-  adBlockerDom,
   contentHider,
   fetchInterceptor,
   autoplayBlocker,
@@ -33,17 +32,10 @@ class ScriptRegistry {
   static final List<InstaScript> all = [
     // ── DOCUMENT_START — must be before IG's JS loads ──
     InstaScript(
-      id: ScriptId.ghostMode,
-      name: 'Ghost Mode',
-      description: 'Blocks story seen, message seen, and online status signals.',
-      assetPath: 'assets/scripts/ghost_mode.js',
-      injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-      enabled: false,
-    ),
-    InstaScript(
       id: ScriptId.fetchInterceptor,
-      name: 'Fetch Interceptor',
-      description: 'Unified feed filter: blocks ads, sponsored, suggested, videos via GraphQL interception.',
+      name: 'Ad & Content Blocker',
+      description:
+          'Blocks ads, sponsored, suggested content, videos, and prevents autoplay via GraphQL interception.',
       assetPath: 'assets/scripts/fetch_interceptor.js',
       injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
       enabled: false,
@@ -65,14 +57,6 @@ class ScriptRegistry {
       assetPath: 'assets/scripts/theme_detector.js',
       injectionTime: UserScriptInjectionTime.AT_DOCUMENT_END,
       enabled: true, // always on — needed for native feel
-    ),
-    InstaScript(
-      id: ScriptId.adBlockerDom,
-      name: 'DOM Ad Blocker',
-      description: 'Removes sponsored posts and tracking elements from feed (legacy - use Fetch Interceptor instead).',
-      assetPath: 'assets/scripts/ad_blocker_dom.js',
-      injectionTime: UserScriptInjectionTime.AT_DOCUMENT_END,
-      enabled: false,
     ),
     InstaScript(
       id: ScriptId.contentHider,
@@ -100,6 +84,4 @@ class ScriptRegistry {
       enabled: false,
     ),
   ];
-
-  static InstaScript byId(ScriptId id) => all.firstWhere((s) => s.id == id);
 }

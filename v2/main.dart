@@ -1,9 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'core/theme/system_ui_manager.dart';
 import 'core/webview/instagram_webview.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Enable web contents debugging for ghost mode verification
+  if (kDebugMode) {
+    InAppWebViewController.setWebContentsDebuggingEnabled(true);
+  }
+
   await SystemUiManager.enableEdgeToEdge();
   runApp(const FocusGramApp());
 }

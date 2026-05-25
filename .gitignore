@@ -14,6 +14,9 @@ migrate_working_dir/
 PRD.md 
 .agents/
 TODO.md
+v2/FOCUSGRAM_V2_PLAN.md
+v2/FocusGram_Feed_Filtering_Reference.docx
+.codex
 
 # IntelliJ related
 *.iml
@@ -27,7 +30,6 @@ TODO.md
 #.vscode/
 RELEASE_GUIDE.md
 android/key.properties
-android/fdroid-config.properties
 android/app/*.jks
 upload-keystore.jks
 

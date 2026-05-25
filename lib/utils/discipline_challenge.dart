@@ -517,7 +517,7 @@ class DisciplineChallenge {
   ];
 
   /// Shows the word challenge dialog. Returns true if successful.
-  static Future<bool> show(BuildContext context, {int count = 15}) async {
+  static Future<bool> show(BuildContext context, {int count = 30}) async {
     final list = List<String>.from(_words)..shuffle();
     final challenge = list.take(count).join(' ');
     final controller = TextEditingController();

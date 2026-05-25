@@ -18,7 +18,11 @@ class _GuardrailsPageState extends State<GuardrailsPage> {
     Future<void> Function() action,
   ) async {
     if (sm.isScheduledBlockActive) {
-      final ok = await DisciplineChallenge.show(context, count: 35);
+      final settings = context.read<SettingsService>();
+      final ok = await DisciplineChallenge.show(
+        context,
+        count: settings.resolvedWordChallengeCount(),
+      );
       if (!context.mounted || !ok) return;
     }
     await action();
@@ -321,7 +325,8 @@ class _FrictionSliderTileState extends State<_FrictionSliderTile> {
                     ElevatedButton(
                       onPressed: () async {
                         final sm = context.read<SessionManager>();
-                        int wordCount = 15;
+                        final settings = context.read<SettingsService>();
+                        int wordCount = settings.resolvedWordChallengeCount();
                         // If we are at 0 quota, increase difficulty to 35 words
                         if (widget.title.contains('Daily Reel Limit') &&
                             sm.dailyRemainingSeconds <= 0) {

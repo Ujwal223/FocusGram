@@ -145,6 +145,7 @@ class _InitialRouteHandlerState extends State<InitialRouteHandler> {
     // Step 3: Breath gate
     if (settings.showBreathGate && !_breathCompleted) {
       return BreathGateScreen(
+        durationSeconds: settings.breathGateSeconds,
         onFinish: () => setState(() => _breathCompleted = true),
       );
     }

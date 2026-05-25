@@ -9,16 +9,16 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _notificationsPlugin =
       FlutterLocalNotificationsPlugin();
 
-  Future<void> init() async {
+  Future<void> init({bool requestPermissions = false}) async {
     const AndroidInitializationSettings initializationSettingsAndroid =
         AndroidInitializationSettings('@mipmap/ic_launcher');
 
     // Request permissions for iOS
     final DarwinInitializationSettings initializationSettingsIOS =
         DarwinInitializationSettings(
-          requestAlertPermission: true,
-          requestBadgePermission: true,
-          requestSoundPermission: true,
+          requestAlertPermission: requestPermissions,
+          requestBadgePermission: requestPermissions,
+          requestSoundPermission: requestPermissions,
           defaultPresentAlert: true,
           defaultPresentBadge: true,
           defaultPresentSound: true,
@@ -37,7 +37,12 @@ class NotificationService {
       },
     );
 
-    // Request permissions after initialization
+    if (requestPermissions) {
+      await requestPermissionsNow();
+    }
+  }
+
+  Future<void> requestPermissionsNow() async {
     await _requestIOSPermissions();
     await _requestAndroidPermissions();
   }

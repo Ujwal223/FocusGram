@@ -6,6 +6,7 @@ import '../injection/script_engine.dart';
 import '../injection/script_registry.dart';
 import '../channels/channel_registry.dart';
 import '../webview/webview_config.dart';
+import '../services/ghost_mode_service.dart';
 
 class InstagramWebView extends StatefulWidget {
   const InstagramWebView({super.key});
@@ -17,9 +18,10 @@ class InstagramWebView extends StatefulWidget {
 class InstagramWebViewState extends State<InstagramWebView> {
   InAppWebViewController? _controller;
   ScriptEngine? _engine;
+  GhostModeService? _ghostMode;
   bool _loading = true;
 
-  // ── Public API — call from Settings screen ────────────────────────────────
+  // ── Public API — call from Settings screen ─────────────────────────────
   Future<void> toggleScript(ScriptId id, bool enabled) async {
     await _engine?.toggle(id, enabled);
   }
@@ -32,6 +34,37 @@ class InstagramWebViewState extends State<InstagramWebView> {
     await _engine?.setOnlineHide(enabled);
   }
 
+  // Ghost mode controls
+  Future<void> setGhostModeEnabled(bool enabled) async {
+    if (_ghostMode != null) {
+      _ghostMode!.features.disableAnalytics = enabled;
+      _ghostMode!.features.hideStoryViews = enabled;
+      _ghostMode!.features.hideReadReceipts = enabled;
+      _ghostMode!.features.hideLiveJoin = enabled;
+      _ghostMode!.features.hideTypingIndicator = enabled;
+      _ghostMode!.features.hideVoiceListened = enabled;
+      _ghostMode!.features.hideReplyImageViewed = enabled;
+      await _ghostMode!.features.save();
+      // Reapply settings if webview exists
+      if (_controller != null) {
+        // Force reload to apply new settings
+        await _controller!.reload();
+      }
+    }
+  }
+
+  Future<void> setAntiScreenshot(bool enabled) async {
+    if (_ghostMode != null) {
+      _ghostMode!.features.antiScreenshot = enabled;
+      await _ghostMode!.features.save();
+      if (_ghostMode!.features.antiScreenshot) {
+        await _ghostMode!.applyWindowFlags(context);
+      } else {
+        await _ghostMode!.clearWindowFlags();
+      }
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
 
   @override
@@ -40,11 +73,17 @@ class InstagramWebViewState extends State<InstagramWebView> {
       children: [
         InAppWebView(
           initialUrlRequest: WebViewConfig.initialRequest,
-          initialSettings: WebViewConfig.settings,
+          initialSettings:
+              _ghostMode?.buildWebViewSettings() ?? WebViewConfig.settings,
 
           // ── ContentBlockers — merged base + EasyList rules ──────────────
           contentBlockers: WebViewConfig.baseContentBlockers,
           // TODO Phase 1.5: merge EasyListParser.load() here at startup
+
+          // ── User Scripts — AT_DOCUMENT_START critical for ghost mode ─────
+          initialUserScripts: UnmodifiableListView(
+            _ghostMode?.buildUserScripts() ?? [],
+          ),
 
           // ── JavaScript channels ─────────────────────────────────────────
           javascriptChannels: ChannelRegistry(
@@ -56,6 +95,12 @@ class InstagramWebViewState extends State<InstagramWebView> {
 
           onWebViewCreated: (controller) async {
             _controller = controller;
+
+            // Initialize GhostModeService
+            _ghostMode = GhostModeService();
+            await _ghostMode!.load();
+
+            // Initialize existing script engine for other scripts
             final prefs = await SharedPreferences.getInstance();
             _engine = ScriptEngine(controller: controller, prefs: prefs);
 
@@ -66,6 +111,10 @@ class InstagramWebViewState extends State<InstagramWebView> {
           onLoadStop: (controller, url) async {
             // Inject DOCUMENT_END scripts
             await _engine?.injectDocumentEndScripts();
+
+            // Re-inject ghost mode scripts on SPA navigation
+            await _ghostMode?.onPageLoaded(url?.uriValue);
+
             setState(() => _loading = false);
           },
 
@@ -102,6 +151,15 @@ class InstagramWebViewState extends State<InstagramWebView> {
             if (!isReload!) {
               await _engine?.injectDocumentEndScripts();
             }
+          },
+
+          // ── Native intercept for service worker requests ────────────────
+          shouldInterceptRequest: (controller, request) async {
+            return await _ghostMode?.shouldInterceptRequest(
+                  controller,
+                  request,
+                ) ??
+                null;
           },
         ),
 

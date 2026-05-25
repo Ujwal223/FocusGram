@@ -57,15 +57,15 @@ class InjectionController {
     required bool blurReels,
     required bool tapToUnblur,
     required bool enableTextSelection,
-    required bool hideSuggestedPosts, // JS-only, handled by InjectionManager
-    required bool hideSponsoredPosts, // JS-only, handled by InjectionManager
+    required bool hideSuggestedPosts,
+    required bool hideSponsoredPosts,
     required bool hideLikeCounts,
     required bool hideFollowerCounts,
-    // hideStoriesBar parameter removed per user request
     required bool hideExploreTab,
     required bool hideReelsTab,
     required bool hideShopTab,
     required bool disableReelsEntirely,
+    required bool blockHomeFeedScroll,
   }) {
     final css = StringBuffer()..writeln(scripts.kGlobalUIFixesCSS);
     if (!enableTextSelection) css.writeln(scripts.kDisableSelectionCSS);
@@ -75,18 +75,12 @@ class InjectionController {
       css.writeln(scripts.kHideReelsFeedContentCSS);
     }
 
-    // FIX: blurReels moved OUTSIDE `if (!sessionActive)`.
-    // Previously it was inside that block alongside display:none on the parent —
-    // you cannot blur children of a display:none element, making it dead code.
-    // Now: when sessionActive=true, reel thumbnails are blurred as friction.
-    //      when sessionActive=false, reels are hidden anyway (blur harmless).
     if (blurReels) css.writeln(scripts.kBlurReelsCSS);
 
     if (blurExplore) css.writeln(scripts.kBlurHomeFeedAndExploreCSS);
 
     if (hideLikeCounts) css.writeln(ui_hider.kHideLikeCountsCSS);
     if (hideFollowerCounts) css.writeln(ui_hider.kHideFollowerCountsCSS);
-    // Stories hiding removed per user request
     if (hideExploreTab) css.writeln(ui_hider.kHideExploreTabCSS);
     if (hideReelsTab) css.writeln(ui_hider.kHideReelsTabCSS);
     if (hideShopTab) css.writeln(ui_hider.kHideShopTabCSS);
@@ -94,6 +88,7 @@ class InjectionController {
     return '''
       ${buildSessionStateJS(sessionActive)}
       window.__fgDisableReelsEntirely = $disableReelsEntirely;
+      window.__fgBlockHomeFeedScroll = $blockHomeFeedScroll;
       window.__fgTapToUnblur = $tapToUnblur;
       ${scripts.kTrackPathJS}
       ${_buildMutationObserver(css.toString())}
