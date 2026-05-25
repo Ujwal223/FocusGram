@@ -23,16 +23,22 @@
 
   // Helper: Check if a node is an ad
   const isAdNode = (node) => {
-    if (!node || typeof node !== 'object') return false;
-    
-    return !!(
-      node.is_ad ||
-      node.ad_action_link ||
-      node.ad_id ||
-      (node.product_type && node.product_type === 'ad') ||
-      (node.ad_header_style && node.ad_header_style !== 'none') ||
-      (node.__typename && node.__typename === 'GraphAdStory')
-    );
+  if (!node || typeof node !== 'object') return false;
+  return !!(
+    node.is_ad ||
+    node.ad_id ||
+    node.ad_action_link ||
+    node.ad_action_links?.length > 0 ||           
+    node.is_paid_partnership ||                    
+    node.sponsor_tags?.length > 0 ||              
+    (node.commerciality_status === 'ad') ||        
+    (node.commerciality_status === 'shoppable_feed_ad') ||  
+    (node.product_type === 'ad') ||
+    (node.ad_header_style && node.ad_header_style !== 'none') ||
+    node.__typename === 'GraphAdStory' ||
+    node.__typename === 'XDTAdFeedUnit' ||         
+    (node.__typename?.toLowerCase().includes('ad')) 
+  );
   };
 
   // Helper: Check if a node is sponsored
@@ -158,6 +164,7 @@
       }
     }
   };
+  
 
   // Override fetch
   const _fetch = window.fetch.bind(window);
@@ -173,7 +180,7 @@
     let response = await _fetch(input, init);
 
     // Only intercept GraphQL feed queries
-    if (!url.includes('/graphql/query') && !url.includes('/api/v1/feed')) {
+    if (!url.includes('/graphql') && !url.includes('/api/v1/feed')) {
       return response;
     }
 

@@ -46,7 +46,39 @@ class ExtrasSettingsPage extends StatelessWidget {
               HapticFeedback.selectionClick();
             },
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.amber.withValues(alpha: 0.07),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.amber.withValues(alpha: 0.12)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8, top: 2),
+                    child: Icon(
+                      Icons.info_outline,
+                      size: 14,
+                      color: Colors.amber,
+                    ),
+                  ),
+                  const Expanded(
+                    child: Text(
+                      'NOTE: The seen indicator is not sent to the sender while you are active in the chat, but as soon as you close and reopen the chat, the seen indicator is sent.',
+                      style: TextStyle(fontSize: 11, color: Colors.amber),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
 
+          /* TRIED BUT IT DIDNT WORK 98% oF THE TIME) 
+          
           const _SectionHeader(title: 'FOCUSGRAM V2'),
           _SwitchTile(
             title: 'Ad Blocker',
@@ -66,7 +98,7 @@ class ExtrasSettingsPage extends StatelessWidget {
               HapticFeedback.selectionClick();
             },
           ),
-
+*/
           const SizedBox(height: 40),
         ],
       ),

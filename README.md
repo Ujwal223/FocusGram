@@ -7,7 +7,7 @@
 **Use social media on your terms.**
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_3.0-blue.svg)](LICENSE)
-[![Flutter](https://img.shields.io/badge/Flutter-3.38-blue?logo=flutter&logoColor=white)](https://flutter.dev)
+[![Version](https://img.shields.io/badge/version-2.0.0-white)](https://flutter.dev)
 [![Downloads](https://img.shields.io/github/downloads/ujwal223/focusgram/total?label=downloads&color=blue&cacheSeconds=30)](https://github.com/ujwal223/focusgram/releases)
 
 <a href='https://focusgram.en.uptodown.com/android' title='Download FocusGram'>
@@ -124,8 +124,6 @@ FocusGram uses a standard Android System WebView to load `instagram.com`. All fe
 - JavaScript injection (autoplay blocking, metadata extraction, SPA navigation monitoring)
 - CSS injection (element hiding, grayscale, scroll behaviour)
 - URL interception via NavigationDelegate (Reels blocking, Explore blocking)
-
-Nothing is modified server-side. The app never reads, intercepts, or stores Instagram content beyond what is explicitly listed 
 
 ### Permissions
 

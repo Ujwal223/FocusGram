@@ -13,4 +13,3 @@ const String kDmKeyboardFixJS = r'''
     } catch (_) {}
   });
 ''';
-

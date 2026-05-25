@@ -27,7 +27,7 @@ import '../v2_integration/script_engine_v2_overlay.dart';
 import '../v2_integration/script_registry_v2_overlay.dart';
 import '../scripts/focus_scripts.dart';
 import '../focus_settings.dart';
-import 'package:http/http.dart' as http;
+
 
 import '../services/adblock/adblock_content_blocker_loader.dart';
 
@@ -127,7 +127,10 @@ class _MainWebViewPageState extends State<MainWebViewPage>
     // Check for updates on launch
     context.read<UpdateCheckerService>().checkForUpdates();
 
-    unawaited(_loadAdblockerData());
+    // Load adblock data early. If adblock is enabled, we wait for initial data
+    // to be loaded so the WebView can apply contentBlockers on first render.
+    // This prevents ads from loading before filters are applied.
+    unawaited(_loadAdblockerDataEarly());
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<SessionManager>().addListener(_onSessionChanged);
@@ -155,6 +158,9 @@ class _MainWebViewPageState extends State<MainWebViewPage>
       _lastV2AutoplayBlockerEnabled = settings.blockAutoplay;
       _lastAdblockToggleValue = settings.v2AdBlockerDomEnabled;
       _onScreenTimeChanged();
+
+      // Load full adblock data with longer timeout after UI is initialized
+      unawaited(_loadAdblockerData());
     });
 
     FocusGramRouter.pendingUrl.addListener(_onPendingUrlChanged);
@@ -581,6 +587,28 @@ class _MainWebViewPageState extends State<MainWebViewPage>
     return data;
   }
 
+  Future<void> _loadAdblockerDataEarly() async {
+    final settings = context.read<SettingsService>();
+    if (!settings.v2AdBlockerDomEnabled) return;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final loader = AdblockContentBlockerLoader();
+      final data = await loader.loadOrUpdateIfNeeded(
+        enabled: true,
+        prefs: prefs,
+        timeoutMs: 5000, // Short timeout for early load
+      );
+
+      if (mounted) {
+        setState(() => _adblockData = data);
+      }
+    } catch (_) {
+      // If loading fails, continue without blocking app startup
+      // AdblockData will be retried in _loadAdblockerData()
+    }
+  }
+
   bool _isBlockedByAdblockHostList(WebUri uri, Set<String>? blockedHosts) {
     if (blockedHosts == null || blockedHosts.isEmpty) return false;
 
@@ -911,6 +939,24 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                               pullToRefreshController: _pullToRefreshController,
                               shouldInterceptRequest: (controller, request) async {
                                 final url = request.url.toString();
+
+                                const adDomains = [
+                                  'an.facebook.com',
+                                  'connect.facebook.net',
+                                  'pixel.facebook.com',
+                                  'graph.facebook.com/logging',
+                                  'www.instagram.com/ajax/bz',
+                                  'www.instagram.com/api/v1/web/comet/logcalls',
+                                  'doubleclick.net',
+                                  'googletagmanager.com',
+                                  'scorecardresearch.com',
+                                ];
+                                if (adDomains.any(url.contains)) {
+                                  return WebResourceResponse(
+                                    data: Uint8List(0),
+                                  );
+                                }
+
                                 final referrer =
                                     request.headers?['Referer'] ??
                                     request.headers?['referer'];
@@ -919,7 +965,7 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                                   _syncDirectThreadState(referrer);
                                 }
 
-                                if (_isInDirectThread &&
+                                /*if (_isInDirectThread &&
                                     _isFktmInstagramCdn(url)) {
                                   if (_dmThreadCdnBlockArmed) {
                                     return WebResourceResponse(
@@ -928,7 +974,7 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                                   }
                                   _dmThreadCdnBlockArmed = true;
                                 }
-
+*/
                                 // Strict/high-priority domain blocking from uBlock-style lists.
                                 final adblockHosts = _adblockData?.blockedHosts;
                                 if (_isBlockedByAdblockHostList(
@@ -983,11 +1029,11 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                                   );
                                 }
 
-                                // Strip ads from feed
+                                /* Strip ads from feed (JS handles it)
                                 if (settings.noAds &&
                                     url.contains(
                                       'instagram.com/graphql/query',
-                                    )) {
+                                    )) {/
                                   try {
                                     final res = await http.post(
                                       Uri.parse(url),
@@ -1006,10 +1052,76 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                                       edges.removeWhere((e) {
                                         final node = e['node'];
                                         if (node == null) return false;
-                                        return node['ad'] != null ||
-                                            node['explore_story'] != null ||
-                                            node['media']?['inventory_source'] ==
-                                                'mixed_unconnected';
+                                        // Strip ads from feed
+                                        if (settings.noAds &&
+                                            url.contains(
+                                              'instagram.com/graphql',
+                                            )) {
+                                          try {
+                                            final res = await http.post(
+                                              Uri.parse(url),
+                                              headers: Map<String, String>.from(
+                                                request.headers ?? {},
+                                              ),
+                                            );
+
+                                            final json = jsonDecode(res.body);
+
+                                            void filterEdges(dynamic obj) {
+                                              if (obj == null) return;
+                                              if (obj is Map) {
+                                                if (obj['edges'] is List) {
+                                                  (obj['edges'] as List).removeWhere((
+                                                    e,
+                                                  ) {
+                                                    final node = e is Map
+                                                        ? e['node']
+                                                        : null;
+                                                    if (node == null ||
+                                                        node is! Map)
+                                                      return false;
+                                                    return node['is_ad'] ==
+                                                            true ||
+                                                        node['ad_id'] != null ||
+                                                        node['ad_action_links'] !=
+                                                            null ||
+                                                        node['is_paid_partnership'] ==
+                                                            true ||
+                                                        node['sponsor_tags'] !=
+                                                            null ||
+                                                        node['commerciality_status'] ==
+                                                            'ad' ||
+                                                        node['commerciality_status'] ==
+                                                            'shoppable_feed_ad' ||
+                                                        (node['__typename']
+                                                                ?.toString()
+                                                                .toLowerCase()
+                                                                .contains(
+                                                                  'ad',
+                                                                ) ??
+                                                            false);
+                                                  });
+                                                }
+                                                obj.values.forEach(filterEdges);
+                                              } else if (obj is List) {
+                                                obj.forEach(filterEdges);
+                                              }
+                                            }
+
+                                            filterEdges(json);
+
+                                            return WebResourceResponse(
+                                              data: Uint8List.fromList(
+                                                utf8.encode(jsonEncode(json)),
+                                              ),
+                                              headers: res.headers,
+                                              statusCode: 200,
+                                              contentType: 'application/json',
+                                            );
+                                          } catch (_) {
+                                            return null;
+                                          }
+                                        }
                                       });
                                     }
 
@@ -1025,7 +1137,7 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                                     // if anything fails, pass through original request unmodified
                                     return null;
                                   }
-                                }
+                                }*/
 
                                 return null;
                               },

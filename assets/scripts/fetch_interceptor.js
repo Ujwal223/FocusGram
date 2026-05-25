@@ -243,7 +243,7 @@
     let response = await _fetch(input, init);
 
     // Only intercept GraphQL feed queries
-    if (!url.includes('/graphql/query') && !url.includes('/api/v1/feed')) {
+    if (!url.includes('/graphql') && !url.includes('/api/v1/feed')) {
       return response;
     }
 

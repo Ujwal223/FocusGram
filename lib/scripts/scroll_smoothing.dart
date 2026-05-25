@@ -10,4 +10,3 @@ const String kScrollSmoothingJS = r'''
     } catch (_) {}
   })();
 ''';
-

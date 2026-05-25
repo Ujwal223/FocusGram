@@ -17,7 +17,8 @@ void main() {
     test('accepts http(s) instagram-like hosts and calls launcher', () async {
       final launched = <Uri>[];
       final ok = await handleFocusGramMediaDownload(
-        raw: '{"type":"video","url":"https://cdninstagram.com/v/1.mp4","filename":"x"}',
+        raw:
+            '{"type":"video","url":"https://cdninstagram.com/v/1.mp4","filename":"x"}',
         launch: (uri) async => launched.add(uri),
       );
 
@@ -30,7 +31,8 @@ void main() {
     test('rejects non-instagram hosts even if http(s)', () async {
       final launched = <Uri>[];
       final ok = await handleFocusGramMediaDownload(
-        raw: '{"type":"video","url":"https://example.com/video.mp4","filename":"x"}',
+        raw:
+            '{"type":"video","url":"https://example.com/video.mp4","filename":"x"}',
         launch: (uri) async => launched.add(uri),
       );
 

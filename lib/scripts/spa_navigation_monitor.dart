@@ -29,4 +29,3 @@ const String kSpaNavigationMonitorScript = '''
   window.addEventListener('popstate', () => notifyUrlChange());
 })();
 ''';
-

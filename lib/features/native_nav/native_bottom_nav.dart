@@ -35,12 +35,11 @@ class NativeBottomNav extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    final bgColor =
-        theme.colorScheme.surface.withValues(alpha: isDark ? 0.95 : 0.98);
-    final iconColorInactive =
-        isDark ? Colors.white70 : Colors.black54;
-    final iconColorActive =
-        theme.colorScheme.primary;
+    final bgColor = theme.colorScheme.surface.withValues(
+      alpha: isDark ? 0.95 : 0.98,
+    );
+    final iconColorInactive = isDark ? Colors.white70 : Colors.black54;
+    final iconColorActive = theme.colorScheme.primary;
 
     final tabs = <_NavItem>[
       _NavItem(
@@ -103,8 +102,7 @@ class NativeBottomNav extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: tabs.map((item) {
-            final color =
-                item.active ? iconColorActive : iconColorInactive;
+            final color = item.active ? iconColorActive : iconColorInactive;
             final opacity = item.enabled ? 1.0 : 0.35;
 
             return Expanded(
@@ -129,10 +127,7 @@ class NativeBottomNav extends StatelessWidget {
                         const SizedBox(height: 2),
                         Text(
                           item.label,
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: color,
-                          ),
+                          style: TextStyle(fontSize: 10, color: color),
                         ),
                       ],
                     ),
@@ -164,4 +159,3 @@ class _NavItem {
     required this.enabled,
   });
 }
-

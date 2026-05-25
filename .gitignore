@@ -16,7 +16,7 @@ PRD.md
 TODO.md
 v2/FOCUSGRAM_V2_PLAN.md
 v2/FocusGram_Feed_Filtering_Reference.docx
-.codex
+
 
 # IntelliJ related
 *.iml
@@ -28,7 +28,6 @@ v2/FocusGram_Feed_Filtering_Reference.docx
 # VS Code which you may wish to be included in version control, so this line
 # is commented out by default.
 #.vscode/
-RELEASE_GUIDE.md
 android/key.properties
 android/app/*.jks
 upload-keystore.jks

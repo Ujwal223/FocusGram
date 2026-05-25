@@ -14,12 +14,10 @@ class InstagramPreloader {
 
   static Future<void> start(String userAgent) async {
     if (_headlessWebView != null) return; // don't start twice
-    
+
     _headlessWebView = HeadlessInAppWebView(
       keepAlive: keepAlive,
-      initialUrlRequest: URLRequest(
-        url: WebUri('https://www.instagram.com/'),
-      ),
+      initialUrlRequest: URLRequest(url: WebUri('https://www.instagram.com/')),
       initialSettings: InAppWebViewSettings(
         userAgent: userAgent,
         mediaPlaybackRequiresUserGesture: true,
@@ -69,4 +67,3 @@ class InstagramPreloader {
     isReady = false;
   }
 }
-

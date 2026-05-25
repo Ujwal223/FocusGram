@@ -32,10 +32,7 @@ class _UpdateBannerState extends State<UpdateBanner> {
       decoration: BoxDecoration(
         color: colorScheme.secondaryContainer,
         border: Border(
-          bottom: BorderSide(
-            color: colorScheme.outlineVariant,
-            width: 0.5,
-          ),
+          bottom: BorderSide(color: colorScheme.outlineVariant, width: 0.5),
         ),
       ),
       child: Column(
@@ -121,10 +118,11 @@ class _UpdateBannerState extends State<UpdateBanner> {
     text = text.replaceAll(RegExp(r'#{1,6}\s'), '');
     text = text.replaceAll(RegExp(r'\*\*(.*?)\*\*'), r'\1');
     text = text.replaceAll(RegExp(r'\*(.*?)\*'), r'\1');
-    text =
-        text.replaceAll(RegExp(r'\[([^\]]+)\]\([^)]+\)'), r'\1'); // links -> text
+    text = text.replaceAll(
+      RegExp(r'\[([^\]]+)\]\([^)]+\)'),
+      r'\1',
+    ); // links -> text
     text = text.replaceAll(RegExp(r'`([^`]+)`'), r'\1');
     return text.trim();
   }
 }
-

@@ -56,8 +56,9 @@ class UpdateCheckerService extends ChangeNotifier {
         return;
       }
 
-      final cleanVersion =
-          gitVersionTag.startsWith('v') ? gitVersionTag.substring(1) : gitVersionTag;
+      final cleanVersion = gitVersionTag.startsWith('v')
+          ? gitVersionTag.substring(1)
+          : gitVersionTag;
 
       var trimmed = body.trim();
       if (trimmed.length > 1500) {

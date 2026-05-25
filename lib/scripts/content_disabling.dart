@@ -451,23 +451,60 @@ const String kHideSuggestedPostsJS = r'''
 (function() {
   function hideSuggestedPosts() {
     try {
-      document.querySelectorAll('span, h3, h4').forEach(function(el) {
+      // Target text patterns that indicate suggested content
+      const suggestedPatterns = [
+        'Suggested for you',
+        'Suggested posts',
+        "You're all caught up",
+        'Suggested',
+        'Recommendations',
+        'Discover more',
+        'Suggested Accounts',
+      ];
+      
+      // Find and hide all elements with suggested content text
+      document.querySelectorAll('span, h3, h4, h2, a').forEach(function(el) {
         try {
           const text = el.textContent.trim();
-          if (
-            text === 'Suggested for you' ||
-            text === 'Suggested posts' ||
-            text === "You're all caught up"
-          ) {
+          const matched = suggestedPatterns.some(pattern => 
+            text === pattern || text.includes(pattern)
+          );
+          
+          if (matched) {
             let parent = el.parentElement;
-            for (let i = 0; i < 8 && parent; i++) {
+            // Traverse up to find the container section/article
+            for (let i = 0; i < 12 && parent; i++) {
               const tag = parent.tagName.toLowerCase();
-              if (tag === 'article' || tag === 'section' || tag === 'li') {
+              const classList = parent.className || '';
+              
+              // Hide articles, sections, lists, and common suggestion containers
+              if (
+                tag === 'article' || 
+                tag === 'section' || 
+                tag === 'li' ||
+                classList.includes('xjx87jv0') || // Instagram suggestion container
+                classList.includes('x1a8lsjc') // Reel suggestion container
+              ) {
                 parent.style.setProperty('display', 'none', 'important');
                 break;
               }
               parent = parent.parentElement;
             }
+          }
+        } catch(_) {}
+      });
+      
+      // Also hide by attribute patterns
+      document.querySelectorAll('[aria-label*="Suggested"], [data-testid*="suggested"]').forEach(function(el) {
+        try {
+          let parent = el;
+          for (let i = 0; i < 12 && parent; i++) {
+            const tag = parent.tagName.toLowerCase();
+            if (tag === 'article' || tag === 'section' || tag === 'li') {
+              parent.style.setProperty('display', 'none', 'important');
+              break;
+            }
+            parent = parent.parentElement;
           }
         } catch(_) {}
       });
