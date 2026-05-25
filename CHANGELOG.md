@@ -1,13 +1,23 @@
-## FocusGram 1.0.0
+## FocusGram 2.0.0
 
 ### What's new
-- Reordered Settings Page.
-- Added "Click to Unblur" for posts.
-- Added Persistent Notification
-- Improved Grayscale Scheduling. 
+
+- NEW: Added Media Downloader for downloading images and videos
+- NEW: Added Ghost Mode
+- NEW: Added a toggle for scroll lock in minimal mode
+- NEW: Added Option to Choose Duration of Mindfulness Gate
+- NEW: Added ability to customize number of words in typing challenge
+- UPDATED: Redesigned Focus Control Flyout
+- UPDATED: Settings and Reordered items
+- UPDATED: Added more time Choices for reels session
+- UPDATED: Improved Permission Request invocation in onboarding page.
+- UPDATED: Improved Notification Alerts
+
+
 
 ### Bug fixes
-- Fixed a Bug Where Reels Werent playing despite Reels Sessions being ON.
-- Fixed a Bug Where Session End Popup could be just dismissed and app ran Normally despite session already ended.
+- Fixed: back button on homepage didnt exit the app.
+- Fixed: Only First image of multiple imaged posts was blurred.
+- FIxed: Couldn't scroll the home feed after enabling minimal mode
 - Perfomance Optimizations
-- Other Minor Changes.
+- A lof of other Minor fixes .

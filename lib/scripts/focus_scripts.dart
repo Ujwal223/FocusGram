@@ -78,18 +78,22 @@ List<UserScript> buildUserScripts(FocusSettings settings) {
 
   final scripts = <UserScript>[];
   if (startScripts.isNotEmpty) {
-    scripts.add(UserScript(
-      source: startScripts.join('\n'),
-      injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-      forMainFrameOnly: false,
-    ));
+    scripts.add(
+      UserScript(
+        source: startScripts.join('\n'),
+        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+        forMainFrameOnly: false,
+      ),
+    );
   }
   if (endScripts.isNotEmpty) {
-    scripts.add(UserScript(
-      source: endScripts.join('\n'),
-      injectionTime: UserScriptInjectionTime.AT_DOCUMENT_END,
-      forMainFrameOnly: true,
-    ));
+    scripts.add(
+      UserScript(
+        source: endScripts.join('\n'),
+        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_END,
+        forMainFrameOnly: true,
+      ),
+    );
   }
   return scripts;
 }

@@ -18,12 +18,12 @@ class ReelsHistoryEntry {
   });
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'url': url,
-        'title': title,
-        'thumbnailUrl': thumbnailUrl,
-        'visitedAt': visitedAt.toUtc().toIso8601String(),
-      };
+    'id': id,
+    'url': url,
+    'title': title,
+    'thumbnailUrl': thumbnailUrl,
+    'visitedAt': visitedAt.toUtc().toIso8601String(),
+  };
 
   static ReelsHistoryEntry fromJson(Map<String, dynamic> json) {
     return ReelsHistoryEntry(
@@ -31,7 +31,8 @@ class ReelsHistoryEntry {
       url: (json['url'] as String?) ?? '',
       title: (json['title'] as String?) ?? 'Instagram Reel',
       thumbnailUrl: (json['thumbnailUrl'] as String?) ?? '',
-      visitedAt: DateTime.tryParse((json['visitedAt'] as String?) ?? '') ??
+      visitedAt:
+          DateTime.tryParse((json['visitedAt'] as String?) ?? '') ??
           DateTime.now().toUtc(),
     );
   }
@@ -114,4 +115,3 @@ class ReelsHistoryService {
     await prefs.setString(_prefsKey, jsonEncode(jsonList));
   }
 }
-

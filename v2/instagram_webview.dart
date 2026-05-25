@@ -78,7 +78,6 @@ class InstagramWebViewState extends State<InstagramWebView> {
 
           // ── ContentBlockers — merged base + EasyList rules ──────────────
           contentBlockers: WebViewConfig.baseContentBlockers,
-          // TODO Phase 1.5: merge EasyListParser.load() here at startup
 
           // ── User Scripts — AT_DOCUMENT_START critical for ghost mode ─────
           initialUserScripts: UnmodifiableListView(
@@ -95,6 +94,33 @@ class InstagramWebViewState extends State<InstagramWebView> {
 
           onWebViewCreated: (controller) async {
             _controller = controller;
+
+            //Interceptor for adblock
+            shouldInterceptRequest:
+            (controller, request) async {
+              final url = request.url.toString();
+
+              const adDomains = [
+                'an.facebook.com',
+                'connect.facebook.net',
+                'pixel.facebook.com',
+                'graph.facebook.com/logging',
+                'www.instagram.com/ajax/bz',
+                'www.instagram.com/api/v1/web/comet/logcalls',
+                'doubleclick.net',
+                'googletagmanager.com',
+                'scorecardresearch.com',
+              ];
+
+              if (adDomains.any(url.contains)) {
+                return WebResourceResponse(
+                  contentType: 'application/json',
+                  httpStatus: WebResourceResponseHTTPStatus(statusCode: 200),
+                  data: Uint8List.fromList(utf8.encode('{}')),
+                );
+              }
+              return null;
+            };
 
             // Initialize GhostModeService
             _ghostMode = GhostModeService();

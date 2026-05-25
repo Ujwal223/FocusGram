@@ -46,7 +46,7 @@ class SettingsPage extends StatelessWidget {
             title: 'Focus Mode',
             subtitle: settings.minimalModeEnabled
                 ? 'Minimal mode on'
-                : 'Blocking, friction, media',
+                : 'Blocking, Content Hider, Feed Blur and more',
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const FocusSettingsPage()),
@@ -71,7 +71,7 @@ class SettingsPage extends StatelessWidget {
             icon: Icons.download_rounded,
             iconColor: Colors.orangeAccent,
             title: 'Extras',
-            subtitle: 'Download media, Ghost Mode, Ad Blocker',
+            subtitle: 'Download media, Ghost Mode',
             enabled: true,
             onTap: () => Navigator.push(
               context,
@@ -100,7 +100,7 @@ class SettingsPage extends StatelessWidget {
             icon: Icons.lock_outline,
             iconColor: Colors.tealAccent,
             title: 'Privacy & Notifications',
-            subtitle: 'Session end alerts',
+            subtitle: 'Manage Your Notifications',
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(
@@ -379,12 +379,16 @@ class FocusSettingsPage extends StatelessWidget {
             ),
 
           const _SectionHeader(title: 'MEDIA'),
+          /* 
+          ( I TRIED SO HARD, AND GOT SO FAR, BUT IN THE END... 
+          IT DOESNT EVEN MATTER ..... (didnt work))
+
           _SwitchTile(
             title: 'Block Autoplay Videos',
             subtitle: 'Videos won\'t play until you tap them',
             value: settings.blockAutoplay,
             onChanged: (v) => settings.setBlockAutoplay(v),
-          ),
+          ),*/
           _SwitchTile(
             title: 'Blur Feed & Explore',
             subtitle: 'Blurs post thumbnails until tapped',
@@ -403,47 +407,15 @@ class FocusSettingsPage extends StatelessWidget {
               ),
             ),
 
-          const _SectionHeader(title: 'FOCUSGRAM V2 OVERLAY'),
+          const _SectionHeader(title: 'CONTENT HIDER'),
 
           _SwitchTile(
-            title: 'Content Hider',
-            subtitle: 'Hide stories tray, feed posts, reels, suggested content',
-            value: settings.v2ContentHiderEnabled,
-            onChanged: (v) => settings.setV2ContentHiderEnabled(v),
+            title: 'Hide Feed Posts',
+            subtitle:
+                'Hides home feed posts (stories tray, posts, suggested content)',
+            value: settings.contentPosts,
+            onChanged: (v) => settings.setContentPostsEnabled(v),
           ),
-
-          if (settings.v2ContentHiderEnabled)
-            Padding(
-              padding: const EdgeInsets.only(left: 32),
-              child: Column(
-                children: [
-                  _SwitchTile(
-                    title: 'Hide Stories Tray',
-                    subtitle: 'Story bubbles row',
-                    value: settings.contentStories,
-                    onChanged: (v) => settings.setContentStoriesEnabled(v),
-                  ),
-                  _SwitchTile(
-                    title: 'Hide Feed Posts',
-                    subtitle: 'Home feed posts',
-                    value: settings.contentPosts,
-                    onChanged: (v) => settings.setContentPostsEnabled(v),
-                  ),
-                  _SwitchTile(
-                    title: 'Hide Reels (Feed)',
-                    subtitle: 'Reels shown in the feed',
-                    value: settings.contentReels,
-                    onChanged: (v) => settings.setContentReelsEnabled(v),
-                  ),
-                  _SwitchTile(
-                    title: 'Hide Suggested Content',
-                    subtitle: 'Suggested posts and recommendation units',
-                    value: settings.contentSuggested,
-                    onChanged: (v) => settings.setContentSuggestedEnabled(v),
-                  ),
-                ],
-              ),
-            ),
 
           const SizedBox(height: 40),
         ],

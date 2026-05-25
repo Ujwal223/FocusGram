@@ -1,6 +1,6 @@
 /**
  * FocusGram DOM Ad Blocker
- * Removes sponsored posts, "Suggested for you" injections, and ad elements.
+ * SHould have Removed sponsored posts, "Suggested for you" injections, and ad elements.
  * Uses structure-based selectors — NOT class names (those change weekly).
  * Injected at DOCUMENT_END.
  */
@@ -93,8 +93,6 @@
     if (hasAdditions) scanAndRemove();
   });
 
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true,
-  });
+  const feed = document.querySelector('main') ?? document.body;
+observer.observe(feed, { childList: true, subtree: true });
 })();

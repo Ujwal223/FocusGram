@@ -17,6 +17,7 @@ import 'screens/cooldown_gate_screen.dart';
 import 'services/notification_service.dart';
 import 'features/update_checker/update_checker_service.dart';
 import 'features/preloader/instagram_preloader.dart';
+import 'widgets/remote_popup_handler.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -88,7 +89,7 @@ class FocusGramApp extends StatelessWidget {
 ///   2. Cooldown Gate (if app-open cooldown active)
 ///   3. Breath Gate (if enabled in settings)
 ///   4. If an app session is already active, resume it
-///      otherwise show App Session Picker
+///   otherwise show App Session Picker
 ///   5. Main WebView
 class InitialRouteHandler extends StatefulWidget {
   const InitialRouteHandler({super.key});
@@ -108,6 +109,10 @@ class _InitialRouteHandlerState extends State<InitialRouteHandler> {
     super.initState();
     _appLinks = AppLinks();
     _initDeepLinks();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      RemotePopupHandler.checkAndShow(context);
+    });
   }
 
   Future<void> _initDeepLinks() async {

@@ -1,4 +1,5 @@
 import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -407,9 +408,11 @@ class SettingsService extends ChangeNotifier {
   }
 
   Future<void> setBreathGateSeconds(int seconds) async {
-    _breathGateSeconds = seconds.clamp(3, 60).toInt();
+    final clamped = seconds.clamp(3, 60);
+    _breathGateSeconds = clamped.toInt();
     await _prefs?.setInt(_keyBreathGateSeconds, _breathGateSeconds);
-    notifyListeners();
+    // Defer notifyListeners to next microtask to avoid rebuild conflicts
+    Future.microtask(notifyListeners);
   }
 
   Future<void> setWordChallengeCount(int count) async {

@@ -9,4 +9,3 @@ const String kHapticBridgeScript = '''
   }, true);
 })();
 ''';
-

@@ -172,7 +172,7 @@ const String kVideoDownloadJS = r'''
     btn.innerHTML = icon();
     btn.style.cssText = [
       'position:absolute',
-      'z-index:2147483647',
+      'z-index:999',
       'width:34px',
       'height:34px',
       'border-radius:10px',

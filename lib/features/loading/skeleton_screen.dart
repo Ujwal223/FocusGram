@@ -92,16 +92,16 @@ class _SkeletonScreenState extends State<SkeletonScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
+        SizedBox(
           height: 80,
-          padding: const EdgeInsets.symmetric(vertical: 8),
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             itemCount: 6,
             itemBuilder: (context, index) => Padding(
               padding: const EdgeInsets.only(right: 12),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
                     width: 56,
@@ -111,13 +111,13 @@ class _SkeletonScreenState extends State<SkeletonScreen>
                       borderRadius: BorderRadius.circular(28),
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   Container(
                     width: 32,
-                    height: 8,
+                    height: 6,
                     decoration: BoxDecoration(
                       color: Colors.white,
-                      borderRadius: BorderRadius.circular(4),
+                      borderRadius: BorderRadius.circular(3),
                     ),
                   ),
                 ],
