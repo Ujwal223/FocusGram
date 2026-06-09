@@ -1,5 +1,5 @@
 class FocusSettings {
-  final bool ghostMode; // hide read receipts
+  final bool ghostMode; // DM ghost — blocks seen/DM signals comprehensively
   final bool noAds; // strip ads and sponsored posts
   final bool noStories; // hide story tray
   final bool noReels; // hide reels tab

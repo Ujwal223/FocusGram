@@ -4,11 +4,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:app_links/app_links.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+// google_mobile_ads removed — switched to Adsterra only
 import 'services/session_manager.dart';
 import 'services/settings_service.dart';
 import 'services/screen_time_service.dart';
 import 'services/focusgram_router.dart';
 import 'services/injection_controller.dart';
+import 'services/credit_store.dart';
+import 'services/bait_engine.dart';
+import 'services/app_lock_service.dart';
+import 'services/level_service.dart';
+import 'services/snapshot_service.dart';
+import 'screens/app_lock_screen.dart';
 import 'screens/onboarding_page.dart';
 import 'screens/main_webview_page.dart';
 import 'screens/breath_gate_screen.dart';
@@ -28,23 +36,40 @@ void main() async {
     DeviceOrientation.portraitDown,
   ]);
 
+  // ── Initialise storage & SDKs ──────────────────────────────
+  await Hive.initFlutter();
+  final creditStore = CreditStore();
+  final baitEngine = BaitEngine();
+  final levelService = LevelService();
+  final appLockService = AppLockService();
+  final snapshotService = SnapshotService();
+
   final sessionManager = SessionManager();
   final settingsService = SettingsService();
   final screenTimeService = ScreenTimeService();
 
   final updateChecker = UpdateCheckerService();
 
+  await creditStore.init();
+  await baitEngine.init();
+  await appLockService.init();
+  await levelService.init();
+  await snapshotService.init();
   await sessionManager.init();
   await settingsService.init();
   await screenTimeService.init();
-  await NotificationService().init();
-
+  await NotificationService().init(requestPermissions: true);
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: sessionManager),
         ChangeNotifierProvider.value(value: settingsService),
         ChangeNotifierProvider.value(value: screenTimeService),
+        ChangeNotifierProvider.value(value: creditStore),
+        ChangeNotifierProvider.value(value: baitEngine),
+        ChangeNotifierProvider.value(value: levelService),
+        ChangeNotifierProvider.value(value: appLockService),
+        ChangeNotifierProvider.value(value: snapshotService),
         ChangeNotifierProvider.value(value: updateChecker),
       ],
       child: const FocusGramApp(),
@@ -98,7 +123,8 @@ class InitialRouteHandler extends StatefulWidget {
   State<InitialRouteHandler> createState() => _InitialRouteHandlerState();
 }
 
-class _InitialRouteHandlerState extends State<InitialRouteHandler> {
+class _InitialRouteHandlerState extends State<InitialRouteHandler>
+    with WidgetsBindingObserver {
   bool _breathCompleted = false;
   bool _appSessionStarted = false;
   bool _onboardingCompleted = false;
@@ -107,6 +133,7 @@ class _InitialRouteHandlerState extends State<InitialRouteHandler> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _appLinks = AppLinks();
     _initDeepLinks();
 
@@ -115,17 +142,44 @@ class _InitialRouteHandlerState extends State<InitialRouteHandler> {
     });
   }
 
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final appLock = context.read<AppLockService>();
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      appLock.onBackgrounded();
+    } else if (state == AppLifecycleState.resumed) {
+      if (appLock.shouldLockOnResume) {
+        appLock.onLockScreenShown();
+        _showLockScreen();
+      }
+    }
+  }
+
+  void _showLockScreen() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AppLockScreen(forAppWide: true)),
+    );
+  }
+
   Future<void> _initDeepLinks() async {
     // 1. Handle background links while app is running
     _appLinks.uriLinkStream.listen((uri) {
-      debugPrint('Incoming Deep Link: $uri');
+      // debugPrint('Incoming Deep Link: $uri');
       FocusGramRouter.pendingUrl.value = uri.toString();
     });
 
     // 2. Handle the initial link that opened the app
     final initialUri = await _appLinks.getInitialLink();
     if (initialUri != null) {
-      debugPrint('Initial Deep Link: $initialUri');
+      // debugPrint('Initial Deep Link: $initialUri');
       FocusGramRouter.pendingUrl.value = initialUri.toString();
     }
   }
@@ -134,6 +188,17 @@ class _InitialRouteHandlerState extends State<InitialRouteHandler> {
   Widget build(BuildContext context) {
     final sm = context.watch<SessionManager>();
     final settings = context.watch<SettingsService>();
+    final appLock = context.watch<AppLockService>();
+
+    // Step 0: App-wide lock (shows before everything)
+    if (appLock.needsUnlockOnStart && !_appSessionStarted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!appLock.isShowingLock) {
+          appLock.onLockScreenShown();
+          _showLockScreen();
+        }
+      });
+    }
 
     // Step 1: Onboarding
     if (settings.isFirstRun && !_onboardingCompleted) {

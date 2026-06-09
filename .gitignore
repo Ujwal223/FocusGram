@@ -12,10 +12,9 @@
 .swiftpm/
 migrate_working_dir/
 PRD.md 
+.reasonix/
 .agents/
-TODO.md
-v2/FOCUSGRAM_V2_PLAN.md
-v2/FocusGram_Feed_Filtering_Reference.docx
+
 
 
 # IntelliJ related

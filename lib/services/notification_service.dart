@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 class NotificationService {
@@ -55,7 +54,7 @@ class NotificationService {
           >()
           ?.requestPermissions(alert: true, badge: true, sound: true);
     } catch (e) {
-      debugPrint('iOS permission request error: $e');
+      // debugPrint('iOS permission request error: $e');
     }
   }
 
@@ -67,7 +66,7 @@ class NotificationService {
           >()
           ?.requestNotificationsPermission();
     } catch (e) {
-      debugPrint('Android permission request error: $e');
+      // debugPrint('Android permission request error: $e');
     }
   }
 
@@ -105,7 +104,7 @@ class NotificationService {
         notificationDetails: platformDetails,
       );
     } catch (e) {
-      debugPrint('Notification error: $e');
+      // debugPrint('Notification error: $e');
     }
   }
 
@@ -149,7 +148,7 @@ class NotificationService {
         notificationDetails: platformDetails,
       );
     } catch (e) {
-      debugPrint('Persistent notification error: $e');
+      // debugPrint('Persistent notification error: $e');
     }
   }
 
@@ -158,7 +157,7 @@ class NotificationService {
     try {
       await _notificationsPlugin.cancel(id: id);
     } catch (e) {
-      debugPrint('Cancel persistent notification error: $e');
+      // debugPrint('Cancel persistent notification error: $e');
     }
   }
 
@@ -167,7 +166,7 @@ class NotificationService {
     try {
       await _notificationsPlugin.cancelAll();
     } catch (e) {
-      debugPrint('Cancel all notifications error: $e');
+      // debugPrint('Cancel all notifications error: $e');
     }
   }
 }

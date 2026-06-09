@@ -6,6 +6,55 @@
 (function () {
   'use strict';
 
+  // ─── Direct Message API block ────────────────────────────────────────────
+  // ── First-interaction gate: allow inbox to load, then block ─
+  window.__fgDirectApiBlocked = false;
+  document.addEventListener('click', function() {
+    if (window.location.pathname.indexOf('/direct/') === 0) window.__fgDirectApiBlocked = true;
+  }, true);
+  document.addEventListener('touchstart', function() {
+    if (window.location.pathname.indexOf('/direct/') === 0) window.__fgDirectApiBlocked = true;
+  }, true);
+  var _prevD = window.location.pathname.indexOf('/direct/') === 0;
+  setInterval(function() {
+    var now = window.location.pathname.indexOf('/direct/') === 0;
+    if (now !== _prevD) { _prevD = now; window.__fgDirectApiBlocked = false; }
+  }, 300);
+
+  function _blockIfNeeded(url) {
+    return window.__fgDirectApiBlocked &&
+           window.location.pathname.indexOf('/direct/') === 0 &&
+           url.indexOf('/api/graphql') !== -1;
+  }
+
+  const _f = window.fetch.bind(window);
+  window.fetch = function(input, init) {
+    const url = (typeof input === 'string') ? input : (input && input.url) ? input.url : '';
+    if (_blockIfNeeded(url)) {
+      return Promise.resolve(new Response(JSON.stringify({status:'ok'}), {
+        status: 200, headers: {'Content-Type': 'application/json'}
+      }));
+    }
+    return _f(input, init);
+  };
+
+  const _o = XMLHttpRequest.prototype.open;
+  const _s = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function(m, u) {
+    this.__fgUrl = u || ''; return _o.apply(this, arguments);
+  };
+  XMLHttpRequest.prototype.send = function(body) {
+    if (_blockIfNeeded(this.__fgUrl || '')) {
+      const self = this; setTimeout(function() {
+        Object.defineProperty(self,'readyState',{get:function(){return 4}});
+        Object.defineProperty(self,'status',{get:function(){return 200}});
+        Object.defineProperty(self,'responseText',{get:function(){return '{"status":"ok"}'}});
+        self.dispatchEvent(new Event('readystatechange')); self.dispatchEvent(new Event('load'));
+      }, 5); return;
+    }
+    return _s.apply(this, arguments);
+  };
+
   // ─── Seen API patterns ────────────────────────────────────────────────────
   const SEEN_PATTERNS = [
     /\/api\/v1\/media\/[\w-]+\/seen\//,

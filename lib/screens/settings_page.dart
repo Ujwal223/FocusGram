@@ -6,8 +6,18 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/session_manager.dart';
 import '../services/settings_service.dart';
+import '../services/level_service.dart';
+import '../services/credit_store.dart';
+import '../services/app_lock_service.dart';
+// snapshot_service import removed — offline feature deleted
 import '../services/focusgram_router.dart';
+import 'app_lock_settings_page.dart';
+// snapshot_manager_screen import removed — offline feature deleted
+import 'level_panel_screen.dart';
+//import 'debug_menu_screen.dart';
+import '../widgets/native_ad_banner.dart';
 import '../features/screen_time/screen_time_screen.dart';
+// reels_history_screen import removed — feature deleted
 import 'guardrails_page.dart';
 import 'extras_settings_page.dart';
 
@@ -37,7 +47,7 @@ class SettingsPage extends StatelessWidget {
       body: ListView(
         children: [
           const _DonateTile(),
-          _buildStatsRow(sm),
+          _buildStatsRow(sm, context),
 
           const _SectionHeader(title: 'FOCUS & BLOCKING'),
           _SubmoduleTile(
@@ -71,13 +81,14 @@ class SettingsPage extends StatelessWidget {
             icon: Icons.download_rounded,
             iconColor: Colors.orangeAccent,
             title: 'Extras',
-            subtitle: 'Download media, Ghost Mode',
+            subtitle: 'Startup Page, Download media, Ghost Mode',
             enabled: true,
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const ExtrasSettingsPage()),
             ),
           ),
+          
 
           const _SectionHeader(title: 'APPEARANCE'),
           _SubmoduleTile(
@@ -88,10 +99,22 @@ class SettingsPage extends StatelessWidget {
                 ? 'Grayscale on'
                 : settings.grayscaleSchedules.isNotEmpty
                 ? 'Grayscale scheduled (${settings.grayscaleSchedules.length} schedules)'
-                : 'Theme, grayscale',
+                : 'Grayscale and schedules',
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const AppearancePage()),
+            ),
+          ),
+
+          const _SectionHeader(title: 'SECURITY'),
+          _SubmoduleTile(
+            icon: Icons.lock_rounded,
+            iconColor: Colors.blueAccent,
+            title: 'App Lock',
+            subtitle: _appLockSubtitle(context.watch<AppLockService>()),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const AppLockSettingsPage()),
             ),
           ),
 
@@ -120,18 +143,22 @@ class SettingsPage extends StatelessWidget {
               MaterialPageRoute(builder: (_) => const ScreenTimeScreen()),
             ),
           ),
-
-          const _SectionHeader(title: 'ABOUT'),
-          FutureBuilder<PackageInfo>(
-            future: PackageInfo.fromPlatform(),
-            builder: (context, snapshot) => ListTile(
-              title: const Text('Version'),
-              trailing: Text(
-                snapshot.data?.version ?? '…',
-                style: const TextStyle(color: Colors.grey),
-              ),
+          _SubmoduleTile(
+            icon: Icons.trending_up_rounded,
+            iconColor: Colors.amber,
+            title: 'Your Journey',
+            subtitle: 'Level ${context.watch<LevelService>().level} · ${context.watch<LevelService>().xp} XP',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const LevelPanelScreen()),
             ),
           ),
+          // Quick XP debug grant (visible in settings for testing)
+         // _XpDebugTile(),
+          // Reels History removed
+
+          const _SectionHeader(title: 'ABOUT'),
+           _VersionTile(),
           ListTile(
             title: const Text('GitHub'),
             trailing: const Icon(Icons.open_in_new, size: 14),
@@ -173,6 +200,8 @@ class SettingsPage extends StatelessWidget {
                   'https://www.instagram.com/accounts/settings/?entrypoint=profile';
             },
           ),
+          const SizedBox(height: 20),
+          const NativeAdBanner(height: 60),
           const SizedBox(height: 40),
           Center(
             child: Text(
@@ -189,7 +218,35 @@ class SettingsPage extends StatelessWidget {
     );
   }
 
-  Widget _buildStatsRow(SessionManager sm) {
+  Widget _buildStatsRow(SessionManager sm, BuildContext context) {
+    final creditStore = context.watch<CreditStore>();
+    final cells = <Widget>[
+      _statCell('Opens Today', '${sm.dailyOpenCount}×', Colors.blue),
+      _dividerCell(),
+      _statCell(
+        'Reels Used',
+        '${sm.dailyUsedSeconds ~/ 60}m',
+        Colors.orangeAccent,
+      ),
+      _dividerCell(),
+      _statCell(
+        'Remaining',
+        '${sm.dailyRemainingSeconds ~/ 60}m',
+        Colors.greenAccent,
+      ),
+    ];
+
+    if (true) { // ad counter always shown
+      cells.addAll([
+        _dividerCell(),
+        _statCell(
+          'XP Ads Watched',
+          '${creditStore.adsWatchedToday}',
+          Colors.purpleAccent,
+        ),
+      ]);
+    }
+
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 20, 16, 4),
       padding: const EdgeInsets.all(16),
@@ -200,21 +257,7 @@ class SettingsPage extends StatelessWidget {
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
-          _statCell('Opens Today', '${sm.dailyOpenCount}×', Colors.blue),
-          _dividerCell(),
-          _statCell(
-            'Reels Used',
-            '${sm.dailyUsedSeconds ~/ 60}m',
-            Colors.orangeAccent,
-          ),
-          _dividerCell(),
-          _statCell(
-            'Remaining',
-            '${sm.dailyRemainingSeconds ~/ 60}m',
-            Colors.greenAccent,
-          ),
-        ],
+        children: cells,
       ),
     );
   }
@@ -239,6 +282,16 @@ class SettingsPage extends StatelessWidget {
     height: 36,
     color: Colors.blue.withValues(alpha: 0.1),
   );
+
+  String _appLockSubtitle(AppLockService a) {
+    if (!a.anyLockEnabled) return 'Protect FocusGram with a PIN';
+    final parts = <String>[];
+    if (a.lockAppWide) parts.add('App-wide');
+    if (a.lockMessages) parts.add('Messages');
+    return '${parts.join(' + ')} lock active';
+  }
+
+
 
   void _showLegalDisclaimer(BuildContext context) {
     showDialog(
@@ -341,6 +394,8 @@ class FocusSettingsPage extends StatelessWidget {
             ),
           ),
 
+          const SizedBox(height: 8),
+
           const _SectionHeader(title: 'FRICTION'),
           _SwitchTile(
             title: 'Mindfulness Gate',
@@ -378,17 +433,24 @@ class FocusSettingsPage extends StatelessWidget {
               onSelected: (v) => settings.setWordChallengeCount(v),
             ),
 
-          const _SectionHeader(title: 'MEDIA'),
-          /* 
-          ( I TRIED SO HARD, AND GOT SO FAR, BUT IN THE END... 
-          IT DOESNT EVEN MATTER ..... (didnt work))
-
           _SwitchTile(
-            title: 'Block Autoplay Videos',
-            subtitle: 'Videos won\'t play until you tap them',
-            value: settings.blockAutoplay,
-            onChanged: (v) => settings.setBlockAutoplay(v),
-          ),*/
+            title: 'Effort Friction Mode',
+            subtitle: 'Watch ads to earn reel quota minutes',
+            value: settings.effortFrictionEnabled,
+            onChanged: (v) async {
+              if (v && !context.read<LevelService>().isFeatureUnlocked(AppFeature.effortFriction)) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Unlocks at Level 2')),
+                );
+                return;
+              }
+              await settings.setEffortFrictionEnabled(v);
+              HapticFeedback.selectionClick();
+            },
+          ),
+
+          const _SectionHeader(title: 'MEDIA'),
+          // Block Autoplay removed — was unreliable
           _SwitchTile(
             title: 'Blur Feed & Explore',
             subtitle: 'Blurs post thumbnails until tapped',
@@ -412,7 +474,7 @@ class FocusSettingsPage extends StatelessWidget {
           _SwitchTile(
             title: 'Hide Feed Posts',
             subtitle:
-                'Hides home feed posts (stories tray, posts, suggested content)',
+                'Hides home feed posts',
             value: settings.contentPosts,
             onChanged: (v) => settings.setContentPostsEnabled(v),
           ),
@@ -1320,6 +1382,26 @@ class _NumberEditTile extends StatelessWidget {
     );
   }
 }
+
+
+class _VersionTile extends StatelessWidget {
+  const _VersionTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<PackageInfo>(
+      future: PackageInfo.fromPlatform(),
+      builder: (context, snapshot) => ListTile(
+        title: const Text('Version'),
+        trailing: Text(
+          snapshot.data?.version ?? '…',
+          style: const TextStyle(color: Colors.grey),
+        ),
+      ),
+    );
+  }
+}
+
 
 class _SectionHeader extends StatelessWidget {
   final String title;

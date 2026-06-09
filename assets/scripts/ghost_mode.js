@@ -1,12 +1,36 @@
 /**
- * FocusGram Ghost Mode
+ * FocusGram Ghost Mode (V2 Overlay)
  * Injected at DOCUMENT_START — before Instagram's JS loads.
  * Blocks story-seen, message-seen, and online-presence signals.
+ *
+ * Uses _prev chain pattern: each section saves the PREVIOUS fetch/XHR
+ * before overriding, so they compose rather than conflict.
  */
 (function () {
   'use strict';
 
-  // ─── Seen API patterns ────────────────────────────────────────────────────
+  // ─── First-interaction DM gate ──────────────────────────────────────────
+  // On /direct/*, first click blocks all api/graphql (inbox loads first).
+  window.__fgDirectApiBlocked = false;
+  document.addEventListener('click', function() {
+    if (window.location.pathname.indexOf('/direct/') === 0) window.__fgDirectApiBlocked = true;
+  }, true);
+  document.addEventListener('touchstart', function() {
+    if (window.location.pathname.indexOf('/direct/') === 0) window.__fgDirectApiBlocked = true;
+  }, true);
+  var _prevD = window.location.pathname.indexOf('/direct/') === 0;
+  setInterval(function() {
+    var now = window.location.pathname.indexOf('/direct/') === 0;
+    if (now !== _prevD) { _prevD = now; window.__fgDirectApiBlocked = false; }
+  }, 300);
+
+  function _blockIfNeeded(url) {
+    return window.__fgDirectApiBlocked &&
+           window.location.pathname.indexOf('/direct/') === 0 &&
+           url.indexOf('/api/graphql') !== -1;
+  }
+
+  // ─── SEEN + ACTIVITY patterns ───────────────────────────────────────────
   const SEEN_PATTERNS = [
     /\/api\/v1\/media\/[\w-]+\/seen\//,
     /\/api\/v1\/stories\/reel\/seen\//,
@@ -15,7 +39,6 @@
     /\/api\/v1\/live\/[\w-]+\/comment\/seen\//,
   ];
 
-  // ─── Activity patterns (like, comment) — intercepted for local history ────
   const ACTIVITY_PATTERNS = [
     /\/api\/v1\/web\/likes\/[\w-]+\/like\//,
     /\/api\/v1\/web\/comments\/add\//,
@@ -25,16 +48,9 @@
   const isSeen = (url) => SEEN_PATTERNS.some((p) => p.test(url));
   const isActivity = (url) => ACTIVITY_PATTERNS.some((p) => p.test(url));
 
-  const fakeOkResponse = () =>
-    new Response(JSON.stringify({ status: 'ok' }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-  // ─── Fetch override ───────────────────────────────────────────────────────
-  const _fetch = window.fetch.bind(window);
-
-  const patchedFetch = async function (input, init) {
+  // ─── Fetch override — chains with whatever was there ──────────────────────
+  const _prevFetch = window.fetch;
+  window.fetch = async function (input, init) {
     const url =
       typeof input === 'string'
         ? input
@@ -42,17 +58,24 @@
         ? input.href
         : input?.url ?? '';
 
-    // Block seen
-    if (isSeen(url)) {
-      if (window.GhostChannel) {
-        window.GhostChannel.postMessage(
-          JSON.stringify({ type: 'seen_blocked', url })
-        );
-      }
-      return fakeOkResponse();
+    // DM first-interaction gate
+    if (_blockIfNeeded(url)) {
+      return new Response(JSON.stringify({ status: 'ok' }), {
+        status: 200, headers: { 'Content-Type': 'application/json' }
+      });
     }
 
-    // Intercept activity for local history
+    // Seen pattern block
+    if (isSeen(url)) {
+      if (window.GhostChannel) {
+        window.GhostChannel.postMessage(JSON.stringify({ type: 'seen_blocked', url }));
+      }
+      return new Response(JSON.stringify({ status: 'ok' }), {
+        status: 200, headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    // Activity interceptor for local history
     if (isActivity(url) && window.ActivityChannel) {
       const body = init?.body;
       const bodyText =
@@ -66,51 +89,57 @@
       );
     }
 
-    return _fetch(input, init);
+    return _prevFetch(input, init);
   };
-
-  // Disguise as native
-  Object.defineProperty(window, 'fetch', {
-    value: patchedFetch,
-    writable: true,
-    configurable: true,
-    enumerable: true,
-  });
   window.fetch.toString = () => 'function fetch() { [native code] }';
-  window.fetch[Symbol.toStringTag] = 'fetch';
 
-  // ─── XMLHttpRequest override ──────────────────────────────────────────────
-  const _XHROpen = XMLHttpRequest.prototype.open;
-  const _XHRSend = XMLHttpRequest.prototype.send;
+  // ─── XHR override — chains ──────────────────────────────────────────────
+  const _prevOpen = XMLHttpRequest.prototype.open;
+  const _prevSend = XMLHttpRequest.prototype.send;
 
   XMLHttpRequest.prototype.open = function (method, url, ...args) {
     this._fg_url = url ?? '';
     this._fg_method = (method ?? '').toUpperCase();
-    return _XHROpen.call(this, method, url, ...args);
+    return _prevOpen.call(this, method, url, ...args);
   };
 
   XMLHttpRequest.prototype.send = function (body) {
-    if (this._fg_url && isSeen(this._fg_url)) {
-      // Fire readyState 4 with fake success without actually sending
+    const url = this._fg_url || '';
+
+    // DM first-interaction gate
+    if (_blockIfNeeded(url)) {
       const self = this;
       setTimeout(() => {
         Object.defineProperty(self, 'readyState', { get: () => 4 });
         Object.defineProperty(self, 'status', { get: () => 200 });
-        Object.defineProperty(self, 'responseText', {
-          get: () => '{"status":"ok"}',
+        Object.defineProperty(self, 'responseText', { get: () => '{"status":"ok"}' });
+        Object.defineProperty(self, 'response', { get: () => '{"status":"ok"}' });
+        ['readystatechange', 'load'].forEach(function(t) {
+          try { self.dispatchEvent(new Event(t)); } catch(e) {}
         });
-        Object.defineProperty(self, 'response', {
-          get: () => '{"status":"ok"}',
-        });
-        self.dispatchEvent(new Event('readystatechange'));
-        self.dispatchEvent(new Event('load'));
-      }, 10);
+      }, 5);
       return;
     }
-    return _XHRSend.call(this, body);
+
+    // Seen pattern block
+    if (url && isSeen(url)) {
+      const self = this;
+      setTimeout(() => {
+        Object.defineProperty(self, 'readyState', { get: () => 4 });
+        Object.defineProperty(self, 'status', { get: () => 200 });
+        Object.defineProperty(self, 'responseText', { get: () => '{"status":"ok"}' });
+        Object.defineProperty(self, 'response', { get: () => '{"status":"ok"}' });
+        ['readystatechange', 'load'].forEach(function(t) {
+          try { self.dispatchEvent(new Event(t)); } catch(e) {}
+        });
+      }, 5);
+      return;
+    }
+
+    return _prevSend.call(this, body);
   };
 
-  // ─── WebSocket intercept (message-seen via WS) ────────────────────────────
+  // ─── WebSocket intercept (message-seen via WS) ──────────────────────────
   const _WS = window.WebSocket;
 
   function PatchedWebSocket(url, protocols) {
@@ -119,7 +148,6 @@
 
     ws.send = function (data) {
       if (typeof data === 'string') {
-        // IG sends seen ops as JSON with "op":"4" or "op":"seen" depending on version
         try {
           const parsed = JSON.parse(data);
           if (
@@ -130,7 +158,6 @@
             return; // drop
           }
         } catch (_) {}
-        // Text-based seen signal check
         if (data.includes('"seen"') && data.includes('"thread_id"')) {
           return;
         }
@@ -141,7 +168,6 @@
     return ws;
   }
 
-  // Preserve WebSocket prototype chain so IG's ws checks pass
   PatchedWebSocket.prototype = _WS.prototype;
   PatchedWebSocket.CONNECTING = _WS.CONNECTING;
   PatchedWebSocket.OPEN = _WS.OPEN;
@@ -149,24 +175,18 @@
   PatchedWebSocket.CLOSED = _WS.CLOSED;
   window.WebSocket = PatchedWebSocket;
 
-  // ─── Visibility trick — hide "Active Now" ────────────────────────────────
-  // Only applied if user enables online-status hiding
-  // Wrapped in a named fn so Flutter can call it:
-  // controller.evaluateJavascript(source: 'window.__fgEnableOnlineHide()')
+  // ─── Visibility trick — hide "Active Now" ──────────────────────────────
   window.__fgEnableOnlineHide = function () {
     Object.defineProperty(document, 'visibilityState', {
-      get: () => 'hidden',
-      configurable: true,
+      get: () => 'hidden', configurable: true,
     });
     Object.defineProperty(document, 'hidden', {
-      get: () => true,
-      configurable: true,
+      get: () => true, configurable: true,
     });
     document.dispatchEvent(new Event('visibilitychange'));
   };
 
   window.__fgDisableOnlineHide = function () {
-    // Restore by deleting the overrides (falls back to native getter)
     delete document.visibilityState;
     delete document.hidden;
     document.dispatchEvent(new Event('visibilitychange'));

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../services/settings_service.dart';
+import 'ghost_mode_submenu_page.dart';
 
 class ExtrasSettingsPage extends StatelessWidget {
   const ExtrasSettingsPage({super.key});
@@ -10,7 +11,6 @@ class ExtrasSettingsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsService>();
-
     return Scaffold(
       appBar: AppBar(
         title: const Text(
@@ -25,6 +25,10 @@ class ExtrasSettingsPage extends StatelessWidget {
       ),
       body: ListView(
         children: [
+          const _SectionHeader(title: 'STARTUP'),
+          _LaunchPagePicker(settings: settings),
+          const SizedBox(height: 8),
+
           const _SectionHeader(title: 'MEDIA'),
           _SwitchTile(
             title: 'Download Media (Feed + Reels)',
@@ -37,69 +41,101 @@ class ExtrasSettingsPage extends StatelessWidget {
           ),
 
           const _SectionHeader(title: 'FOCUS'),
-          _SwitchTile(
-            title: 'GHOST MODE',
-            subtitle: 'Hide seen indicator / read receipts',
-            value: settings.ghostMode,
-            onChanged: (v) async {
-              await settings.setGhostMode(v);
-              HapticFeedback.selectionClick();
-            },
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: Container(
-              padding: const EdgeInsets.all(12),
+          ListTile(
+            leading: Container(
+              width: 36,
+              height: 36,
               decoration: BoxDecoration(
-                color: Colors.amber.withValues(alpha: 0.07),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.amber.withValues(alpha: 0.12)),
+                color: settings.ghostMode
+                    ? Colors.purple.withValues(alpha: 0.15)
+                    : Colors.grey.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
               ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8, top: 2),
-                    child: Icon(
-                      Icons.info_outline,
-                      size: 14,
-                      color: Colors.amber,
-                    ),
-                  ),
-                  const Expanded(
-                    child: Text(
-                      'NOTE: The seen indicator is not sent to the sender while you are active in the chat, but as soon as you close and reopen the chat, the seen indicator is sent.',
-                      style: TextStyle(fontSize: 11, color: Colors.amber),
-                    ),
-                  ),
-                ],
+              child: Icon(
+                Icons.visibility_off_rounded,
+                color: settings.ghostMode ? Colors.purpleAccent : Colors.grey,
+                size: 20,
               ),
+            ),
+            title: const Text('Ghost Mode', style: TextStyle(fontSize: 15)),
+            subtitle: Text(
+              _ghostSubtitle(settings),
+              style: const TextStyle(fontSize: 12),
+            ),
+            trailing: const Icon(Icons.chevron_right, size: 20),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const GhostModeSubmenuPage()),
             ),
           ),
 
-          /* TRIED BUT IT DIDNT WORK 98% oF THE TIME) 
-          
-          const _SectionHeader(title: 'FOCUSGRAM V2'),
-          _SwitchTile(
-            title: 'Ad Blocker',
-            subtitle: 'Removes ads and sponsored posts',
-            value: settings.v2AdBlockerDomEnabled,
-            onChanged: (v) async {
-              await settings.setV2AdBlockerDomEnabled(v);
-              HapticFeedback.selectionClick();
-            },
-          ),
-          _SwitchTile(
-            title: 'Block Suggested Posts',
-            subtitle: 'Removes Suggested for you and recommendation units',
-            value: settings.contentSuggested,
-            onChanged: (v) async {
-              await settings.setContentSuggestedEnabled(v);
-              HapticFeedback.selectionClick();
-            },
-          ),
-*/
           const SizedBox(height: 40),
+        ],
+      ),
+    );
+  }
+}
+
+String _ghostSubtitle(SettingsService s) {
+  if (s.ghostMode) return 'DM Ghost active';
+  return 'Tap to configure ghost modes';
+}
+
+class _LaunchPagePicker extends StatelessWidget {
+  final SettingsService settings;
+  const _LaunchPagePicker({required this.settings});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final options = ['home', 'following', 'favorites', 'direct'];
+    final labels = {
+      'home': 'Home Feed',
+      'following': 'Following',
+      'favorites': 'Favorites',
+      'direct': 'Direct Messages',
+    };
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          DropdownButtonFormField<String>(
+            value: settings.startupPage,
+            decoration: const InputDecoration(
+              labelText: 'Launch Page',
+              border: OutlineInputBorder(),
+              isDense: true,
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
+            ),
+            items: options
+                .map(
+                  (p) => DropdownMenuItem(
+                    value: p,
+                    child: Text(
+                      labels[p] ?? p,
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: (v) {
+              if (v != null) settings.setStartupPage(v);
+              HapticFeedback.selectionClick();
+            },
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Choose which page opens when you launch Focusgram.',
+            style: TextStyle(
+              fontSize: 12,
+              color: isDark ? Colors.white38 : Colors.black38,
+            ),
+          ),
         ],
       ),
     );
@@ -111,7 +147,6 @@ class _SwitchTile extends StatelessWidget {
   final String? subtitle;
   final bool value;
   final ValueChanged<bool> onChanged;
-
   const _SwitchTile({
     required this.title,
     this.subtitle,
@@ -124,7 +159,7 @@ class _SwitchTile extends StatelessWidget {
     return SwitchListTile(
       title: Text(title, style: const TextStyle(fontSize: 15)),
       subtitle: subtitle != null
-          ? Text(subtitle ?? '', style: const TextStyle(fontSize: 12))
+          ? Text(subtitle!, style: const TextStyle(fontSize: 12))
           : null,
       value: value,
       onChanged: onChanged,
@@ -135,7 +170,6 @@ class _SwitchTile extends StatelessWidget {
 class _SectionHeader extends StatelessWidget {
   final String title;
   const _SectionHeader({required this.title});
-
   @override
   Widget build(BuildContext context) {
     return Padding(

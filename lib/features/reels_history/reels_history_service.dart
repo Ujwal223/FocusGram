@@ -8,6 +8,8 @@ class ReelsHistoryEntry {
   final String title;
   final String thumbnailUrl;
   final DateTime visitedAt;
+  final int durationSeconds;    // How long the session lasted
+  final int adsWatchedInSession; // How many ads watched during this session
 
   const ReelsHistoryEntry({
     required this.id,
@@ -15,6 +17,8 @@ class ReelsHistoryEntry {
     required this.title,
     required this.thumbnailUrl,
     required this.visitedAt,
+    this.durationSeconds = 0,
+    this.adsWatchedInSession = 0,
   });
 
   Map<String, dynamic> toJson() => {
@@ -23,6 +27,8 @@ class ReelsHistoryEntry {
     'title': title,
     'thumbnailUrl': thumbnailUrl,
     'visitedAt': visitedAt.toUtc().toIso8601String(),
+    'durationSeconds': durationSeconds,
+    'adsWatchedInSession': adsWatchedInSession,
   };
 
   static ReelsHistoryEntry fromJson(Map<String, dynamic> json) {
@@ -34,6 +40,8 @@ class ReelsHistoryEntry {
       visitedAt:
           DateTime.tryParse((json['visitedAt'] as String?) ?? '') ??
           DateTime.now().toUtc(),
+      durationSeconds: (json['durationSeconds'] as num?)?.toInt() ?? 0,
+      adsWatchedInSession: (json['adsWatchedInSession'] as num?)?.toInt() ?? 0,
     );
   }
 }
@@ -71,6 +79,8 @@ class ReelsHistoryService {
     required String url,
     required String title,
     required String thumbnailUrl,
+    int durationSeconds = 0,
+    int adsWatchedInSession = 0,
   }) async {
     if (url.isEmpty) return;
     final now = DateTime.now().toUtc();
@@ -89,6 +99,8 @@ class ReelsHistoryService {
       title: title.isEmpty ? 'Instagram Reel' : title,
       thumbnailUrl: thumbnailUrl,
       visitedAt: now,
+      durationSeconds: durationSeconds,
+      adsWatchedInSession: adsWatchedInSession,
     );
 
     final updated = [entry, ...entries];
@@ -102,6 +114,44 @@ class ReelsHistoryService {
     final entries = await getEntries();
     entries.removeWhere((e) => e.id == id);
     await _save(entries);
+  }
+
+  /// Get average reels watched per day in the last 7 days.
+  Future<double> getWeeklyAverageReels() async {
+    final entries = await getEntries();
+    if (entries.isEmpty) return 0;
+
+    final now = DateTime.now();
+    final sevenDaysAgo = now.subtract(const Duration(days: 7));
+    final recent = entries.where((e) => e.visitedAt.isAfter(sevenDaysAgo)).toList();
+
+    if (recent.isEmpty) return 0;
+    return recent.length / 7.0;
+  }
+
+  /// Get reel counts grouped by day (for the level system).
+  Future<Map<String, int>> getDailyReelCounts({int days = 30}) async {
+    final entries = await getEntries();
+    final now = DateTime.now();
+    final cutoff = now.subtract(Duration(days: days));
+    final recent = entries.where((e) => e.visitedAt.isAfter(cutoff)).toList();
+
+    final Map<String, int> counts = {};
+    for (final entry in recent) {
+      final dayKey = '${entry.visitedAt.year}-'
+          '${entry.visitedAt.month.toString().padLeft(2, '0')}-'
+          '${entry.visitedAt.day.toString().padLeft(2, '0')}';
+      counts[dayKey] = (counts[dayKey] ?? 0) + 1;
+    }
+    return counts;
+  }
+
+  /// Get total reels watched in the last [days] days.
+  Future<int> getRecentReelCount({int days = 7}) async {
+    final entries = await getEntries();
+    final now = DateTime.now();
+    final cutoff = now.subtract(Duration(days: days));
+    return entries.where((e) => e.visitedAt.isAfter(cutoff)).length;
   }
 
   Future<void> clearAll() async {

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/session_manager.dart';
 import '../services/settings_service.dart';
+import '../services/level_service.dart';
+import 'adsterra_ad_screen.dart';
 import '../utils/discipline_challenge.dart';
 
 class GuardrailsPage extends StatefulWidget {
@@ -113,20 +115,33 @@ class _GuardrailsPageState extends State<GuardrailsPage> {
               ),
             ),
           ),
-          _buildFrictionSliderTile(
-            context: context,
-            sm: sm,
-            title: 'Daily Reel Limit',
-            subtitle: '${sm.dailyLimitSeconds ~/ 60} min / day',
-            value: (sm.dailyLimitSeconds ~/ 60).toDouble(),
-            min: 5,
-            max: 120,
-            divisor: 5,
-            isMorePermissive: (v) => v > (sm.dailyLimitSeconds ~/ 60),
-            warningText:
-                'Increasing your limit makes it easier to scroll. Are you sure?',
-            onConfirmed: (v) => sm.setDailyLimitMinutes(v.toInt()),
-          ),
+          // If quota used up, show earn page instead of slider
+          if (sm.dailyRemainingSeconds <= 0)
+            _buildQuotaExhaustedTile(context, sm)
+          else
+            _buildFrictionSliderTile(
+              context: context,
+              sm: sm,
+              title: 'Daily Reel Limit',
+              subtitle: '${sm.dailyLimitSeconds ~/ 60} min / day',
+              value: (sm.dailyLimitSeconds ~/ 60).toDouble(),
+              min: 5,
+              max: 120,
+              divisor: 5,
+              isMorePermissive: (v) => v > (sm.dailyLimitSeconds ~/ 60),
+              warningText:
+                  'Increasing your limit makes it easier to scroll. Are you sure?',
+              onConfirmed: (v) async {
+                // XP penalty for increasing limit
+                final increase = (v.toInt() - (sm.dailyLimitSeconds ~/ 60));
+                if (increase > 0) {
+                  // context.read<LevelService>().grantDebugXp(
+                  //   -increase * 5, 'Penalty: increased reel limit',
+                  // );
+                }
+                await sm.setDailyLimitMinutes(v.toInt());
+              },
+            ),
           _buildFrictionSliderTile(
             context: context,
             sm: sm,
@@ -223,6 +238,71 @@ class _GuardrailsPageState extends State<GuardrailsPage> {
         ],
       ),
     );
+  }
+
+  Widget _buildQuotaExhaustedTile(BuildContext context, SessionManager sm) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.orange.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        children: [
+          const Icon(
+            Icons.hourglass_empty,
+            color: Colors.orangeAccent,
+            size: 36,
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Daily Reel Quota Used Up',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Watch an ad to earn 3 more minutes of reel time.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 13, color: Colors.grey),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () => _earnQuota(context, sm),
+              icon: const Icon(Icons.play_circle_fill_rounded, size: 20),
+              label: const Text('Watch Ad (+3 min reels)'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _earnQuota(BuildContext context, SessionManager sm) async {
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const AdsterraAdScreen(sessionType: 'reels'),
+      ),
+    );
+    if (result == true && context.mounted) {
+      sm.increaseDailyLimit(3);
+      context.read<LevelService>().addXpForAd();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('+3 min reel quota earned!')),
+      );
+    }
   }
 
   Widget _buildFrictionSliderTile({

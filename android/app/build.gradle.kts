@@ -63,11 +63,9 @@ android {
         }
     }
 
+    // Narrow exclusions to only the specific modules that cause conflicts,
+    // not entire Google/Firebase groups (which would block AdMob & Firebase).
     configurations.all {
-        exclude(group = "com.google.android.gms")
-        exclude(group = "com.google.firebase")
-        exclude(group = "com.google.android.datatransport")
-        exclude(group = "com.google.android.play")
         exclude(group = "com.google.android.play", module = "core")
         exclude(group = "com.google.android.play", module = "core-common")
     }

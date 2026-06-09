@@ -40,8 +40,11 @@ const String kBlurHomeFeedAndExploreCSS = '''
     transition: filter 0.15s ease !important;
   }
   /* Per-post unblur override (set by kTapToUnblurJS) */
-  [data-fg-unblurred="1"] img,
-  [data-fg-unblurred="1"] video {
+  /* Must match the blur selector's specificity (body[path="/"] article img = 0,0,1,3) */
+  body[path="/"] [data-fg-unblurred="1"] img,
+  body[path="/"] [data-fg-unblurred="1"] video,
+  body[path^="/explore"] [data-fg-unblurred="1"] img,
+  body[path^="/explore"] [data-fg-unblurred="1"] video {
     filter: none !important;
     -webkit-filter: none !important;
   }
@@ -149,6 +152,15 @@ const String kTapToUnblurJS = r'''
       }
     }
 
+    function unblurAllMediaInHost(host) {
+      try {
+        host.querySelectorAll('img,video').forEach(function(el) {
+          el.style.setProperty('filter', 'none', 'important');
+          el.style.setProperty('-webkit-filter', 'none', 'important');
+        });
+      } catch (_) {}
+    }
+
     function unblurMedia(media) {
       try {
         media.style.setProperty('filter', 'none', 'important');
@@ -164,11 +176,15 @@ const String kTapToUnblurJS = r'''
         if (!media) return;
         const host = getHost(media);
         if (!host) return;
-        if (isUnblurred(host)) return; // allow normal Instagram behaviour
+
+        // ALWAYS re-unblur media — Instagram swaps DOM elements in carousels,
+        // so the inline style applied on first tap is lost on subsequent pages.
+        unblurMedia(media);
+
+        if (isUnblurred(host)) return; // allow normal Instagram click-through
 
         // First tap: unblur and swallow click so it doesn't open the post.
         markUnblurred(host);
-        unblurMedia(media);
         if (e.cancelable) e.preventDefault();
         e.stopPropagation();
       } catch (_) {}

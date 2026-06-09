@@ -462,6 +462,13 @@ class SessionManager extends ChangeNotifier {
     return true;
   }
 
+  /// Temporarily increase the daily limit by [minutes] (for ad rewards).
+  void addBonusDailyMinutes(int minutes) {
+    _dailyLimitSeconds += minutes * 60;
+    _prefs?.setInt(_keyDailyLimitSec, _dailyLimitSeconds);
+    notifyListeners();
+  }
+
   void endSession() {
     if (!_isSessionActive) return;
     // Don't show notification when user manually ends the session
@@ -482,6 +489,13 @@ class SessionManager extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Whether the user needs to go through the Effort Friction gate
+  /// before starting a reel session.
+  bool needsEffortFrictionGate(bool effortModeEnabled, int creditBalance) {
+    if (!effortModeEnabled) return false;
+    return creditBalance <= 0;
+  }
+
   // ── App session API ────────────────────────────────────────
 
   /// Start an app session of [minutes] (1–60).
@@ -498,6 +512,18 @@ class SessionManager extends ChangeNotifier {
   }
 
   /// Extend the app session by 10 minutes. Only works once.
+  /// Increase daily limit by [minutes] and return whether it succeeded.
+  bool increaseDailyLimit(int minutes) {
+    final current = _dailyLimitSeconds;
+    final added = minutes * 60;
+    _dailyLimitSeconds = (current + added).clamp(0, 7200); // max 2 hours
+    _prefs?.setInt(_keyDailyLimitSec, _dailyLimitSeconds);
+    _dailyUsedSeconds = 0; // reset used counter so they can use the new quota
+    _prefs?.setInt(_keyDailyUsedSeconds, 0);
+    notifyListeners();
+    return true;
+  }
+
   bool extendAppSession() {
     if (_appExtensionUsed) return false;
     final base = _appSessionEnd ?? DateTime.now();

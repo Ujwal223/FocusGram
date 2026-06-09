@@ -43,6 +43,16 @@ dependencies:
   # Charts for on-device screen time dashboard (MIT)
   fl_chart: ^0.71.0
 
+  # ── Local storage ──────────────────────────────────────────
+  # google_mobile_ads removed — switched to Adsterra only
+  # firebase removed — level data stored in Hive locally
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  flutter_secure_storage: ^9.2.4
+  local_auth: ^2.3.0
+  # connectivity_plus, workmanager, flutter_background_service removed —
+  # unused after offline snapshots pivoted to WebView cache.
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

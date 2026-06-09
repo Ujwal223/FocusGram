@@ -2,9 +2,10 @@ import 'dart:collection';
 
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
-import '../../scripts/autoplay_blocker.dart';
 import '../../scripts/spa_navigation_monitor.dart';
 import '../../scripts/native_feel.dart';
+import '../../scripts/focus_scripts.dart';
+import '../../scripts/reel_metadata_extractor.dart';
 
 class InstagramPreloader {
   static HeadlessInAppWebView? _headlessWebView;
@@ -13,7 +14,7 @@ class InstagramPreloader {
   static bool isReady = false;
 
   static Future<void> start(String userAgent) async {
-    if (_headlessWebView != null) return; // don't start twice
+    if (_headlessWebView != null) return;
 
     _headlessWebView = HeadlessInAppWebView(
       keepAlive: keepAlive,
@@ -31,12 +32,10 @@ class InstagramPreloader {
         safeBrowsingEnabled: false,
       ),
       initialUserScripts: UnmodifiableListView([
+        // DM Ghost — comprehensive blocking, gated by window.__fgFullDmGhost flag.
+        // it should have worked, but sadly it didnt
         UserScript(
-          source: 'window.__fgBlockAutoplay = true;',
-          injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-        ),
-        UserScript(
-          source: kAutoplayBlockerJS,
+          source: kFullDmGhostJS,
           injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
         ),
         UserScript(
@@ -47,6 +46,7 @@ class InstagramPreloader {
           source: kNativeFeelingScript,
           injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
         ),
+        // ReelMetadataExtractor removed — reel history feature deleted
       ]),
       onWebViewCreated: (c) {
         controller = c;

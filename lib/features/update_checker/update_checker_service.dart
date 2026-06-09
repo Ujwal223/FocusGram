@@ -74,7 +74,7 @@ class UpdateCheckerService extends ChangeNotifier {
       _isDismissed = false;
       notifyListeners();
     } catch (e) {
-      debugPrint('Update check failed: $e');
+      // debugPrint('Update check failed: $e');
     }
   }
 
