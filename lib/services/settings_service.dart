@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'notification_service.dart';
@@ -62,6 +62,16 @@ class SettingsService extends ChangeNotifier {
 
   // Reels History
   static const _keyReelsHistoryEnabled = 'reels_history_enabled';
+
+  // ── Adsterra fallback ─────────────────────────────────────
+  static const _keyAdsterraZoneUrl = 'adsterra_zone_url';
+  static const _keyAdsterraAdCode = 'adsterra_ad_code';
+
+  // ── Startup page ──────────────────────────────────────────
+  static const _keyStartupPage = 'startup_page';
+
+  // ── Effort Friction Mode ──────────────────────────────────
+  static const _keyEffortFrictionEnabled = 'effort_friction_enabled';
 
   // Privacy keys
   static const _keySanitizeLinks = 'set_sanitize_links';
@@ -139,6 +149,10 @@ class SettingsService extends ChangeNotifier {
   bool _notifyPersistent = false;
 
   // Focus mode settings
+  bool _effortFrictionEnabled = false;
+  String _startupPage = 'home'; // home, following, favorites, direct
+  String _adsterraZoneUrl = '';
+  String _adsterraAdCode = '';
   bool _ghostMode = false;
   bool _noAds = false;
   bool _noStories = false;
@@ -196,6 +210,23 @@ class SettingsService extends ChangeNotifier {
   bool get hideShopTab => _hideShopTab;
 
   // Focus mode settings
+  bool get effortFrictionEnabled => _effortFrictionEnabled;
+  String get startupPage => _startupPage;
+  String get startupUrl {
+    switch (_startupPage) {
+      case 'following':
+        return 'https://www.instagram.com/?variant=following';
+      case 'favorites':
+        return 'https://www.instagram.com/?variant=favorites';
+      case 'direct':
+        return 'https://www.instagram.com/direct/inbox/';
+      default:
+        return 'https://www.instagram.com/';
+    }
+  }
+
+  String get adsterraZoneUrl => _adsterraZoneUrl;
+  String get adsterraAdCode => _adsterraAdCode;
   bool get ghostMode => _ghostMode;
   bool get noAds => _noAds;
   bool get noStories => _noStories;
@@ -290,7 +321,8 @@ class SettingsService extends ChangeNotifier {
     _contentSuggested = _prefs!.getBool(_keyContentSuggested) ?? false;
     _hideSuggestedPosts = _prefs!.getBool(_keyHideSuggestedPosts) ?? false;
 
-    // Load grayscale schedules
+    // Load grayscale toggle + schedules
+    _grayscaleEnabled = _prefs!.getBool(_keyGrayscaleEnabled) ?? false;
     final schedulesJson = _prefs!.getString(_keyGrayscaleSchedules);
     if (schedulesJson != null) {
       try {
@@ -330,6 +362,11 @@ class SettingsService extends ChangeNotifier {
     _reelsHistoryEnabled = _prefs!.getBool(_keyReelsHistoryEnabled) ?? true;
 
     // Focus mode settings
+    _effortFrictionEnabled =
+        _prefs!.getBool(_keyEffortFrictionEnabled) ?? false;
+    _startupPage = _prefs!.getString(_keyStartupPage) ?? 'home';
+    _adsterraZoneUrl = _prefs!.getString(_keyAdsterraZoneUrl) ?? '';
+    _adsterraAdCode = _prefs!.getString(_keyAdsterraAdCode) ?? '';
     _ghostMode = _prefs!.getBool(_keyGhostMode) ?? false;
     _noAds = _prefs!.getBool(_keyNoAds) ?? false;
     _noStories = _prefs!.getBool(_keyNoStories) ?? false;
@@ -411,8 +448,9 @@ class SettingsService extends ChangeNotifier {
     final clamped = seconds.clamp(3, 60);
     _breathGateSeconds = clamped.toInt();
     await _prefs?.setInt(_keyBreathGateSeconds, _breathGateSeconds);
-    // Defer notifyListeners to next microtask to avoid rebuild conflicts
-    Future.microtask(notifyListeners);
+    // Defer notifyListeners to after the current frame to avoid
+    // Flutter's 'Dependents.isEmpty' assertion error.
+    WidgetsBinding.instance.addPostFrameCallback((_) => notifyListeners());
   }
 
   Future<void> setWordChallengeCount(int count) async {
@@ -771,7 +809,33 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── Startup page ─────────────────────────────────────────────────────────────
+  Future<void> setStartupPage(String page) async {
+    _startupPage = page;
+    await _prefs?.setString(_keyStartupPage, page);
+    notifyListeners();
+  }
+
+  // ── Adsterra zone config ────────────────────────────────────────────────────
+  Future<void> setAdsterraZoneUrl(String url) async {
+    _adsterraZoneUrl = url;
+    await _prefs?.setString(_keyAdsterraZoneUrl, url);
+    notifyListeners();
+  }
+
+  Future<void> setAdsterraAdCode(String code) async {
+    _adsterraAdCode = code;
+    await _prefs?.setString(_keyAdsterraAdCode, code);
+    notifyListeners();
+  }
+
   // ── Focus mode settings ──────────────────────────────────────────────────────
+  Future<void> setEffortFrictionEnabled(bool v) async {
+    _effortFrictionEnabled = v;
+    await _prefs?.setBool(_keyEffortFrictionEnabled, v);
+    notifyListeners();
+  }
+
   Future<void> setGhostMode(bool v) async {
     _ghostMode = v;
     await _prefs?.setBool(_keyGhostMode, v);

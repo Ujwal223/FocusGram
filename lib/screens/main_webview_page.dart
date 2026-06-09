@@ -13,11 +13,20 @@ import '../services/settings_service.dart';
 import '../services/injection_controller.dart';
 import '../services/injection_manager.dart';
 import '../scripts/native_feel.dart';
+import '../scripts/grayscale.dart' as grayscale;
 import '../services/screen_time_service.dart';
 import '../services/navigation_guard.dart';
 import '../services/focusgram_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/notification_service.dart';
+import '../services/bait_engine.dart';
+import '../services/credit_store.dart';
+import '../services/level_service.dart';
+import 'bait_me_full_screen.dart';
+import '../services/app_lock_service.dart';
+// snapshot_service import removed — offline feature deleted
+// reels_history_service import removed — feature deleted
+import 'app_lock_screen.dart';
 import '../features/update_checker/update_checker_service.dart';
 import '../utils/discipline_challenge.dart';
 import 'settings_page.dart';
@@ -26,8 +35,8 @@ import '../features/preloader/instagram_preloader.dart';
 import '../v2_integration/script_engine_v2_overlay.dart';
 import '../v2_integration/script_registry_v2_overlay.dart';
 import '../scripts/focus_scripts.dart';
+import 'adsterra_ad_screen.dart';
 import '../focus_settings.dart';
-
 
 import '../services/adblock/adblock_content_blocker_loader.dart';
 
@@ -100,9 +109,12 @@ class _MainWebViewPageState extends State<MainWebViewPage>
   bool _isPreloaded = false;
   bool _minimalModeBannerDismissed = false;
   bool _isInDirectThread = false;
-  bool _dmThreadCdnBlockArmed = false;
   DateTime _lastMainFrameLoadStartedAt = DateTime.fromMillisecondsSinceEpoch(0);
   SkeletonType _skeletonType = SkeletonType.generic;
+
+  /// True when on the homepage and should block api/graphql + gateway.
+  /// Updated in onLoadStart / UrlChange before shouldInterceptRequest fires.
+  bool _blockHomepageGraphql = false;
 
   /// Helper to determine if we are on a login/onboarding page.
   bool get _isOnOnboardingPage {
@@ -225,6 +237,121 @@ class _MainWebViewPageState extends State<MainWebViewPage>
     await _controller?.evaluateJavascript(
       source: 'window.__focusgramIsolatedPlayer = $active;',
     );
+  }
+
+  /// Show a full-screen lock gate when navigating to Instagram DMs.
+  void _showDmLockGate() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (ctx) => Scaffold(
+          backgroundColor: Colors.black,
+          body: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Center(
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.lock_outline,
+                        color: Colors.white54,
+                        size: 64,
+                      ),
+                      const SizedBox(height: 24),
+                      const Text(
+                        'Messages Locked',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Enter your PIN to access Direct Messages',
+                        style: TextStyle(color: Colors.white54, fontSize: 14),
+                      ),
+                      const SizedBox(height: 40),
+                      ElevatedButton.icon(
+                        onPressed: () async {
+                          final result = await Navigator.push<bool>(
+                            ctx,
+                            MaterialPageRoute(
+                              builder: (_) => const AppLockScreen(
+                                forAppWide: false,
+                                title: 'Messages Locked',
+                                subtitle:
+                                    'Enter your PIN to access Direct Messages',
+                              ),
+                            ),
+                          );
+                          if (!ctx.mounted) return;
+                          if (result == true) {
+                            _dmLockOverride = true;
+                            Navigator.pop(ctx);
+                          } else {
+                            _controller?.evaluateJavascript(
+                              source: 'window.location.href = "/";',
+                            );
+                            Navigator.pop(ctx);
+                          }
+                        },
+                        icon: const Icon(Icons.lock_open_rounded),
+                        label: const Text('Unlock'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blueAccent,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 32,
+                            vertical: 14,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      TextButton(
+                        onPressed: () {
+                          _controller?.evaluateJavascript(
+                            source: 'window.location.href = "/";',
+                          );
+                          Navigator.pop(ctx);
+                        },
+                        child: const Text(
+                          'Cancel — Go to Home',
+                          style: TextStyle(color: Colors.white38),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Set ghost mode flags in the WebView so the pre-injected scripts activate.
+  void _setGhostModeFlags(InAppWebViewController c, SettingsService s) {
+    c.evaluateJavascript(
+      source:
+          '''
+window.__fgFullDmGhost = ${s.ghostMode};
+''',
+    );
+  }
+
+  /// Re-inject grayscale on app resume (fixes cold-start persistence bug
+  /// where the preloader cache can bypass onLoadStop).
+  void _syncGrayscaleOnResume(SettingsService settings) {
+    if (_injectionManager == null || _controller == null) return;
+    if (settings.isGrayscaleActiveNow) {
+      _injectionManager!.runAllPostLoadInjections(_currentUrl);
+    } else {
+      // Explicitly remove grayscale
+      _controller?.evaluateJavascript(source: grayscale.kGrayscaleOffJS);
+    }
   }
 
   void _onSessionChanged() {
@@ -360,6 +487,21 @@ class _MainWebViewPageState extends State<MainWebViewPage>
       _injectionManager!.runAllPostLoadInjections(_currentUrl);
     }
 
+    // Ghost mode flags update + reload (scripts already injected by preloader,
+    // but need to reload so the fetch/XHR interceptors see the new flags from
+    // the start of page load).
+    if (_lastGhostMode != settings.ghostMode) {
+      _lastGhostMode = settings.ghostMode;
+      if (_controller != null) {
+        _setGhostModeFlags(_controller!, settings);
+        // Schedule a reload so the flags take effect on fresh page load
+        _reloadDebounce?.cancel();
+        _reloadDebounce = Timer(const Duration(milliseconds: 300), () {
+          if (mounted) _controller?.reload();
+        });
+      }
+    }
+
     // 2. Rebuild Flutter widget tree (e.g. overlay conditions, banner state)
     setState(() {});
 
@@ -425,6 +567,11 @@ class _MainWebViewPageState extends State<MainWebViewPage>
       screenTime.startTracking();
       // Cancel persistent notification when app comes to foreground
       NotificationService().cancelPersistentNotification(id: 5001);
+
+      // Re-inject grayscale on resume — schedules may have changed
+      // while the app was backgrounded, and injection can be lost on cold
+      // start due to the preloader cache bypassing onLoadStop.
+      _syncGrayscaleOnResume(settings);
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.detached) {
@@ -535,10 +682,24 @@ class _MainWebViewPageState extends State<MainWebViewPage>
             ),
             if (sm.canExtendAppSession)
               ElevatedButton(
-                onPressed: () {
+                onPressed: () async {
                   Navigator.of(context, rootNavigator: true).pop();
-                  sm.extendAppSession();
+                  // Keep _extensionDialogShown = true while ad runs so the
+                  // watchdog timer doesn't re-show the dialog over the ad screen.
+                  if (!mounted) return;
+                  final adResult = await Navigator.push<bool>(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const AdsterraAdScreen(
+                        sessionType: 'reels',
+                        requiredSeconds: 20,
+                      ),
+                    ),
+                  );
                   _extensionDialogShown = false;
+                  if (adResult == true && mounted) {
+                    sm.extendAppSession();
+                  }
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.blue,
@@ -546,7 +707,7 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                     borderRadius: BorderRadius.circular(10),
                   ),
                 ),
-                child: const Text('+10 minutes'),
+                child: const Text('Watch Ad (+10 min)'),
               ),
           ],
         ),
@@ -673,20 +834,36 @@ class _MainWebViewPageState extends State<MainWebViewPage>
 
   static bool _isDirectThreadUrl(String url) {
     final path = Uri.tryParse(url)?.path ?? url;
-    return RegExp(r'^/direct/t/[^/]+/?$').hasMatch(path);
+    // Match both /direct/inbox/ and /direct/t/{thread_id}
+    return RegExp(r'^/direct/').hasMatch(path);
   }
 
+  /* unused after CDN block was removed
   static bool _isFktmInstagramCdn(String url) {
     final host = Uri.tryParse(url)?.host.toLowerCase() ?? '';
     return RegExp(r'^instagram\.fktm\d+-\d+\.fna\.fbcdn\.net$').hasMatch(host);
   }
+  */
 
   void _syncDirectThreadState(String url) {
     final active = _isDirectThreadUrl(url);
     if (_isInDirectThread == active) return;
     _isInDirectThread = active;
-    _dmThreadCdnBlockArmed = false;
+
+    // Reset override when leaving DMs
+    if (!active) _dmLockOverride = false;
+
+    // If Messages Tab Lock is enabled and user navigated to DMs,
+    // show a lock overlay.
+    if (active && mounted) {
+      final appLock = context.read<AppLockService>();
+      if (appLock.messagesLockReady && !_dmLockOverride) {
+        _showDmLockGate();
+      }
+    }
   }
+
+  bool _dmLockOverride = false;
 
   Future<void> _showReelSessionPicker() async {
     final settings = context.read<SettingsService>();
@@ -836,6 +1013,13 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                     _BrandedTopBar(
                       onFocusControlTap: () =>
                           _edgePanelKey.currentState?._toggleExpansion(),
+                      onDmGhostToggle: () {
+                        context.read<SettingsService>().setGhostMode(false);
+                        _controller?.reload();
+                      },
+                      onReload: () => _controller?.reload(),
+                      currentUrl: _currentUrl,
+                      dmGhostActive: context.read<SettingsService>().ghostMode,
                     ),
                   Expanded(
                     child: Consumer<SessionManager>(
@@ -1029,6 +1213,95 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                                   );
                                 }
 
+                                // ── DM Ghost: block ALL seen signals ────────────────
+                                // Like Chrome DevTools "Block request URL" — catches all
+                                // sources at the native WebView level.
+                                //
+                                // Rules:
+                                // 1. Block specific seen endpoint patterns everywhere
+                                // 2. Block /api/graphql on homepage (/) and DM threads
+                                //    (/direct/t/*). Allow on /direct/inbox/ so inbox loads.
+                                if (settings.ghostMode) {
+                                  // — Seen endpoint patterns (always block) —
+                                  final seenBlocked = RegExp(
+                                    r'/api/v1/media/[\w-]+/seen/|'
+                                    r'/api/v1/stories/reel/seen/|'
+                                    r'/api/v1/direct_v2/threads/[\w-]+/seen/|'
+                                    r'/api/v1/direct_v2/visual_message/[\w-]+/seen/|'
+                                    r'/api/v1/live/[\w-]+/comment/seen/|'
+                                    r'/api/v1/direct_v2/threads/[^/]+/mark_item_seen/|'
+                                    r'/api/v1/direct_v2/mark_item_seen/|'
+                                    r'/api/v1/direct_v2/threads/[^/]+/items/[^/]+/mark_visual_item_seen/|'
+                                    r'/api/v1/direct_v2/visual_thread/[^/]+/seen/|'
+                                    r'/api/v1/direct_v2/threads/[^/]+/items/[^/]+/mark_audio_seen/|'
+                                    r'/api/v1/live/[^/]+/join/|'
+                                    r'/api/v1/live/[^/]+/get_join_requests/|'
+                                    r'/api/v1/media/seen/|'
+                                    r'/api/v1/feed/viewed_story/|'
+                                    r'/api/v1/feed/reels_tray/seen/|'
+                                    r'/api/v1/qe/|'
+                                    r'/api/v1/launcher/sync/|'
+                                    r'/api/v1/logging/|'
+                                    r'/api/v1/fb_onetap_logging/|'
+                                    r'/ajax/bz|'
+                                    r'/ajax/logging/|'
+                                    r'/api/v1/stats/|'
+                                    r'/api/v1/fbanalytics/',
+                                  ).hasMatch(url);
+                                  if (seenBlocked) {
+                                    return WebResourceResponse(
+                                      data: Uint8List.fromList(
+                                        utf8.encode('{"status":"ok"}'),
+                                      ),
+                                      statusCode: 200,
+                                      contentType: 'application/json',
+                                    );
+                                  }
+
+                                  // — Block /api/graphql + gateway on homepage &
+                                  //    DM thread pages. Allow on /direct/inbox/. —
+                                  final currentPath =
+                                      Uri.tryParse(_currentUrl)?.path ??
+                                      _currentUrl;
+                                  final isHomepage =
+                                      currentPath == '/' || currentPath == '';
+                                  final isDmThread = currentPath.startsWith(
+                                    '/direct/t/',
+                                  );
+                                  if (!currentPath.startsWith(
+                                        '/direct/inbox/',
+                                      ) &&
+                                      (isHomepage || isDmThread) &&
+                                      (url.contains('/api/graphql') ||
+                                          url.contains(
+                                            'gateway.instagram.com',
+                                          ))) {
+                                    return WebResourceResponse(
+                                      data: Uint8List.fromList(
+                                        utf8.encode('{"status":"ok"}'),
+                                      ),
+                                      statusCode: 200,
+                                      contentType: 'application/json',
+                                    );
+                                  }
+                                }
+
+                                // Legacy homepage graphql + gateway block
+                                // (kept for safety — the ghost mode block above now covers it)
+                                if (_blockHomepageGraphql &&
+                                    (url.contains('/api/graphql') ||
+                                        url.contains(
+                                          'gateway.instagram.com',
+                                        ))) {
+                                  return WebResourceResponse(
+                                    data: Uint8List.fromList(
+                                      utf8.encode('{"status":"ok"}'),
+                                    ),
+                                    statusCode: 200,
+                                    contentType: 'application/json',
+                                  );
+                                }
+
                                 /* Strip ads from feed (JS handles it)
                                 if (settings.noAds &&
                                     url.contains(
@@ -1158,6 +1431,29 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                                   settingsService,
                                 );
 
+                                // Set ghost mode flags (scripts already injected by preloader)
+                                _setGhostModeFlags(controller, settingsService);
+
+                                // Navigate to startup page if not Home
+                                if (settingsService.startupPage != 'home') {
+                                  await controller.loadUrl(
+                                    urlRequest: URLRequest(
+                                      url: WebUri(settingsService.startupUrl),
+                                    ),
+                                  );
+                                }
+
+                                // Force-inject grayscale on initial WebView creation,
+                                // because the preloader's keepAlive causes the main
+                                // WebView to skip onLoadStop on cold start.
+                                if (settingsService.isGrayscaleActiveNow) {
+                                  try {
+                                    await controller.evaluateJavascript(
+                                      source: grayscale.kGrayscaleJS,
+                                    );
+                                  } catch (_) {}
+                                }
+
                                 _registerJavaScriptHandlers(controller);
 
                                 // ── FocusGram v2 overlay initial sync ───────────────
@@ -1223,6 +1519,14 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                                 if (!mounted) return;
                                 final u = url?.toString() ?? '';
                                 _syncDirectThreadState(u);
+                                // Update homepage graphql block flag SYNCHRONOUSLY
+                                // (before setState, so shouldInterceptRequest sees it)
+                                final path = Uri.tryParse(u)?.path ?? u;
+                                _blockHomepageGraphql =
+                                    settings.ghostMode &&
+                                    (path == '/' ||
+                                        path == '' ||
+                                        path == '/explore/');
                                 final lower = u.toLowerCase();
                                 final isOnboardingUrl =
                                     lower.contains('/accounts/login') ||
@@ -1251,6 +1555,15 @@ class _MainWebViewPageState extends State<MainWebViewPage>
 
                                 final current = url?.toString() ?? '';
                                 _syncDirectThreadState(current);
+
+                                // Re-set ghost mode flags on every page load.
+                                // evaluateJavascript-set flags are destroyed when
+                                // the JS context resets on navigation. The flags
+                                // are also prepended to initialUserScripts, but
+                                // this covers the toggle-off → reload case.
+                                final s = context.read<SettingsService>();
+                                _setGhostModeFlags(controller, s);
+
                                 setState(() {
                                   _isLoading = false;
                                   _currentUrl = current;
@@ -1262,6 +1575,17 @@ class _MainWebViewPageState extends State<MainWebViewPage>
 
                                 // Phase 1 V2 overlay DOM scripts
                                 await _v2Engine?.injectDocumentEndScripts();
+
+                                // Re-inject grayscale on every page load
+                                if (s.isGrayscaleActiveNow) {
+                                  await controller.evaluateJavascript(
+                                    source: grayscale.kGrayscaleJS,
+                                  );
+                                } else {
+                                  await controller.evaluateJavascript(
+                                    source: grayscale.kGrayscaleOffJS,
+                                  );
+                                }
 
                                 await controller.evaluateJavascript(
                                   source:
@@ -1458,7 +1782,7 @@ class _MainWebViewPageState extends State<MainWebViewPage>
                 right: 0,
                 child: const _InstagramGradientProgressBar(),
               ),
-            _EdgePanel(key: _edgePanelKey),
+            _EdgePanel(key: _edgePanelKey, currentUrl: _currentUrl),
 
             if (_exploreBlockedOverlay)
               Positioned.fill(
@@ -1850,12 +2174,34 @@ class _MainWebViewPageState extends State<MainWebViewPage>
       },
     );
 
+    // ReelMetadata handler removed — reel history feature deleted
+
     controller.addJavaScriptHandler(
       handlerName: 'UrlChange',
       callback: (args) async {
         final url = (args.isNotEmpty ? args[0] : '') as String? ?? '';
         _syncDirectThreadState(url);
+
+        final s = context.read<SettingsService>();
+
+        // Update homepage graphql block for SPA navigation
+        final path = Uri.tryParse(url)?.path ?? url;
+        _blockHomepageGraphql =
+            s.ghostMode && (path == '/' || path == '' || path == '/explore/');
+
+        // Re-set ghost mode flags on SPA navigation (no page reload).
+        _setGhostModeFlags(controller, s);
+
         await _injectionManager?.runAllPostLoadInjections(url);
+
+        // Re-inject grayscale on SPA nav (no page reload)
+        if (s.isGrayscaleActiveNow) {
+          await controller.evaluateJavascript(source: grayscale.kGrayscaleJS);
+        } else {
+          await controller.evaluateJavascript(
+            source: grayscale.kGrayscaleOffJS,
+          );
+        }
 
         // Phase 1 V2 overlay re-inject on SPA route changes
         await _v2Engine?.injectDocumentEndScripts();
@@ -1876,7 +2222,6 @@ class _MainWebViewPageState extends State<MainWebViewPage>
             .read<SettingsService>()
             .disableExploreEntirely;
 
-        final path = Uri.tryParse(url)?.path ?? url;
         final isReels = path.startsWith('/reels') || path.startsWith('/reel/');
         final isExplore = path.startsWith('/explore');
 
@@ -1967,7 +2312,8 @@ class _MinimalModeBanner extends StatelessWidget {
 }
 
 class _EdgePanel extends StatefulWidget {
-  const _EdgePanel({super.key});
+  final String currentUrl;
+  const _EdgePanel({super.key, this.currentUrl = ''});
   @override
   State<_EdgePanel> createState() => _EdgePanelState();
 }
@@ -2091,6 +2437,38 @@ class _EdgePanelState extends State<_EdgePanel> {
                           ],
                         ),
                       ),
+                      // Level badge
+                      Consumer<LevelService>(
+                        builder: (context, lv, _) => Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: lv.level >= 3
+                                ? Colors.purple.withValues(alpha: 0.2)
+                                : Colors.grey.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: lv.level >= 3
+                                  ? Colors.purpleAccent.withValues(alpha: 0.4)
+                                  : Colors.grey.withValues(alpha: 0.2),
+                            ),
+                          ),
+                          child: Text(
+                            'Lv ${lv.level}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: lv.level >= 3
+                                  ? Colors.purpleAccent
+                                  : Colors.grey,
+                            ),
+                          ),
+                        ),
+                      ),
+                      // Save current page — REMOVED
+                      const SizedBox(width: 4),
                       IconButton(
                         tooltip: 'Close',
                         icon: Icon(
@@ -2102,6 +2480,8 @@ class _EdgePanelState extends State<_EdgePanel> {
                       ),
                     ],
                   ),
+                  // Bait Me button row
+                  _BaitMeButtonRow(),
                   const SizedBox(height: 18),
                   Container(
                     width: double.infinity,
@@ -2189,6 +2569,7 @@ class _EdgePanelState extends State<_EdgePanel> {
                     color: reelsHardDisabled ? Colors.redAccent : textSub,
                     isDark: isDark,
                   ),
+
                   const SizedBox(height: 16),
                   if (sm.isSessionActive)
                     SizedBox(
@@ -2226,17 +2607,86 @@ class _EdgePanelState extends State<_EdgePanel> {
                     ),
                   const SizedBox(height: 8),
                   if (!canStart && !sm.isSessionActive)
-                    Text(
-                      reelsHardDisabled
-                          ? 'Turn off hard Reels blocking in Focus Mode to use timed sessions.'
-                          : sm.isCooldownActive
-                          ? 'A cooldown is active before the next Reel session.'
-                          : 'Your daily Reel quota is used up.',
-                      style: TextStyle(
-                        color: textSub,
-                        fontSize: 12,
-                        height: 1.35,
-                      ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          reelsHardDisabled
+                              ? 'Turn off hard Reels blocking in Focus Mode to use timed sessions.'
+                              : sm.isCooldownActive
+                              ? 'A cooldown is active before the next Reel session.'
+                              : 'Your daily Reel quota is used up.',
+                          style: TextStyle(
+                            color: textSub,
+                            fontSize: 12,
+                            height: 1.35,
+                          ),
+                        ),
+                        if (sm.dailyRemainingSeconds <= 0 &&
+                            !reelsHardDisabled &&
+                            !sm.isCooldownActive)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Consumer<CreditStore>(
+                              builder: (ctx, credits, _) {
+                                if (!credits.canWatchAdToday) {
+                                  return Text(
+                                    'Ad limit reached (3/day)',
+                                    style: TextStyle(
+                                      color: textSub,
+                                      fontSize: 11,
+                                    ),
+                                  );
+                                }
+                                return SizedBox(
+                                  width: double.infinity,
+                                  height: 40,
+                                  child: OutlinedButton.icon(
+                                    onPressed: () async {
+                                      final adResult =
+                                          await Navigator.push<bool>(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  const AdsterraAdScreen(
+                                                    sessionType: 'reels',
+                                                    requiredSeconds: 20,
+                                                  ),
+                                            ),
+                                          );
+                                      if (adResult == true && context.mounted) {
+                                        context
+                                            .read<CreditStore>()
+                                            .addReelsMinutes(amount: 2);
+                                        context
+                                            .read<SessionManager>()
+                                            .addBonusDailyMinutes(2);
+                                        HapticFeedback.heavyImpact();
+                                      }
+                                    },
+                                    icon: const Icon(Icons.videocam, size: 16),
+                                    label: Text(
+                                      'Watch Ad (+2 min) '
+                                      '(${CreditStore.maxDailyAds - credits.adsWatchedToday}/3 today)',
+                                      style: const TextStyle(fontSize: 12),
+                                    ),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.orangeAccent,
+                                      side: BorderSide(
+                                        color: Colors.orangeAccent.withValues(
+                                          alpha: 0.4,
+                                        ),
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                      ],
                     ),
                   const SizedBox(height: 10),
                   Divider(color: border),
@@ -2345,16 +2795,88 @@ class _EdgePanelState extends State<_EdgePanel> {
   }
 }
 
-class _BrandedTopBar extends StatelessWidget {
-  final VoidCallback? onFocusControlTap;
-  const _BrandedTopBar({this.onFocusControlTap});
+/// Small row showing the Bait Me button and daily XP for the edge panel.
+class _BaitMeButtonRow extends StatelessWidget {
+  const _BaitMeButtonRow();
+
   @override
   Widget build(BuildContext context) {
-    final isDark = context.watch<SettingsService>().isDarkMode;
+    final levelService = context.watch<LevelService>();
+    final baitEngine = context.watch<BaitEngine>();
+    final isUnlocked = levelService.isFeatureUnlocked(AppFeature.baitMe);
+
+    if (!isUnlocked) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: SizedBox(
+        width: double.infinity,
+        height: 48,
+        child: ElevatedButton.icon(
+          onPressed: baitEngine.isOnCooldown
+              ? null
+              : () => _openBaitMe(context),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.purpleAccent.withValues(alpha: 0.2),
+            foregroundColor: Colors.purpleAccent,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          icon: const Icon(Icons.casino_rounded, size: 20),
+          label: Text(
+            baitEngine.isOnCooldown
+                ? 'Bait Me (${baitEngine.cooldownRemainingMinutes}m cooldown)'
+                : '🎲 Bait Me — Feel Lucky?',
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _openBaitMe(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const BaitMeFullScreen()),
+    );
+  }
+}
+
+class _BrandedTopBar extends StatelessWidget {
+  final VoidCallback? onFocusControlTap;
+  final VoidCallback? onDmGhostToggle;
+  final VoidCallback? onReload;
+  final String currentUrl;
+  final bool dmGhostActive;
+  const _BrandedTopBar({
+    this.onFocusControlTap,
+    this.onDmGhostToggle,
+    this.onReload,
+    this.currentUrl = '',
+    this.dmGhostActive = false,
+  });
+
+  static bool _isDirectInbox(String url) {
+    final path = Uri.tryParse(url)?.path ?? url;
+    return path == '/direct/inbox/' || path == '/direct/inbox';
+  }
+
+  static bool _isDirectThread(String url) {
+    final path = Uri.tryParse(url)?.path ?? url;
+    return RegExp(r'^/direct/t/').hasMatch(path);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = context.watch<SettingsService>();
+    final isDark = settings.isDarkMode;
     final barBg = isDark ? Colors.black : Colors.white;
     final textMain = isDark ? Colors.white : Colors.black;
     final iconColor = isDark ? Colors.white70 : Colors.black54;
     final border = isDark ? Colors.white12 : Colors.black12;
+    final showDmGhostBtn = _isDirectThread(currentUrl) && dmGhostActive;
+    final showReloadBtn = _isDirectInbox(currentUrl);
 
     return Container(
       height: 60,
@@ -2363,10 +2885,11 @@ class _BrandedTopBar extends StatelessWidget {
         border: Border(bottom: BorderSide(color: border, width: 0.5)),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
+            // Left: settings icon
             IconButton(
               icon: Icon(Icons.settings_outlined, color: iconColor, size: 22),
               onPressed: () => Navigator.push(
@@ -2374,21 +2897,83 @@ class _BrandedTopBar extends StatelessWidget {
                 MaterialPageRoute(builder: (_) => const SettingsPage()),
               ),
             ),
-            Text(
-              'FocusGram',
-              style: GoogleFonts.grandHotel(
-                color: textMain,
-                fontSize: 32,
-                letterSpacing: 0.5,
+
+            // Center: FocusGram logo (or DM ghost badge)
+            if (showDmGhostBtn)
+              GestureDetector(
+                onTap: onDmGhostToggle,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.redAccent.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: Colors.redAccent.withValues(alpha: 0.4),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.visibility_off,
+                        color: Colors.redAccent,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'DM Ghost ON',
+                        style: TextStyle(
+                          color: Colors.redAccent,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        Icons.close,
+                        color: Colors.redAccent.withValues(alpha: 0.6),
+                        size: 14,
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              Text(
+                'FocusGram',
+                style: GoogleFonts.grandHotel(
+                  color: textMain,
+                  fontSize: 32,
+                  letterSpacing: 0.5,
+                ),
               ),
-            ),
-            IconButton(
-              icon: const Icon(
-                Icons.timer_outlined,
-                color: Colors.blueAccent,
-                size: 22,
-              ),
-              onPressed: onFocusControlTap,
+
+            // Right: reload button + timer icon
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (showReloadBtn)
+                  IconButton(
+                    icon: Icon(
+                      Icons.refresh_rounded,
+                      color: iconColor,
+                      size: 22,
+                    ),
+                    onPressed: onReload,
+                    tooltip: 'Reload page',
+                  ),
+                IconButton(
+                  icon: const Icon(
+                    Icons.timer_outlined,
+                    color: Colors.blueAccent,
+                    size: 22,
+                  ),
+                  onPressed: onFocusControlTap,
+                ),
+              ],
             ),
           ],
         ),

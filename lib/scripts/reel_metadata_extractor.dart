@@ -15,8 +15,8 @@ const String kReelMetadataExtractorScript = r'''
       return;
     }
 
-    // Check if this is a reel page
-    if (!currentUrl.includes('/reel/')) {
+    // Check if this is a reel page (Instagram uses /reels/ not /reel/)
+    if (!currentUrl.includes('/reels/') && !currentUrl.includes('/reel/')) {
       return;
     }
 

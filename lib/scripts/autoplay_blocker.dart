@@ -223,3 +223,36 @@ const String kAutoplayBlockerJS = r'''
     }, true);
   })();
 ''';
+
+// Reinforcement observer — catches videos that Instagram creates after the
+// prototype override (e.g. React re-renders). Runs a MutationObserver that
+// pauses any <video> that tries to autoplay.
+const String kAutoplayObserverJS = r'''
+  (function fgAutoplayObserver() {
+    if (window.__fgAutoplayObserverRunning) return;
+    window.__fgAutoplayObserverRunning = true;
+
+    function pauseIfBlocked(v) {
+      try {
+        if (window.__fgBlockAutoplay === false) return;
+        if (window.__focusgramSessionActive) return;
+        const url = window.location.href || '';
+        if (url.includes('/reels/') || url.includes('/reel/')) return;
+        if (v.paused) return;
+        if (v.getAttribute('data-fg-user-played') === '1') return;
+        v.pause();
+      } catch (_) {}
+    }
+
+    // Check all existing videos periodically
+    setInterval(function() {
+      document.querySelectorAll('video').forEach(pauseIfBlocked);
+    }, 500);
+
+    // Mark video as user-played on click
+    document.addEventListener('click', function(e) {
+      var v = e.target && e.target.closest ? e.target.closest('video') : null;
+      if (v) v.setAttribute('data-fg-user-played', '1');
+    }, true);
+  })();
+''';
