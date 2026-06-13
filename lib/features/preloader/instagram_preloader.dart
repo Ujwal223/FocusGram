@@ -5,7 +5,6 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../../scripts/spa_navigation_monitor.dart';
 import '../../scripts/native_feel.dart';
 import '../../scripts/focus_scripts.dart';
-import '../../scripts/reel_metadata_extractor.dart';
 
 class InstagramPreloader {
   static HeadlessInAppWebView? _headlessWebView;

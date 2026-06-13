@@ -34,8 +34,8 @@ class SavedPage {
     id: json['id'] as String? ?? '',
     url: json['url'] as String? ?? '',
     title: json['title'] as String? ?? 'Instagram',
-    savedAt: DateTime.tryParse(json['savedAt'] as String? ?? '') ??
-        DateTime.now(),
+    savedAt:
+        DateTime.tryParse(json['savedAt'] as String? ?? '') ?? DateTime.now(),
     htmlContent: json['html'] as String?,
   );
 }
@@ -68,10 +68,11 @@ class SnapshotService extends ChangeNotifier {
       final raw = _box.get('page_list') as String?;
       if (raw != null) {
         final decoded = jsonDecode(raw) as List;
-        _savedPages = decoded
-            .map((e) => SavedPage.fromJson(e as Map<String, dynamic>))
-            .toList()
-          ..sort((a, b) => b.savedAt.compareTo(a.savedAt));
+        _savedPages =
+            decoded
+                .map((e) => SavedPage.fromJson(e as Map<String, dynamic>))
+                .toList()
+              ..sort((a, b) => b.savedAt.compareTo(a.savedAt));
       }
     } catch (_) {}
   }
@@ -82,7 +83,11 @@ class SnapshotService extends ChangeNotifier {
   }
 
   /// Save a page. Optionally pass [htmlContent] captured from the WebView.
-  Future<void> savePage(String url, {String title = 'Instagram', String? htmlContent}) async {
+  Future<void> savePage(
+    String url, {
+    String title = 'Instagram',
+    String? htmlContent,
+  }) async {
     if (url.isEmpty) return;
     // Avoid duplicates
     if (_savedPages.any((p) => p.url == url)) return;

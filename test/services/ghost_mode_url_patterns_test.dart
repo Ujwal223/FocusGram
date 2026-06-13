@@ -105,14 +105,17 @@ void main() {
     });
 
     // ── Ephemeral / visual seen ───────────────────────────────
-    test('blocks /api/v1/direct_v2/threads/{id}/items/{id}/mark_visual_item_seen/', () {
-      expect(
-        seenPattern.hasMatch(
-          'https://www.instagram.com/api/v1/direct_v2/threads/abc/items/def/mark_visual_item_seen/',
-        ),
-        isTrue,
-      );
-    });
+    test(
+      'blocks /api/v1/direct_v2/threads/{id}/items/{id}/mark_visual_item_seen/',
+      () {
+        expect(
+          seenPattern.hasMatch(
+            'https://www.instagram.com/api/v1/direct_v2/threads/abc/items/def/mark_visual_item_seen/',
+          ),
+          isTrue,
+        );
+      },
+    );
 
     test('blocks /api/v1/direct_v2/visual_thread/{id}/seen/', () {
       expect(
@@ -171,18 +174,14 @@ void main() {
 
     test('blocks /api/v1/launcher/sync/', () {
       expect(
-        seenPattern.hasMatch(
-          'https://www.instagram.com/api/v1/launcher/sync/',
-        ),
+        seenPattern.hasMatch('https://www.instagram.com/api/v1/launcher/sync/'),
         isTrue,
       );
     });
 
     test('blocks /api/v1/logging/', () {
       expect(
-        seenPattern.hasMatch(
-          'https://www.instagram.com/api/v1/logging/event',
-        ),
+        seenPattern.hasMatch('https://www.instagram.com/api/v1/logging/event'),
         isTrue,
       );
     });
@@ -204,10 +203,7 @@ void main() {
     });
 
     test('blocks /ajax/bz', () {
-      expect(
-        seenPattern.hasMatch('https://www.instagram.com/ajax/bz'),
-        isTrue,
-      );
+      expect(seenPattern.hasMatch('https://www.instagram.com/ajax/bz'), isTrue);
     });
 
     test('blocks /ajax/logging/', () {
@@ -220,18 +216,14 @@ void main() {
     // ── Should NOT block legitimate endpoints ─────────────────
     test('does NOT block normal feed timeline request', () {
       expect(
-        seenPattern.hasMatch(
-          'https://www.instagram.com/api/v1/feed/timeline/',
-        ),
+        seenPattern.hasMatch('https://www.instagram.com/api/v1/feed/timeline/'),
         isFalse,
       );
     });
 
     test('does NOT block graphql queries', () {
       expect(
-        seenPattern.hasMatch(
-          'https://www.instagram.com/api/graphql',
-        ),
+        seenPattern.hasMatch('https://www.instagram.com/api/graphql'),
         isFalse,
       );
     });

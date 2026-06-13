@@ -32,8 +32,10 @@ class _AppLockSettingsPageState extends State<AppLockSettingsPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('App Lock',
-            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+        title: const Text(
+          'App Lock',
+          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+        ),
         centerTitle: true,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, size: 18),
@@ -49,9 +51,16 @@ class _AppLockSettingsPageState extends State<AppLockSettingsPage> {
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: anythingOn
-                    ? [Colors.blueAccent.withValues(alpha: 0.15), Colors.blue.withValues(alpha: 0.05)]
-                    : [Colors.grey.withValues(alpha: 0.1), Colors.grey.withValues(alpha: 0.05)],
-                begin: Alignment.topLeft, end: Alignment.bottomRight,
+                    ? [
+                        Colors.blueAccent.withValues(alpha: 0.15),
+                        Colors.blue.withValues(alpha: 0.05),
+                      ]
+                    : [
+                        Colors.grey.withValues(alpha: 0.1),
+                        Colors.grey.withValues(alpha: 0.05),
+                      ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
@@ -71,7 +80,8 @@ class _AppLockSettingsPageState extends State<AppLockSettingsPage> {
                 Text(
                   anythingOn ? 'Lock Active' : 'No Lock',
                   style: TextStyle(
-                    fontSize: 20, fontWeight: FontWeight.bold,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
                     color: anythingOn ? Colors.blueAccent : Colors.grey,
                   ),
                 ),
@@ -92,9 +102,7 @@ class _AppLockSettingsPageState extends State<AppLockSettingsPage> {
           // ── App-wide lock ────────────────────────────────────
           SwitchListTile(
             title: const Text('Lock Entire App'),
-            subtitle: const Text(
-              'Require PIN when opening FocusGram.',
-            ),
+            subtitle: const Text('Require PIN when opening FocusGram.'),
             value: a.lockAppWide,
             onChanged: (v) async {
               if (v && !a.hasPin) {
@@ -133,9 +141,9 @@ class _AppLockSettingsPageState extends State<AppLockSettingsPage> {
                   MaterialPageRoute(builder: (_) => const AppLockSetupScreen()),
                 );
                 if (ok == true && mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('PIN updated')),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(const SnackBar(content: Text('PIN updated')));
                 }
               },
             ),
@@ -163,7 +171,11 @@ class _AppLockSettingsPageState extends State<AppLockSettingsPage> {
                 ),
                 child: const Row(
                   children: [
-                    Icon(Icons.info_outline, size: 16, color: Colors.blueAccent),
+                    Icon(
+                      Icons.info_outline,
+                      size: 16,
+                      color: Colors.blueAccent,
+                    ),
                     SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -199,12 +211,15 @@ class _SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
-      child: Text(title,
-          style: const TextStyle(
-              color: Colors.grey,
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 1.2)),
+      child: Text(
+        title,
+        style: const TextStyle(
+          color: Colors.grey,
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 1.2,
+        ),
+      ),
     );
   }
 }

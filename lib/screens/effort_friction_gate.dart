@@ -35,8 +35,9 @@ class _EffortFrictionGateState extends State<EffortFrictionGate> {
   Widget build(BuildContext context) {
     final creditStore = context.watch<CreditStore>();
     final isReels = widget.sessionType == 'reels';
-    final credits =
-        isReels ? creditStore.reelsMinutes : creditStore.instaMinutes;
+    final credits = isReels
+        ? creditStore.reelsMinutes
+        : creditStore.instaMinutes;
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -55,10 +56,7 @@ class _EffortFrictionGateState extends State<EffortFrictionGate> {
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: LinearGradient(
-                    colors: [
-                      Colors.orange.shade800,
-                      Colors.orange.shade500,
-                    ],
+                    colors: [Colors.orange.shade800, Colors.orange.shade500],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
@@ -231,9 +229,7 @@ class _EffortFrictionGateState extends State<EffortFrictionGate> {
                 onPressed: widget.onCancel ?? () => Navigator.pop(context),
                 child: Text(
                   credits > 0 ? 'Skip for now' : 'Not now',
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.4),
-                  ),
+                  style: TextStyle(color: Colors.white.withValues(alpha: 0.4)),
                 ),
               ),
 

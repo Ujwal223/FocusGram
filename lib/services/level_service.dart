@@ -19,7 +19,7 @@ class AppFeature {
   static const effortFriction = AppFeature._(
     'effort_friction',
     'Effort Friction Mode',
-    2,
+    3,
   );
   static const reelsHistory = AppFeature._('reels_history', 'Reels History', 2);
   static const downloadMedia = AppFeature._(
@@ -79,8 +79,6 @@ class LevelService extends ChangeNotifier {
   int _adsWatchedTotal = 0;
 
   // Track today for daily reel logging
-  int _todayReelCount = 0;
-  String _todayKey = '';
 
   // ─── Getters ───────────────────────────────────────────────
   int get level => _level;
@@ -122,10 +120,7 @@ class LevelService extends ChangeNotifier {
     _cache = await Hive.openBox(_hiveBox);
     _loadFromCache();
 
-    // 2. Set up today tracking
-    _todayKey = DateFormat('yyyy-MM-dd').format(DateTime.now());
-
-    // 3. Check monthly reset
+    // 2. Check monthly reset
     await _checkMonthlyReset();
 
     // 4. Check daily degradation
@@ -164,8 +159,6 @@ class LevelService extends ChangeNotifier {
 
   // ─── XP History ────────────────────────────────────────────
   final List<_XpEvent> _xpHistory = [];
-
-  List<_XpEvent> get xpHistory => List.unmodifiable(_xpHistory);
 
   /// Human-readable recent XP log for "Your Journey".
   List<Map<String, dynamic>> get recentXpLog {

@@ -68,11 +68,13 @@ void main() {
       expect(s.isGrayscaleActiveNow, isTrue);
     });
 
-    test('isGrayscaleActiveNow returns false when toggle off and no schedules',
-        () async {
-      final s = SettingsService();
-      await s.init();
-      expect(s.isGrayscaleActiveNow, isFalse);
-    });
+    test(
+      'isGrayscaleActiveNow returns false when toggle off and no schedules',
+      () async {
+        final s = SettingsService();
+        await s.init();
+        expect(s.isGrayscaleActiveNow, isFalse);
+      },
+    );
   });
 }

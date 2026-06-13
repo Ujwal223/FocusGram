@@ -2,7 +2,7 @@ name: focusgram
 description: "FocusGram is a free, open-source digital wellness tool for Android. Blocks distracting content, sets time limits, and helps you use social media intentionally."
 publish_to: 'none'
 
-version: 2.0.0
+version: 2.1.0
 
 environment:
   sdk: ^3.10.7

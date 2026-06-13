@@ -68,7 +68,9 @@ class _BaitMeFullScreenState extends State<BaitMeFullScreen>
                 const SizedBox(height: 8),
                 Text(
                   _done
-                      ? BaitEngine.outcomeSubtext(_lastOutcome ?? BaitOutcome.addTenMinutes)
+                      ? BaitEngine.outcomeSubtext(
+                          _lastOutcome ?? BaitOutcome.addTenMinutes,
+                        )
                       : 'Tap the button to test your luck!',
                   textAlign: TextAlign.center,
                   style: TextStyle(
@@ -83,7 +85,9 @@ class _BaitMeFullScreenState extends State<BaitMeFullScreen>
                   animation: _spinAnimation,
                   builder: (context, child) {
                     return Transform.rotate(
-                      angle: _isSpinning ? _spinAnimation.value * 2 * pi * 5 : 0,
+                      angle: _isSpinning
+                          ? _spinAnimation.value * 2 * pi * 5
+                          : 0,
                       child: child,
                     );
                   },
@@ -155,8 +159,9 @@ class _BaitMeFullScreenState extends State<BaitMeFullScreen>
                   child: ElevatedButton.icon(
                     onPressed: _isSpinning ? null : _onBaitMe,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor:
-                          _done ? Colors.greenAccent : Colors.purpleAccent,
+                      backgroundColor: _done
+                          ? Colors.greenAccent
+                          : Colors.purpleAccent,
                       foregroundColor: Colors.black,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16),
@@ -167,16 +172,16 @@ class _BaitMeFullScreenState extends State<BaitMeFullScreen>
                       _isSpinning
                           ? Icons.hourglass_top
                           : _done
-                              ? Icons.check_circle
-                              : Icons.casino_rounded,
+                          ? Icons.check_circle
+                          : Icons.casino_rounded,
                       size: 24,
                     ),
                     label: Text(
                       _isSpinning
                           ? 'Rolling…'
                           : _done
-                              ? 'Done — Close'
-                              : '🎲 Spin the Wheel!',
+                          ? 'Done — Close'
+                          : '🎲 Spin the Wheel!',
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 18,
@@ -190,9 +195,12 @@ class _BaitMeFullScreenState extends State<BaitMeFullScreen>
                     padding: const EdgeInsets.only(top: 12),
                     child: TextButton(
                       onPressed: () => Navigator.pop(context),
-                      child: Text('Not now',
-                          style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.3))),
+                      child: Text(
+                        'Not now',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.3),
+                        ),
+                      ),
                     ),
                   ),
 
@@ -220,13 +228,17 @@ class _BaitMeFullScreenState extends State<BaitMeFullScreen>
     baitEngine.onAddMinutes = (m) => creditStore.addBonusMinutes(m);
     baitEngine.onResetSession = () => creditStore.resetBalances();
     baitEngine.onReduceSessionTime = (m) {
-      for (var i = 0; i < m; i++) creditStore.drainReelsMinute();
+      for (var i = 0; i < m; i++) {
+        creditStore.drainReelsMinute();
+      }
     };
     baitEngine.onEndReelSession = () => sessionManager.endSession();
     baitEngine.onEndAppSession = () => sessionManager.endAppSession();
     baitEngine.onOpenUrl = (url) async {
       final uri = Uri.tryParse(url);
-      if (uri != null) await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (uri != null) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
     };
 
     final outcome = await baitEngine.activate();

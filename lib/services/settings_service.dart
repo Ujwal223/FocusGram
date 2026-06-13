@@ -149,7 +149,7 @@ class SettingsService extends ChangeNotifier {
   bool _notifyPersistent = false;
 
   // Focus mode settings
-  bool _effortFrictionEnabled = false;
+  bool _effortFrictionEnabled = true;
   String _startupPage = 'home'; // home, following, favorites, direct
   String _adsterraZoneUrl = '';
   String _adsterraAdCode = '';
@@ -363,7 +363,7 @@ class SettingsService extends ChangeNotifier {
 
     // Focus mode settings
     _effortFrictionEnabled =
-        _prefs!.getBool(_keyEffortFrictionEnabled) ?? false;
+        _prefs!.getBool(_keyEffortFrictionEnabled) ?? true;
     _startupPage = _prefs!.getString(_keyStartupPage) ?? 'home';
     _adsterraZoneUrl = _prefs!.getString(_keyAdsterraZoneUrl) ?? '';
     _adsterraAdCode = _prefs!.getString(_keyAdsterraAdCode) ?? '';

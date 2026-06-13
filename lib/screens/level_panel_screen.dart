@@ -43,8 +43,10 @@ class LevelPanelScreen extends StatelessWidget {
               borderRadius: BorderRadius.circular(20),
               boxShadow: [
                 BoxShadow(
-                  color: _levelColors(levelService.level, isDark)[0]
-                      .withValues(alpha: 0.3),
+                  color: _levelColors(
+                    levelService.level,
+                    isDark,
+                  )[0].withValues(alpha: 0.3),
                   blurRadius: 20,
                   offset: const Offset(0, 8),
                 ),
@@ -116,12 +118,14 @@ class LevelPanelScreen extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: (isDark ? Colors.white : Colors.black)
-                    .withValues(alpha: 0.05),
+                color: (isDark ? Colors.white : Colors.black).withValues(
+                  alpha: 0.05,
+                ),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
-                  color: (isDark ? Colors.white : Colors.black)
-                      .withValues(alpha: 0.1),
+                  color: (isDark ? Colors.white : Colors.black).withValues(
+                    alpha: 0.1,
+                  ),
                 ),
               ),
               child: Row(
@@ -183,19 +187,18 @@ class LevelPanelScreen extends StatelessWidget {
             final unlocked = levelService.isFeatureUnlocked(feature);
             return Container(
               margin: const EdgeInsets.only(bottom: 6),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 14,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               decoration: BoxDecoration(
-                color: (isDark ? Colors.white : Colors.black)
-                    .withValues(alpha: unlocked ? 0.04 : 0.02),
+                color: (isDark ? Colors.white : Colors.black).withValues(
+                  alpha: unlocked ? 0.04 : 0.02,
+                ),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: unlocked
                       ? Colors.greenAccent.withValues(alpha: 0.2)
-                      : (isDark ? Colors.white : Colors.black)
-                          .withValues(alpha: 0.08),
+                      : (isDark ? Colors.white : Colors.black).withValues(
+                          alpha: 0.08,
+                        ),
                 ),
               ),
               child: Row(
@@ -211,12 +214,10 @@ class LevelPanelScreen extends StatelessWidget {
                       feature.name,
                       style: TextStyle(
                         fontSize: 14,
-                        fontWeight:
-                            unlocked ? FontWeight.w600 : FontWeight.normal,
-                        color:
-                            unlocked
-                                ? null
-                                : Colors.grey,
+                        fontWeight: unlocked
+                            ? FontWeight.w600
+                            : FontWeight.normal,
+                        color: unlocked ? null : Colors.grey,
                       ),
                     ),
                   ),
@@ -314,8 +315,9 @@ class LevelPanelScreen extends StatelessWidget {
               margin: const EdgeInsets.only(bottom: 4),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: (isDark ? Colors.white : Colors.black)
-                    .withValues(alpha: 0.04),
+                color: (isDark ? Colors.white : Colors.black).withValues(
+                  alpha: 0.04,
+                ),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Row(
@@ -386,8 +388,11 @@ class LevelPanelScreen extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Icon(Icons.warning_amber_rounded,
-                        color: Colors.redAccent, size: 18),
+                    Icon(
+                      Icons.warning_amber_rounded,
+                      color: Colors.redAccent,
+                      size: 18,
+                    ),
                     SizedBox(width: 8),
                     Text(
                       'XP decays if you backslide',
@@ -404,7 +409,11 @@ class LevelPanelScreen extends StatelessWidget {
                   '• Watching more reels than your weekly average deducts XP\n'
                   '• Exceeding limits for 3 consecutive days drops a level\n'
                   '• Levels are preserved on monthly reset, but XP resets',
-                  style: TextStyle(fontSize: 12, color: Colors.grey, height: 1.5),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey,
+                    height: 1.5,
+                  ),
                 ),
               ],
             ),
@@ -417,12 +426,18 @@ class LevelPanelScreen extends StatelessWidget {
 
   Color _levelColor(int level) {
     switch (level) {
-      case 1: return Colors.grey;
-      case 2: return Colors.blue;
-      case 3: return Colors.purple;
-      case 4: return Colors.orange;
-      case 5: return Colors.amber;
-      default: return Colors.grey;
+      case 1:
+        return Colors.grey;
+      case 2:
+        return Colors.blue;
+      case 3:
+        return Colors.purple;
+      case 4:
+        return Colors.orange;
+      case 5:
+        return Colors.amber;
+      default:
+        return Colors.grey;
     }
   }
 
@@ -461,12 +476,18 @@ class LevelPanelScreen extends StatelessWidget {
 
   String _levelTitle(int level) {
     switch (level) {
-      case 1: return 'Beginner';
-      case 2: return 'Mindful Scroller';
-      case 3: return 'Disciplined';
-      case 4: return 'Focus Master';
-      case 5: return 'Digital Monk';
-      default: return 'Level $level';
+      case 1:
+        return 'Beginner';
+      case 2:
+        return 'Mindful Scroller';
+      case 3:
+        return 'Disciplined';
+      case 4:
+        return 'Focus Master';
+      case 5:
+        return 'Digital Monk';
+      default:
+        return 'Level $level';
     }
   }
 }

@@ -5,7 +5,7 @@ import '../services/app_lock_service.dart';
 
 /// The lock screen shown when FocusGram is locked.
 ///
-/// Supports PIN entry with optional scrambled keypad and biometric fallback.
+/// Supports PIN entry with optional scrambled keypad.
 /// [forAppWide] controls which PIN to verify: true = app-wide, false = messages.
 /// [title] lets the screen show context (e.g. "Messages Locked").
 class AppLockScreen extends StatefulWidget {
@@ -73,10 +73,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
             // Title
             Text(
               widget.title ?? 'FocusGram is Locked',
-              style: const TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-              ),
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             Text(
@@ -125,21 +122,6 @@ class _AppLockScreenState extends State<AppLockScreen> {
               ),
 
             const Spacer(),
-
-            // Biometrics button
-            if (appLock.biometricsEnabled)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 24),
-                child: IconButton(
-                  icon: Icon(
-                    Icons.fingerprint,
-                    color: Colors.blueAccent.withValues(alpha: 0.8),
-                    size: 40,
-                  ),
-                  onPressed: _authenticateBiometric,
-                  tooltip: 'Use fingerprint',
-                ),
-              ),
 
             // Keypad
             _buildKeypad(appLock),
@@ -219,11 +201,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              _KeypadButton(
-                label: '⌫',
-                onTap: _onDelete,
-                isFunction: true,
-              ),
+              _KeypadButton(label: '⌫', onTap: _onDelete, isFunction: true),
               _KeypadButton(
                 label: digitLabels[0],
                 onTap: () => _onDigit(digitLabels[0]),
@@ -257,14 +235,19 @@ class _AppLockScreenState extends State<AppLockScreen> {
 
   void _onDelete() {
     if (_enteredPin.isEmpty) return;
-    setState(() => _enteredPin = _enteredPin.substring(0, _enteredPin.length - 1));
+    setState(
+      () => _enteredPin = _enteredPin.substring(0, _enteredPin.length - 1),
+    );
   }
 
   Future<void> _verifyPin() async {
     setState(() => _isVerifying = true);
 
     final appLock = context.read<AppLockService>();
-    final valid = await appLock.verifyPin(_enteredPin, forAppWide: widget.forAppWide);
+    final valid = await appLock.verifyPin(
+      _enteredPin,
+      forAppWide: widget.forAppWide,
+    );
 
     if (!mounted) return;
 
@@ -283,27 +266,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
     }
   }
 
-  Future<void> _authenticateBiometric() async {
-    final appLock = context.read<AppLockService>();
-    final available = await appLock.isBiometricsAvailable();
-    if (!available) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Biometrics not available on this device')),
-        );
-      }
-      return;
-    }
-    final success = await appLock.authenticateWithBiometrics();
-    if (success && mounted) {
-      appLock.onUnlocked();
-      Navigator.of(context).pop(true);
-    } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Biometric authentication failed')),
-      );
-    }
-  }
+
 }
 
 class _KeypadButton extends StatelessWidget {

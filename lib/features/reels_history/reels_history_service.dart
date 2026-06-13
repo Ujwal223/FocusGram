@@ -8,7 +8,7 @@ class ReelsHistoryEntry {
   final String title;
   final String thumbnailUrl;
   final DateTime visitedAt;
-  final int durationSeconds;    // How long the session lasted
+  final int durationSeconds; // How long the session lasted
   final int adsWatchedInSession; // How many ads watched during this session
 
   const ReelsHistoryEntry({
@@ -123,7 +123,9 @@ class ReelsHistoryService {
 
     final now = DateTime.now();
     final sevenDaysAgo = now.subtract(const Duration(days: 7));
-    final recent = entries.where((e) => e.visitedAt.isAfter(sevenDaysAgo)).toList();
+    final recent = entries
+        .where((e) => e.visitedAt.isAfter(sevenDaysAgo))
+        .toList();
 
     if (recent.isEmpty) return 0;
     return recent.length / 7.0;
@@ -138,7 +140,8 @@ class ReelsHistoryService {
 
     final Map<String, int> counts = {};
     for (final entry in recent) {
-      final dayKey = '${entry.visitedAt.year}-'
+      final dayKey =
+          '${entry.visitedAt.year}-'
           '${entry.visitedAt.month.toString().padLeft(2, '0')}-'
           '${entry.visitedAt.day.toString().padLeft(2, '0')}';
       counts[dayKey] = (counts[dayKey] ?? 0) + 1;

@@ -37,18 +37,20 @@ void main() {
       expect(sm.isSessionActive, isTrue);
     });
 
-    test('canExtendAppSession is false after re-ending an extended session',
-        () async {
-      final sm = SessionManager();
-      await sm.init();
+    test(
+      'canExtendAppSession is false after re-ending an extended session',
+      () async {
+        final sm = SessionManager();
+        await sm.init();
 
-      sm.startAppSession(60);
-      sm.endAppSession();
-      sm.extendAppSession();
-      sm.endAppSession();
+        sm.startAppSession(60);
+        sm.endAppSession();
+        sm.extendAppSession();
+        sm.endAppSession();
 
-      expect(sm.canExtendAppSession, isFalse);
-    });
+        expect(sm.canExtendAppSession, isFalse);
+      },
+    );
   });
 
   group('SessionManager — App session lifecycle', () {
