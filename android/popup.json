@@ -1,10 +1,10 @@
 {
-  "show": false,
+  "show": true,
   "id": "popup_005",
-  "header": "FOCUSGRAM UPDATE DISCONTINUITION!!",
-  "body": "Due to NO Support from community, it is being difficult for me to maintain this project, due to which, Next coming update might be the LAST update for FocusGram. THANKS FOR UNDERSTANDING! ",
+  "header": "App Update NOtice!",
+  "body": "New App Update is available,  if you havent updated to V2.0.0 then you can just update the app normally. But If you are in v2.0.0 you must delete it and install new version. (i forgot to sign V2)",
   "max_shows": 6,
-  "button_text": "OKAY..."
+  "button_text": "Sucks Man..."
   
   
 }
