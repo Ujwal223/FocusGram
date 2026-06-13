@@ -3,7 +3,7 @@
   "id": "popup_005",
   "header": "App Update NOtice!",
   "body": "New App Update is available,  if you havent updated to V2.0.0 then you can just update the app normally. But If you are in v2.0.0 you must delete it and install new version. (i forgot to sign V2)",
-  "max_shows": 6,
+  "max_shows": 2,
   "button_text": "Sucks Man..."
   
   
