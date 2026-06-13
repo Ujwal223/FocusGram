@@ -28,7 +28,7 @@ FocusGram is an Android-only app that loads the Instagram website with the distr
 >
 > [![Buy Me a Momo](https://img.shields.io/badge/-%F0%9F%A5%9F%20Buy%20Me%20a%20Momo-FF6B35?style=for-the-badge&labelColor=1a1a1a)](https://buymemomo.com/ujwal)
 
-<img width="1920" height="1080" alt="FocusGram App Screenshots" src="https://github.com/user-attachments/assets/cffd4012-4cf3-4ba8-aa1a-883e1f85478e" />
+<img width="1920" height="1080" alt="FocusGram App Screenshots" src="[https://github.com/user-attachments/assets/cffd4012-4cf3-4ba8-aa1a-883e1f85478e](https://raw.githubusercontent.com/Ujwal223/FocusGram/refs/heads/main/assets/images/app-demo.png)" />
 
 ---
 
