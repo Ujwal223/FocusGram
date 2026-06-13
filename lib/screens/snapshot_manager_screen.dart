@@ -88,7 +88,11 @@ class _SavedPageList extends StatelessWidget {
           ),
           child: Row(
             children: [
-              const Icon(Icons.info_outline, size: 16, color: Colors.blueAccent),
+              const Icon(
+                Icons.info_outline,
+                size: 16,
+                color: Colors.blueAccent,
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -202,7 +206,10 @@ class _SavedPageList extends StatelessWidget {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (_) => OfflineFeedViewer(url: page.url, pageId: page.id),
+                                builder: (_) => OfflineFeedViewer(
+                                  url: page.url,
+                                  pageId: page.id,
+                                ),
                               ),
                             );
                           }
@@ -222,11 +229,16 @@ class _SavedPageList extends StatelessWidget {
                             value: 'delete',
                             child: Row(
                               children: [
-                                Icon(Icons.delete_outline,
-                                    color: Colors.redAccent, size: 18),
+                                Icon(
+                                  Icons.delete_outline,
+                                  color: Colors.redAccent,
+                                  size: 18,
+                                ),
                                 SizedBox(width: 8),
-                                Text('Remove',
-                                    style: TextStyle(color: Colors.redAccent)),
+                                Text(
+                                  'Remove',
+                                  style: TextStyle(color: Colors.redAccent),
+                                ),
                               ],
                             ),
                           ),
@@ -257,8 +269,9 @@ class _SavedPageList extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Remove page?'),
-        content:
-            const Text('Removes the bookmark. Cache is preserved automatically.'),
+        content: const Text(
+          'Removes the bookmark. Cache is preserved automatically.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -269,8 +282,10 @@ class _SavedPageList extends StatelessWidget {
               service.deletePage(id);
               Navigator.pop(ctx);
             },
-            child:
-                const Text('Remove', style: TextStyle(color: Colors.redAccent)),
+            child: const Text(
+              'Remove',
+              style: TextStyle(color: Colors.redAccent),
+            ),
           ),
         ],
       ),
@@ -293,8 +308,10 @@ class _SavedPageList extends StatelessWidget {
               service.deleteAll();
               Navigator.pop(ctx);
             },
-            child:
-                const Text('Clear', style: TextStyle(color: Colors.redAccent)),
+            child: const Text(
+              'Clear',
+              style: TextStyle(color: Colors.redAccent),
+            ),
           ),
         ],
       ),

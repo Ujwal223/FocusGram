@@ -1259,19 +1259,22 @@ window.__fgFullDmGhost = ${s.ghostMode};
                                   }
 
                                   // — Block /api/graphql + gateway on homepage &
-                                  //    DM thread pages. Allow on /direct/inbox/. —
+                                  //    ANY /direct/* page (not just /direct/t/).
+                                  //    Allow on /direct/inbox/ so inbox loads.
+                                  //    Broader scope catches seen indicators sent
+                                  //    during SPA transitions on re-entry.
                                   final currentPath =
                                       Uri.tryParse(_currentUrl)?.path ??
                                       _currentUrl;
                                   final isHomepage =
                                       currentPath == '/' || currentPath == '';
-                                  final isDmThread = currentPath.startsWith(
-                                    '/direct/t/',
+                                  final isOnDirect = currentPath.startsWith(
+                                    '/direct/',
                                   );
                                   if (!currentPath.startsWith(
                                         '/direct/inbox/',
                                       ) &&
-                                      (isHomepage || isDmThread) &&
+                                      (isHomepage || isOnDirect) &&
                                       (url.contains('/api/graphql') ||
                                           url.contains(
                                             'gateway.instagram.com',
@@ -2180,6 +2183,11 @@ window.__fgFullDmGhost = ${s.ghostMode};
       handlerName: 'UrlChange',
       callback: (args) async {
         final url = (args.isNotEmpty ? args[0] : '') as String? ?? '';
+
+        // Update _currentUrl SYNCHRONOUSLY before any async operations,
+        // so shouldInterceptRequest sees the correct path immediately.
+        _currentUrl = url;
+
         _syncDirectThreadState(url);
 
         final s = context.read<SettingsService>();

@@ -241,7 +241,10 @@ const String kFullDmGhostJS = r'''
     navigator.sendBeacon = function(url) { return true; };
   }
 
-  // ── MQTT WS intercept (typing / live viewer) ───────────────
+  // ── MQTT WS intercept (typing / live viewer / seen) ────────
+  // Instagram uses MQTT over WebSocket for real-time events.
+  // '/t_fs' = foreground state, '/t_mt' = mark thread seen,
+  // '/t_s' and '/t_se' = seen receipts, 'activity_indicator' = active status.
   (function() {
     var _WS = window.WebSocket;
     function DmGhostWS(url, protocols) {
@@ -254,7 +257,9 @@ const String kFullDmGhostJS = r'''
           if (packetType === 0x30) {
             try {
               var decoded = new TextDecoder('utf-8').decode(bytes);
-              if (decoded.indexOf('/t_fs') !== -1 || decoded.indexOf('activity_indicator') !== -1 ||
+              if (decoded.indexOf('/t_fs') !== -1 || decoded.indexOf('/t_mt') !== -1 ||
+                  decoded.indexOf('/t_s') !== -1 || decoded.indexOf('/t_se') !== -1 ||
+                  decoded.indexOf('activity_indicator') !== -1 ||
                   decoded.indexOf('is_typing') !== -1 || decoded.indexOf('direct_typing') !== -1 ||
                   decoded.indexOf('/live/viewer') !== -1 || decoded.indexOf('live_viewer_list') !== -1) {
                 return;
@@ -262,7 +267,9 @@ const String kFullDmGhostJS = r'''
             } catch(e) {}
           }
         } else if (typeof data === 'string') {
-          if (data.indexOf('typing') !== -1 || data.indexOf('live_viewer') !== -1 || data.indexOf('is_typing') !== -1) return;
+          if (data.indexOf('typing') !== -1 || data.indexOf('live_viewer') !== -1 ||
+              data.indexOf('is_typing') !== -1 || data.indexOf('mark_seen') !== -1 ||
+              data.indexOf('mark_read') !== -1 || data.indexOf('receipt') !== -1) return;
         }
         return _send(data);
       };
@@ -403,8 +410,9 @@ List<UserScript> buildUserScripts(FocusSettings settings) {
   // (evaluateJavascript-set flags are destroyed when the JS context resets on load.)
   // DM Ghost uses the comprehensive Full DM approach (URL blocklist, GraphQL ops, SW killer, beacon, WS).
   // it should have worked, but sadly it didnt
-  if (settings.ghostMode)
-    startScripts.add('window.__fgFullDmGhost=true;' + kFullDmGhostJS);
+  if (settings.ghostMode) {
+    startScripts.add('window.__fgFullDmGhost=true;$kFullDmGhostJS');
+  }
   if (settings.noAutoplay) startScripts.add(noAutoplayJS);
 
   // AT_DOCUMENT_END

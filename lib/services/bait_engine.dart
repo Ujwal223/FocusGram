@@ -35,9 +35,9 @@ class BaitEngine extends ChangeNotifier {
   final Random _random = Random();
 
   // ── Hardcoded ad URLs ──────────────────────────────────────
-  String _adWebsiteUrl =
+  final String _adWebsiteUrl =
       'https://www.effectivecpmnetwork.com/qbwsaqj5?key=e547ad0035c9e857ba0ee18506a45f13';
-  String _externalAdUrl =
+  final String _externalAdUrl =
       'https://www.effectivecpmnetwork.com/qbwsaqj5?key=e547ad0035c9e857ba0ee18506a45f13';
 
   // ── Cooldown ───────────────────────────────────────────────
@@ -99,7 +99,9 @@ class BaitEngine extends ChangeNotifier {
     final outcome = roll();
     _lastActivation = DateTime.now();
     await _box.put(
-        'last_activation_ms', _lastActivation!.millisecondsSinceEpoch);
+      'last_activation_ms',
+      _lastActivation!.millisecondsSinceEpoch,
+    );
 
     notifyListeners();
     switch (outcome) {

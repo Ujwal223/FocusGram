@@ -14,11 +14,9 @@ void main() {
       final service = AppLockService();
       await service.init();
 
-      // Set a PIN first
       await service.setPin('1234', forAppWide: true);
 
-      // Verify it
-      final valid = await service.verifyPin('1234');
+      final valid = await service.verifyPin('1234', forAppWide: true);
       expect(valid, isTrue);
     });
 
@@ -28,7 +26,7 @@ void main() {
 
       await service.setPin('1234', forAppWide: true);
 
-      final valid = await service.verifyPin('0000');
+      final valid = await service.verifyPin('0000', forAppWide: true);
       expect(valid, isFalse);
     });
 
@@ -36,10 +34,8 @@ void main() {
       final service = AppLockService();
       await service.init();
 
-      // Set messages PIN
       await service.setPin('5678', forAppWide: false);
 
-      // Verify with forAppWide: false (messages PIN)
       final valid = await service.verifyPin('5678', forAppWide: false);
       expect(valid, isTrue);
     });
@@ -49,7 +45,7 @@ void main() {
       await service.init();
 
       await service.setPin('1234', forAppWide: true);
-      await service.onBackgrounded();
+      service.onBackgrounded();
       expect(service.shouldLockOnResume, isTrue);
 
       service.onUnlocked();
@@ -73,7 +69,7 @@ void main() {
       final service = AppLockService();
       await service.init();
 
-      final valid = await service.verifyPin('1234');
+      final valid = await service.verifyPin('1234', forAppWide: true);
       expect(valid, isFalse);
     });
   });

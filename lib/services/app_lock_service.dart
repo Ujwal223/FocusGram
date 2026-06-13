@@ -27,12 +27,12 @@ class AppLockService extends ChangeNotifier {
   final _auth = LocalAuthentication();
 
   // ─── Mode toggles ──────────────────────────────────────────
-  bool _lockAppWide = false;   // locks the whole app on start / bg timeout
-  bool _lockMessages = false;  // locks only the DMs tab
+  bool _lockAppWide = false; // locks the whole app on start / bg timeout
+  bool _lockMessages = false; // locks only the DMs tab
 
   // ─── Settings ──────────────────────────────────────────────
   bool _scramble = false;
-  bool _bioEnabled = true;
+  bool _bioEnabled = false;
   int _timeoutMs = 120000; // 2 min
   bool _hasPin = false;
 
@@ -67,15 +67,16 @@ class AppLockService extends ChangeNotifier {
     // Check if either PIN exists
     final hashA = await _secure.read(key: _pinAppWideKey);
     final hashM = await _secure.read(key: _pinMessagesKey);
-    _hasPin = (hashA != null && hashA.isNotEmpty) ||
-              (hashM != null && hashM.isNotEmpty);
+    _hasPin =
+        (hashA != null && hashA.isNotEmpty) ||
+        (hashM != null && hashM.isNotEmpty);
   }
 
   // ─── PIN management ────────────────────────────────────────
-  String _hash(String pin) =>
-      utf8.encode('fg_${pin}_salt26')
-          .map((x) => x.toRadixString(16).padLeft(2, '0'))
-          .join();
+  String _hash(String pin) => utf8
+      .encode('fg_${pin}_salt26')
+      .map((x) => x.toRadixString(16).padLeft(2, '0'))
+      .join();
 
   /// Set PIN for a specific lock mode.
   Future<void> setPin(String pin, {required bool forAppWide}) async {

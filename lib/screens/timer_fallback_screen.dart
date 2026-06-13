@@ -154,14 +154,10 @@ class _TimerFallbackScreenState extends State<TimerFallbackScreen> {
                 width: double.infinity,
                 height: 54,
                 child: ElevatedButton.icon(
-                  onPressed: done
-                      ? () => Navigator.pop(context, true)
-                      : null,
+                  onPressed: done ? () => Navigator.pop(context, true) : null,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor:
-                        done ? Colors.greenAccent : Colors.grey,
-                    foregroundColor:
-                        done ? Colors.black : Colors.white38,
+                    backgroundColor: done ? Colors.greenAccent : Colors.grey,
+                    foregroundColor: done ? Colors.black : Colors.white38,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
                     ),

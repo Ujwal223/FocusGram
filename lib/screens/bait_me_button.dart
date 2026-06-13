@@ -95,9 +95,7 @@ class _BaitMeButtonState extends State<BaitMeButton>
                       color: Colors.transparent,
                       child: InkWell(
                         borderRadius: BorderRadius.circular(24),
-                        onTap: baitEngine.isOnCooldown
-                            ? null
-                            : _onBaitMe,
+                        onTap: baitEngine.isOnCooldown ? null : _onBaitMe,
                         child: Center(
                           child: Icon(
                             Icons.casino_rounded,

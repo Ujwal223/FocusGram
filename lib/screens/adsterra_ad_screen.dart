@@ -152,14 +152,19 @@ class _AdsterraAdScreenState extends State<AdsterraAdScreen> {
                 children: [
                   const Icon(Icons.videocam, color: Colors.white54, size: 18),
                   const SizedBox(width: 8),
-                  const Text('Sponsored',
-                      style: TextStyle(color: Colors.white54, fontSize: 13)),
+                  const Text(
+                    'Sponsored',
+                    style: TextStyle(color: Colors.white54, fontSize: 13),
+                  ),
                   const Spacer(),
-                  Text('${_elapsed.clamp(0, widget.requiredSeconds)}s / ${widget.requiredSeconds}s',
-                      style: TextStyle(
-                          color: done ? Colors.greenAccent : Colors.white54,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600)),
+                  Text(
+                    '${_elapsed.clamp(0, widget.requiredSeconds)}s / ${widget.requiredSeconds}s',
+                    style: TextStyle(
+                      color: done ? Colors.greenAccent : Colors.white54,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -171,7 +176,8 @@ class _AdsterraAdScreenState extends State<AdsterraAdScreen> {
                 minHeight: 3,
                 backgroundColor: Colors.white12,
                 valueColor: AlwaysStoppedAnimation<Color>(
-                    done ? Colors.greenAccent : Colors.blueAccent),
+                  done ? Colors.greenAccent : Colors.blueAccent,
+                ),
               ),
             ),
             // Hint text
@@ -212,8 +218,10 @@ class _AdsterraAdScreenState extends State<AdsterraAdScreen> {
                       !url.startsWith('about:')) {
                     if (_adsClicked < 2) _adsClicked++;
                     if (mounted) setState(() {});
-                    await launchUrl(Uri.parse(url),
-                        mode: LaunchMode.externalApplication);
+                    await launchUrl(
+                      Uri.parse(url),
+                      mode: LaunchMode.externalApplication,
+                    );
                     return NavigationActionPolicy.CANCEL;
                   }
                   return NavigationActionPolicy.ALLOW;
@@ -232,18 +240,24 @@ class _AdsterraAdScreenState extends State<AdsterraAdScreen> {
                     child: ElevatedButton.icon(
                       onPressed: buttonEnabled ? buttonAction : null,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: done ? Colors.greenAccent : Colors.grey,
+                        backgroundColor: done
+                            ? Colors.greenAccent
+                            : Colors.grey,
                         foregroundColor: done ? Colors.black : Colors.white38,
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14)),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
                       ),
                       icon: Icon(
-                          done ? Icons.check_circle : Icons.timer_outlined,
-                          size: 22),
+                        done ? Icons.check_circle : Icons.timer_outlined,
+                        size: 22,
+                      ),
                       label: Text(
                         buttonText,
                         style: const TextStyle(
-                            fontWeight: FontWeight.w600, fontSize: 16),
+                          fontWeight: FontWeight.w600,
+                          fontSize: 16,
+                        ),
                       ),
                     ),
                   ),
@@ -261,11 +275,14 @@ class _AdsterraAdScreenState extends State<AdsterraAdScreen> {
                             color: Colors.orangeAccent.withValues(alpha: 0.4),
                           ),
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
                         icon: const Icon(Icons.refresh, size: 18),
-                        label: const Text('Retry — Reload Ads',
-                            style: TextStyle(fontWeight: FontWeight.w600)),
+                        label: const Text(
+                          'Retry — Reload Ads',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -274,8 +291,9 @@ class _AdsterraAdScreenState extends State<AdsterraAdScreen> {
                       child: Text(
                         'Skip (no reward)',
                         style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.3),
-                            fontSize: 13),
+                          color: Colors.white.withValues(alpha: 0.3),
+                          fontSize: 13,
+                        ),
                       ),
                     ),
                   ],

@@ -21,7 +21,8 @@ const String _kMediumRectCode = '''
 class MediumRectBanner extends StatelessWidget {
   const MediumRectBanner({super.key});
 
-  String get _html => '''
+  String get _html =>
+      '''
 <!DOCTYPE html>
 <html>
 <head>

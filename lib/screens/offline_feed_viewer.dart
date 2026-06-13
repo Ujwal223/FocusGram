@@ -23,8 +23,10 @@ class OfflineFeedViewer extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Offline View',
-            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+        title: const Text(
+          'Offline View',
+          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+        ),
         centerTitle: true,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, size: 18),
@@ -39,11 +41,16 @@ class OfflineFeedViewer extends StatelessWidget {
             color: Colors.blue.withValues(alpha: 0.1),
             child: const Row(
               children: [
-                Icon(Icons.wifi_off_rounded, size: 14,
-                    color: Colors.blueAccent),
+                Icon(
+                  Icons.wifi_off_rounded,
+                  size: 14,
+                  color: Colors.blueAccent,
+                ),
                 SizedBox(width: 6),
-                Text('Offline — saved content shown',
-                    style: TextStyle(fontSize: 11, color: Colors.blueAccent)),
+                Text(
+                  'Offline — saved content shown',
+                  style: TextStyle(fontSize: 11, color: Colors.blueAccent),
+                ),
               ],
             ),
           ),

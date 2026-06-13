@@ -77,7 +77,7 @@ class ExtrasSettingsPage extends StatelessWidget {
 }
 
 String _ghostSubtitle(SettingsService s) {
-  if (s.ghostMode) return 'DM Ghost active';
+  if (s.ghostMode) return 'DM Ghost active — works inside chat only';
   return 'Tap to configure ghost modes';
 }
 
@@ -102,7 +102,7 @@ class _LaunchPagePicker extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           DropdownButtonFormField<String>(
-            value: settings.startupPage,
+            initialValue: settings.startupPage,
             decoration: const InputDecoration(
               labelText: 'Launch Page',
               border: OutlineInputBorder(),

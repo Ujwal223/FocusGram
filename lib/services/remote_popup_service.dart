@@ -46,9 +46,7 @@ class RemotePopupService {
 
       final response = await http.get(
         uri,
-        headers: const {
-          'Cache-Control': 'no-cache',
-        },
+        headers: const {'Cache-Control': 'no-cache'},
       );
 
       if (response.statusCode != 200) return null;

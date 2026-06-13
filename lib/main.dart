@@ -128,6 +128,7 @@ class _InitialRouteHandlerState extends State<InitialRouteHandler>
   bool _breathCompleted = false;
   bool _appSessionStarted = false;
   bool _onboardingCompleted = false;
+  bool _lockScreenDismissed = false;
   late AppLinks _appLinks;
 
   @override
@@ -162,11 +163,14 @@ class _InitialRouteHandlerState extends State<InitialRouteHandler>
     }
   }
 
-  void _showLockScreen() {
-    Navigator.push(
+  Future<void> _showLockScreen() async {
+    final result = await Navigator.push<bool>(
       context,
       MaterialPageRoute(builder: (_) => const AppLockScreen(forAppWide: true)),
     );
+    if (result == true && mounted) {
+      setState(() => _lockScreenDismissed = true);
+    }
   }
 
   Future<void> _initDeepLinks() async {
@@ -190,8 +194,8 @@ class _InitialRouteHandlerState extends State<InitialRouteHandler>
     final settings = context.watch<SettingsService>();
     final appLock = context.watch<AppLockService>();
 
-    // Step 0: App-wide lock (shows before everything)
-    if (appLock.needsUnlockOnStart && !_appSessionStarted) {
+    // Step 0: App-wide lock (shows before everything, once per cold start)
+    if (appLock.needsUnlockOnStart && !_lockScreenDismissed) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!appLock.isShowingLock) {
           appLock.onLockScreenShown();

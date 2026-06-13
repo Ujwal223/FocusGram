@@ -29,10 +29,7 @@ class _AppLockSetupScreenState extends State<AppLockSetupScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Set App Lock PIN'),
-        centerTitle: true,
-      ),
+      appBar: AppBar(title: const Text('Set App Lock PIN'), centerTitle: true),
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(

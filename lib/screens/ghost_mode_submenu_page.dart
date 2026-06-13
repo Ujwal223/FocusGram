@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../services/settings_service.dart';
 
@@ -28,7 +27,7 @@ class GhostModeSubmenuPage extends StatelessWidget {
           _GhostCard(
             icon: Icons.visibility_off_rounded,
             title: 'DM Ghost',
-            subtitle: 'Read messages without the person knowing',
+            subtitle: 'Read messages without the person knowing (works inside chat interface — first entry only)',
             value: s.ghostMode,
             warning:
                 'When DM Ghost is enabled, you can\'t send messages or react to any, you can just receive messages. You can turn ghost mode off anytime from topbar button.',
@@ -117,7 +116,7 @@ class _GhostCard extends StatelessWidget {
               ),
               Switch(
                 value: value,
-                activeColor: danger ? Colors.redAccent : null,
+                activeThumbColor: danger ? Colors.redAccent : null,
                 onChanged: onChanged,
               ),
             ],

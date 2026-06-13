@@ -213,9 +213,12 @@ const String kGhostModeJS = r"""
           // MQTT topic starts at byte 4 (2 byte remaining-len + 2 byte topic-len)
           try {
             const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-            // Block typing / activity indicator publishes
+            // Block typing / activity indicator / seen-receipt publishes
             if (
               decoded.includes('/t_fs')          || // foreground state (typing)
+              decoded.includes('/t_mt')          || // mark thread seen
+              decoded.includes('/t_s')           || // seen receipt
+              decoded.includes('/t_se')          || // seen receipt (alt)
               decoded.includes('activity_indicator') ||
               decoded.includes('is_typing')       ||
               decoded.includes('direct_typing')   ||

@@ -7,7 +7,7 @@
 **Use social media on your terms.**
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_3.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.0.0-white)](https://flutter.dev)
+[![Version](https://img.shields.io/badge/version-2.1.0-white)](https://flutter.dev)
 [![Downloads](https://img.shields.io/github/downloads/ujwal223/focusgram/total?label=downloads&color=blue&cacheSeconds=30)](https://github.com/ujwal223/focusgram/releases)
 
 <a href='https://focusgram.en.uptodown.com/android' title='Download FocusGram'>
@@ -20,9 +20,9 @@
 
 ---
 
-Most people don't want to quit Instagram. They want to check their messages, post a story, and leave — without losing an hour to Reels they never meant to watch.
+Most people don't want to completely quit Instagram but control its usage (i.e They want to check their messages, post a story, and leave) without losing many hours to Reels and distracting content they never meant to watch.
 
-FocusGram is an Android app that loads the Instagram website with the distracting parts removed. No private APIs. No data collection. No accounts. Just a cleaner way to use a platform you already use.
+FocusGram is an Android-only app that loads the Instagram website with the distracting parts removed and with Extra features. No private APIs. No data collection. Just a cleaner way to use a platform you already use.
 
 > FocusGram is free and always will be. If it's saved you some time, show your support by buying me a momo 👉👈.
 >
@@ -36,29 +36,32 @@ FocusGram is an Android app that loads the Instagram website with the distractin
 
 **Focus tools**
 
-- Block Reels entirely, or allow them in timed sessions (1–15 min) with daily limits and cooldowns
-- Autoplay blocker — videos won't play until you tap them
-- Minimal Mode — strips everything down to Feed and DMs
+- Block Reels entirely, or allow them in timed sessions (1–30 min) with daily limits and cooldowns
+- Minimal Mode strips everything down to Feed and DMs
+- Hide ALL feed posts entirely.
 
 **Content filtering**
 
-- Hide the Explore tab, Reels tab, or Shop tab individually
-- Disable Explore and blur posts entirely
+- Hide the Explore tab or Reels tab individually
+- Disable Explore and blur posts, videos on feed entirely
+- Click to unblur feed posts
 - Disable Reels entirely
+- Disable scrolling of home feed
 
 **Habit tools**
 
-- Screen Time Dashboard — daily usage, 7-day chart, weekly average
-- Grayscale Mode — reduces the visual pull of colour; can be scheduled by time of day
-- Session intentions — optionally set a reason before opening the app
+- Screen Time Dashboard: daily usage, 7-day chart, weekly average
+- Grayscale Mode: reduces the visual pull of colour; can be scheduled by time of day
+- Session intentions: optionally set a reason before opening the app
+- Reel & App Quota: Allocate only certain time for reels and/or instagram
 
-**The app itself**
+**Other Features**
 
-- Feels (almost) like a native app, not a browser
-- No blank loading screen — content loads in the background before you get there
-- Instant updates via pull-to-refresh
-- Dark mode follows your system
-
+- Lock the app and/or your private messages.
+- See other's message without sending seen indicator*
+- Choose which page to launch when app is opened.
+- Choose pause time before opening app (mindfulness gate).
+- Save media on your local device.
 ---
 
 ## Installation
@@ -78,25 +81,27 @@ FocusGram is an Android app that loads the Instagram website with the distractin
 
 ## Privacy
 
-FocusGram has no access to your Instagram account credentials. It loads `instagram.com` inside a standard Android WebView — your login goes directly to Meta's servers, the same as any mobile browser.
+FocusGram has no access to your Instagram account credentials. It loads `instagram.com` inside a standard Android WebView and your login goes directly to Meta's servers, the same as any mobile browser.
 
+Our app has:
 - No analytics
 - No crash reporting
 - No third-party SDKs
+- No Logging 
 - No data leaves your device
 
 ---
 
 ## Frequently asked questions
 
-**Will this get my account banned?**
+**Will this get my account banned?**<br>
 Unlikely. FocusGram's traffic is indistinguishable from someone using Instagram in Chrome. It does not use Instagram's private API, does not automate any actions, and does not intercept credentials.
 
-**Is this a mod of Instagram's app?**
+**Is this a mod of Instagram's app?**<br>
 No. FocusGram is a separate app that loads `instagram.com` in a WebView. It does not modify Instagram's APK or use any of Meta's proprietary code.
 
-**Why is it free?**
-Because it should be. FocusGram is built and maintained by [Ujwal Chapagain](https://github.com/Ujwal223) and released under AGPL-3.0.
+**How do i support this project?**<br>
+You can support this project by donating here: [Donate](https://buymemomo.com/ujwal)
 
 ---
 
@@ -125,15 +130,6 @@ FocusGram uses a standard Android System WebView to load `instagram.com`. All fe
 - CSS injection (element hiding, grayscale, scroll behaviour)
 - URL interception via NavigationDelegate (Reels blocking, Explore blocking)
 
-### Permissions
-
-| Permission | Reason |
-|---|---|
-| `INTERNET` | Load instagram.com |
-| `RECEIVE_BOOT_COMPLETED` | Keep session timers accurate after device restart |
-| `WAKE_LOCK` | Keep device awake during active Focus sessions |
-| `FOREGROUND_SERVICE` | Run background service for session tracking |
-
 ### Stack
 
 | | |
@@ -151,11 +147,11 @@ FocusGram uses a standard Android System WebView to load `instagram.com`. All fe
 
 FocusGram is an independent, free, and open-source productivity tool licensed under AGPL-3.0. It is not affiliated with, endorsed by, or associated with Meta Platforms, Inc. or Instagram in any way.
 
-**How it works:** FocusGram embeds a standard Android System WebView that loads `instagram.com` — the same website accessible in any mobile browser. All user-facing features are implemented exclusively via client-side modifications and are never transmitted to or processed by Meta's servers.
+**How it works:** FocusGram embeds a standard Android System WebView that loads `instagram.com`; the same website accessible in any mobile browser. All user-facing features are implemented exclusively via client-side modifications and are never transmitted to or processed by Meta's servers.
 
 **What we do not do:**
-- Use Instagram's or Meta's private APIs
-- Intercept, read, log, or store user credentials, session data, or any content
+- Use/Alter Instagram's or Meta's private APIs
+- Intercept, read, log, or store user credentials, session data, or any sensitive content
 - Modify any server-side Meta or Instagram services
 - Scrape, harvest, or collect any user data
 - Claim ownership of any Meta or Instagram trademarks, logos, or intellectual property — any branding visible within the app is served directly from `instagram.com` and remains the property of Meta Platforms, Inc.
@@ -168,6 +164,8 @@ For legal concerns, contact `notujwal@proton.me` before taking any other action.
 
 ## License
 
-Copyright © 2025 Ujwal Chapagain
+Copyright © 2025-2026 Ujwal Chapagain
 
 Licensed under the [GNU Affero General Public License v3.0](LICENSE). You are free to use, modify, and distribute this software under the same terms.
+
+FocusGram is built and maintained by [Ujwal Chapagain](https://github.com/Ujwal223) under AGPL-3.0, Thanks for Reading README.

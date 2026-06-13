@@ -88,7 +88,6 @@ class SettingsPage extends StatelessWidget {
               MaterialPageRoute(builder: (_) => const ExtrasSettingsPage()),
             ),
           ),
-          
 
           const _SectionHeader(title: 'APPEARANCE'),
           _SubmoduleTile(
@@ -147,18 +146,19 @@ class SettingsPage extends StatelessWidget {
             icon: Icons.trending_up_rounded,
             iconColor: Colors.amber,
             title: 'Your Journey',
-            subtitle: 'Level ${context.watch<LevelService>().level} · ${context.watch<LevelService>().xp} XP',
+            subtitle:
+                'Level ${context.watch<LevelService>().level} · ${context.watch<LevelService>().xp} XP',
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const LevelPanelScreen()),
             ),
           ),
-          // Quick XP debug grant (visible in settings for testing)
-         // _XpDebugTile(),
-          // Reels History removed
 
+          // Quick XP debug grant (visible in settings for testing)
+          // _XpDebugTile(),
+          // Reels History removed
           const _SectionHeader(title: 'ABOUT'),
-           _VersionTile(),
+          _VersionTile(),
           ListTile(
             title: const Text('GitHub'),
             trailing: const Icon(Icons.open_in_new, size: 14),
@@ -236,7 +236,8 @@ class SettingsPage extends StatelessWidget {
       ),
     ];
 
-    if (true) { // ad counter always shown
+    if (true) {
+      // ad counter always shown
       cells.addAll([
         _dividerCell(),
         _statCell(
@@ -290,8 +291,6 @@ class SettingsPage extends StatelessWidget {
     if (a.lockMessages) parts.add('Messages');
     return '${parts.join(' + ')} lock active';
   }
-
-
 
   void _showLegalDisclaimer(BuildContext context) {
     showDialog(
@@ -435,12 +434,15 @@ class FocusSettingsPage extends StatelessWidget {
 
           _SwitchTile(
             title: 'Effort Friction Mode',
-            subtitle: 'Watch ads to earn reel quota minutes',
+            subtitle: 'Earn credits by watching ads — enabled by default',
             value: settings.effortFrictionEnabled,
             onChanged: (v) async {
-              if (v && !context.read<LevelService>().isFeatureUnlocked(AppFeature.effortFriction)) {
+              if (v &&
+                  !context.read<LevelService>().isFeatureUnlocked(
+                    AppFeature.effortFriction,
+                  )) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Unlocks at Level 2')),
+                  const SnackBar(content: Text('Unlocks at Level 3')),
                 );
                 return;
               }
@@ -473,8 +475,7 @@ class FocusSettingsPage extends StatelessWidget {
 
           _SwitchTile(
             title: 'Hide Feed Posts',
-            subtitle:
-                'Hides home feed posts',
+            subtitle: 'Hides home feed posts',
             value: settings.contentPosts,
             onChanged: (v) => settings.setContentPostsEnabled(v),
           ),
@@ -1383,7 +1384,6 @@ class _NumberEditTile extends StatelessWidget {
   }
 }
 
-
 class _VersionTile extends StatelessWidget {
   const _VersionTile();
 
@@ -1401,7 +1401,6 @@ class _VersionTile extends StatelessWidget {
     );
   }
 }
-
 
 class _SectionHeader extends StatelessWidget {
   final String title;
