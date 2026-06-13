@@ -80,14 +80,18 @@ jobs:
 
       - name: Create Android key.properties
         shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
           set -euo pipefail
-          cat > android/key.properties <<EOF
-          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
-          keyPassword=${{ secrets.KEY_PASSWORD }}
-          keyAlias=${{ secrets.KEY_ALIAS }}
-          storeFile=upload-keystore.jks
-          EOF
+          {
+            printf 'storePassword=%s\n' "${KEYSTORE_PASSWORD}"
+            printf 'keyPassword=%s\n'   "${KEY_PASSWORD}"
+            printf 'keyAlias=%s\n'      "${KEY_ALIAS}"
+            printf 'storeFile=upload-keystore.jks\n'
+          } > android/key.properties
 
       - name: Build release APK
         run: flutter build apk --release
