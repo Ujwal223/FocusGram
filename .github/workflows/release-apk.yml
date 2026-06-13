@@ -75,8 +75,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p android/app
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > android/app/upload-keystore.jks
+          # tr -d strips any newlines/spaces introduced when the secret was stored
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" \
+            | tr -d '[:space:]' \
+            | base64 --decode > android/app/upload-keystore.jks
           chmod 600 android/app/upload-keystore.jks
+          echo "Keystore written: $(wc -c < android/app/upload-keystore.jks) bytes"
 
       - name: Create Android key.properties
         shell: bash
@@ -86,12 +90,38 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
           set -euo pipefail
+          # Trim any accidental whitespace/newlines from secret values
+          KS_PASS="$(printf '%s' "${KEYSTORE_PASSWORD}" | tr -d '[:space:]')"
+          K_PASS="$(printf '%s'  "${KEY_PASSWORD}"      | tr -d '[:space:]')"
+          K_ALIAS="$(printf '%s' "${KEY_ALIAS}"          | tr -d '[:space:]')"
+          # Absolute path prevents Gradle from misresolving a relative storeFile
+          KEYSTORE_PATH="${GITHUB_WORKSPACE}/android/app/upload-keystore.jks"
           {
-            printf 'storePassword=%s\n' "${KEYSTORE_PASSWORD}"
-            printf 'keyPassword=%s\n'   "${KEY_PASSWORD}"
-            printf 'keyAlias=%s\n'      "${KEY_ALIAS}"
-            printf 'storeFile=upload-keystore.jks\n'
+            printf 'storePassword=%s\n' "${KS_PASS}"
+            printf 'keyPassword=%s\n'   "${K_PASS}"
+            printf 'keyAlias=%s\n'      "${K_ALIAS}"
+            printf 'storeFile=%s\n'     "${KEYSTORE_PATH}"
           } > android/key.properties
+
+      - name: Verify keystore
+        shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KS_PASS="$(printf '%s' "${KEYSTORE_PASSWORD}" | tr -d '[:space:]')"
+          echo "=== Keystore file ==="
+          ls -lh android/app/upload-keystore.jks
+          file android/app/upload-keystore.jks
+          echo ""
+          echo "=== key.properties keys (values hidden) ==="
+          cut -d'=' -f1 android/key.properties
+          echo ""
+          echo "=== Keystore verification via keytool ==="
+          keytool -list \
+            -keystore android/app/upload-keystore.jks \
+            -storepass "${KS_PASS}" \
+            2>&1 | grep -vE "^(Warning|$)"
 
       - name: Build release APK
         run: flutter build apk --release
