@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.FocusGram" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@color/pure_dark_surface</item>
+        <item name="android:navigationBarColor">@color/pure_dark_surface</item>
+        <item name="android:windowBackground">@color/pure_dark_surface</item>
+    </style>
+</resources>

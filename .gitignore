@@ -1,55 +1,114 @@
-# Miscellaneous
-*.class
-*.log
-*.pyc
-*.swp
+# ==============================================================================
+# FocusGram Root .gitignore
+# Covers both Flutter Legacy app and Native Kotlin app in Ported/
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. OS & Editor Artifacts
+# ------------------------------------------------------------------------------
 .DS_Store
-.atom/
-.build/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-migrate_working_dir/
-PRD.md 
-.reasonix/
-.agents/
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*.swp
+*.swo
+*~
+*.bak
+*.class
+*.pyc
 
-
-
-# IntelliJ related
+# IDEs
+.idea/
 *.iml
 *.ipr
 *.iws
-.idea/
+.vscode/
+.atom/
+.history
+.svn/
+.swiftpm/
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
+# ------------------------------------------------------------------------------
+# 2. Secrets, Environment, and Keystores
+# ------------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.key
+key.properties
+**/key.properties
 android/key.properties
-android/app/*.jks
 upload-keystore.jks
 
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
-.dart_tool/
-.flutter-plugins-dependencies
-.pub-cache/
-.pub/
+# ------------------------------------------------------------------------------
+# 3. Android & Gradle Build Artifacts (Root and Ported/)
+# ------------------------------------------------------------------------------
+# Gradle & Android user cache files
+.gradle/
+**/.gradle/
+.kotlin/
+**/.kotlin/
+.android/
+**/.android/
+gradle-app.setting
+!gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# Machine-specific SDK & local configurations
+local.properties
+**/local.properties
+
+# Build directories & outputs
+build/
+**/build/
 /build/
-/coverage/
-
-# Symbolication related
-app.*.symbols
-
-# Obfuscation related
-app.*.map.json
-
-# Android Studio will place build artifacts here
 /android/app/debug
 /android/app/profile
 /android/app/release
+Ported/build/
+Ported/app/build/
+*.apk
+*.aab
+*.ap_
+*.dex
+captures/
+.cxx/
+**/cxx/
 
+# Profiling & Diagnostics
+*.hprof
+*.log
+.buildlog/
+
+# ------------------------------------------------------------------------------
+# 4. Flutter & Dart Artifacts (Preserved Legacy App)
+# ------------------------------------------------------------------------------
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub/
+.pub-cache/
+/coverage/
 .flutter/
+**/doc/api/
+**/ios/Flutter/.last_build_id
+app.*.symbols
+app.*.map.json
+
+# ------------------------------------------------------------------------------
+# 5. Project Migration & Local Tools (Internal / Scratch)
+# ------------------------------------------------------------------------------
+migrate_working_dir/
+PRD.md
+.reasonix/
+.agents/
+system/
+Documents/
+Ghostify/
+inspo/
+
