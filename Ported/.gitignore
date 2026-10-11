@@ -1,0 +1,31 @@
+# ==============================================================================
+# FocusGram Native Android (Ported/) .gitignore
+# ==============================================================================
+
+# Gradle & Android user cache
+.gradle/
+.android/
+build/
+app/build/
+
+# Machine-specific SDK & local configurations
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+.navigation/
+captures/
+.cxx/
+
+# Keystores & Signing Secrets
+*.jks
+*.keystore
+*.key
+key.properties
+
+# OS & Logs
+.DS_Store
+Thumbs.db
+*.log
+*.hprof

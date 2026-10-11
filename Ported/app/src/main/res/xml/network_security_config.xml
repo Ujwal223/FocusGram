@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Strict HTTPS Only: Zero cleartext traffic -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+    <!-- Strictly scoped domains for Instagram session & Adsterra rewarded ads -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">instagram.com</domain>
+        <domain includeSubdomains="true">cdninstagram.com</domain>
+        <domain includeSubdomains="true">fbcdn.net</domain>
+        <!-- Adsterra Rewarded Ad Slots (Used only in isolated AdsterraAdScreen container) -->
+        <domain includeSubdomains="true">effectivecpmnetwork.com</domain>
+        <domain includeSubdomains="true">highperformanceformat.com</domain>
+    </domain-config>
+</network-security-config>

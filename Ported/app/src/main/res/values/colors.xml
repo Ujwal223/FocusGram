@@ -1,0 +1,9 @@
+<resources>
+    <color name="black">#000000</color>
+    <color name="ic_launcher_background">#000000</color>
+    <color name="white">#FFFFFF</color>
+    <color name="pure_dark_surface">#000000</color>
+    <color name="card_dark">#121212</color>
+    <color name="accent_blue">#3797EF</color>
+    <color name="accent_gold">#FFD700</color>
+</resources>
