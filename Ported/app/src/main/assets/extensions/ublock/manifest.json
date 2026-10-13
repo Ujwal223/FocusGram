@@ -27,6 +27,17 @@
         "*://*.instagram.com/*"
       ],
       "js": [
+        "ghost.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "*://*.instagram.com/*"
+      ],
+      "js": [
         "content.js",
         "focusgram_content.js"
       ],

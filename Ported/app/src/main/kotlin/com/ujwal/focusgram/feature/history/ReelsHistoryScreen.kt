@@ -77,6 +77,10 @@ fun ReelsHistoryScreen(
     onOpenReel: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    androidx.activity.compose.BackHandler {
+        onBack()
+    }
+
     var searchQuery by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     var showClearDialog by remember { mutableStateOf(false) }

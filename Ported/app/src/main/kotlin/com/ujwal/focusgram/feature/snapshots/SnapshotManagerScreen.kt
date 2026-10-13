@@ -62,9 +62,12 @@ fun SnapshotManagerScreen(
     snapshotDao: SnapshotDao,
     onBack: () -> Unit,
     onOpenSnapshot: (String) -> Unit,
-    modifier: Modifier = Modifier,
-    userLevel: Int = 1
+    modifier: Modifier = Modifier
 ) {
+    androidx.activity.compose.BackHandler {
+        onBack()
+    }
+
     val snapshots by snapshotDao.getAll().collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
 

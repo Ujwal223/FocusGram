@@ -46,6 +46,15 @@ class FocusGramNavigationDelegate(
             return GeckoResult.fromValue(AllowOrDeny.DENY)
         }
 
+        // 3b. Minimal Mode enforcement: redirect home feed, explore, reels, and individual posts to DMs inbox
+        if (sessionManager.currentSettings.minimalModeEnabled && (host == "instagram.com" || host == "www.instagram.com")) {
+            if (path == "/" || path == "" || path.startsWith("/explore") || path.startsWith("/reels") || path.startsWith("/reel") || path.startsWith("/p/")) {
+                Log.i(TAG, "Minimal Mode active. Redirecting restricted path $path to /direct/inbox/")
+                session.loadUri("https://www.instagram.com/direct/inbox/")
+                return GeckoResult.fromValue(AllowOrDeny.DENY)
+            }
+        }
+
         // 4. Allow Instagram, Meta CDN, and Authentication login domains
         if (isAllowedHost(host)) {
             return GeckoResult.fromValue(AllowOrDeny.ALLOW)
@@ -77,6 +86,18 @@ class FocusGramNavigationDelegate(
                 Log.i(TAG, "Location redirected away from /explore/people to home")
                 sessionManager.loadUrl("https://www.instagram.com/")
                 return
+            }
+            if (sessionManager.currentSettings.minimalModeEnabled) {
+                val locUri = Uri.parse(it)
+                val locHost = locUri.host?.lowercase() ?: ""
+                val locPath = locUri.path?.lowercase() ?: ""
+                if ((locHost == "instagram.com" || locHost == "www.instagram.com") &&
+                    (locPath == "/" || locPath == "" || locPath.startsWith("/explore") || locPath.startsWith("/reels") || locPath.startsWith("/reel") || locPath.startsWith("/p/"))
+                ) {
+                    Log.i(TAG, "Minimal Mode location redirected away from $locPath to /direct/inbox/")
+                    sessionManager.loadUrl("https://www.instagram.com/direct/inbox/")
+                    return
+                }
             }
             Log.d(TAG, "Location changed to: $it")
             sessionManager.updateCurrentUrl(it)

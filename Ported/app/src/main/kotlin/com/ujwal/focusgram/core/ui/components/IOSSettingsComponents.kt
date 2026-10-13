@@ -36,13 +36,82 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.ujwal.focusgram.core.ui.theme.tactilePress
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 // iOS Palette
 val IOSBg = Color(0xFF000000)
 val IOSGroupBg = Color(0xFF1C1C1E)
 val IOSDivider = Color(0xFF2C2C2E)
 val IOSTextPrimary = Color(0xFFFFFFFF)
+
+/**
+ * DynamicNetworkIcon
+ * Asynchronously loads project logos dynamically over the network on page open.
+ * Does NOT bundle images in the APK to ensure zero APK bloat.
+ */
+@Composable
+fun DynamicNetworkIcon(
+    imageUrl: String,
+    fallbackIcon: ImageVector,
+    iconBgColor: Color,
+    modifier: Modifier = Modifier,
+    tint: Color = Color.White
+) {
+    var bitmap by remember(imageUrl) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+
+    LaunchedEffect(imageUrl) {
+        if (imageUrl.isNotBlank()) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val conn = java.net.URL(imageUrl).openConnection() as java.net.HttpURLConnection
+                    conn.connectTimeout = 5000
+                    conn.readTimeout = 5000
+                    conn.instanceFollowRedirects = true
+                    conn.setRequestProperty("User-Agent", "FocusGram/1.0")
+                    conn.inputStream.use { stream ->
+                        val decoded = android.graphics.BitmapFactory.decodeStream(stream)
+                        if (decoded != null) {
+                            bitmap = decoded.asImageBitmap()
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap!!,
+            contentDescription = null,
+            modifier = modifier
+                .size(30.dp)
+                .clip(RoundedCornerShape(7.dp)),
+            contentScale = ContentScale.Crop
+        )
+    } else {
+        Box(
+            modifier = modifier
+                .size(30.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .background(iconBgColor),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = fallbackIcon,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
 val IOSTextSecondary = Color(0xFF8E8E93)
 val IOSTextSection = Color(0xFF8E8E93)
 val IOSGreen = Color(0xFF34C759)
@@ -140,6 +209,7 @@ fun IOSSettingsRow(
     title: String,
     subtitle: String? = null,
     icon: ImageVector? = null,
+    iconUrl: String? = null,
     iconBgColor: Color = IOSBlue,
     checked: Boolean? = null,
     onCheckedChange: ((Boolean) -> Unit)? = null,
@@ -162,7 +232,14 @@ fun IOSSettingsRow(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (icon != null) {
+            if (iconUrl != null && icon != null) {
+                DynamicNetworkIcon(
+                    imageUrl = iconUrl,
+                    fallbackIcon = icon,
+                    iconBgColor = iconBgColor
+                )
+                Spacer(modifier = Modifier.width(14.dp))
+            } else if (icon != null) {
                 Box(
                     modifier = Modifier
                         .size(30.dp)

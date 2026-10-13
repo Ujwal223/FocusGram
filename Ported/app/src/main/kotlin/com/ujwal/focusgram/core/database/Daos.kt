@@ -21,8 +21,17 @@ interface ScreenTimeDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdate(record: ScreenTimeRecord)
 
-    @Query("UPDATE screen_time_records SET seconds = seconds + :deltaSeconds, lastUpdated = :timestamp WHERE date = :date")
-    suspend fun incrementSeconds(date: String, deltaSeconds: Int, timestamp: Long = System.currentTimeMillis())
+    @Query("UPDATE screen_time_records SET seconds = seconds + :deltaSeconds, reelsSeconds = reelsSeconds + :deltaReelsSeconds, lastUpdated = :timestamp WHERE date = :date")
+    suspend fun incrementSeconds(date: String, deltaSeconds: Int, deltaReelsSeconds: Int = 0, timestamp: Long = System.currentTimeMillis())
+
+    suspend fun addSeconds(date: String, deltaSeconds: Int, deltaReelsSeconds: Int = 0) {
+        val existing = getForDateSync(date)
+        if (existing == null) {
+            insertOrUpdate(ScreenTimeRecord(date = date, seconds = deltaSeconds, reelsSeconds = deltaReelsSeconds))
+        } else {
+            incrementSeconds(date = date, deltaSeconds = deltaSeconds, deltaReelsSeconds = deltaReelsSeconds)
+        }
+    }
 
     @Query("DELETE FROM screen_time_records WHERE date < :cutoffDate")
     suspend fun pruneOlderThan(cutoffDate: String)

@@ -119,6 +119,46 @@
                 window.dispatchEvent(new Event('scroll'));
             }
         }
+
+        // Filter Reels video ads on reels and feed surfaces
+        const videos = document.querySelectorAll('video');
+        for (let i = 0; i < videos.length; i++) {
+            const video = videos[i];
+            let container = video.closest('article') || video.closest('section') || video.closest('[role="region"]') || video.parentElement;
+            while (container && container !== document.body && container !== document.documentElement) {
+                if (container.tagName === 'ARTICLE' || container.tagName === 'SECTION' || container.parentElement?.tagName === 'MAIN') break;
+                const r = container.getBoundingClientRect();
+                if (r.height > window.innerHeight * 0.45) break;
+                container = container.parentElement;
+            }
+            if (!container || container.dataset.adFiltered) continue;
+
+            const text = (container.textContent || '').trim().toLowerCase();
+            const isSponsored = SPONSORED_KEYWORDS.some(kw => text.includes(kw)) ||
+                                !!container.querySelector('a[href*="/ads/"], a[href*="/ad_"], a[href*="/about/ads"], a[href*="ads.instagram.com"]') ||
+                                !!container.querySelector('[aria-label*="Sponsored" i], [aria-label*="sponsored" i], [data-ad-preview]');
+
+            const hasAdCTA = !!container.querySelector('div[role="button"], a[role="button"]') &&
+                             AD_CTA_KEYWORDS.some(cta => text.includes(cta));
+
+            if (isSponsored || hasAdCTA) {
+                video.muted = true;
+                try { video.pause(); } catch (_) {}
+                container.style.setProperty('display', 'none', 'important');
+                container.style.setProperty('height', '0px', 'important');
+                container.style.setProperty('opacity', '0', 'important');
+                container.style.setProperty('pointer-events', 'none', 'important');
+                container.dataset.adFiltered = 'true';
+
+                // Skip ad reel automatically if currently visible
+                const r = container.getBoundingClientRect();
+                if (r.top >= -100 && r.top <= window.innerHeight * 0.8) {
+                    const evt = new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, which: 40, bubbles: true });
+                    window.dispatchEvent(evt);
+                    document.dispatchEvent(evt);
+                }
+            }
+        }
     }
 
     // Dynamic MutationObserver for SPA scrolling

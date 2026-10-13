@@ -33,6 +33,9 @@ class UBlockExtensionAssetsTest {
 
         val focusgramContentFile = File(uBlockDir, "focusgram_content.js")
         assertTrue("focusgram_content.js must exist", focusgramContentFile.exists())
+
+        val ghostFile = File(uBlockDir, "ghost.js")
+        assertTrue("ghost.js must exist", ghostFile.exists())
     }
 
     @Test

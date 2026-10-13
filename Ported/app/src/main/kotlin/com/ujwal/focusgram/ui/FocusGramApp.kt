@@ -57,8 +57,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.ujwal.focusgram.core.database.FocusGramDatabase
 import com.ujwal.focusgram.core.datastore.SettingsRepository
 import com.ujwal.focusgram.core.engine.FocusGramNavigationDelegate
@@ -83,10 +85,15 @@ import com.ujwal.focusgram.feature.session.SessionExhaustedScreen
 import com.ujwal.focusgram.feature.snapshots.SnapshotManagerScreen
 import com.ujwal.focusgram.feature.webview.GeckoViewContainer
 import com.ujwal.focusgram.feature.screentime.ScreenTimeScreen
+import com.ujwal.focusgram.feature.wellness.AdPreloader
 import com.ujwal.focusgram.feature.wellness.AdsterraAdScreen
 import com.ujwal.focusgram.feature.wellness.BreathGateScreen
 import com.ujwal.focusgram.feature.wellness.CooldownGateScreen
+import com.ujwal.focusgram.feature.wellness.EffortFrictionGate
 import com.ujwal.focusgram.feature.wellness.GuardrailsDashboardScreen
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.max
 
 enum class AppDestination {
@@ -131,16 +138,25 @@ fun FocusGramApp() {
         }
     }
 
-    val settings by settingsRepository.settingsFlow.collectAsState(initial = FocusSettings())
-
+    val initialSettings = remember { settingsRepository.getSettingsSync() }
+    val settings by settingsRepository.settingsFlow.collectAsState(initial = initialSettings)
+    val currentUrl by sessionManager.currentUrl.collectAsState()
+    var isAppInForeground by remember { mutableStateOf(true) }
     var destination by remember { mutableStateOf(AppDestination.MAIN_WEBVIEW) }
+    val isViewingReels = destination == AppDestination.MAIN_WEBVIEW && currentUrl.lowercase().contains("/reel")
     val hasPin = remember { encryptedStorage.hasPin() }
     var isAppUnlocked by remember { mutableStateOf(false) }
     val shouldShowLock = settings.appLockEnabled && hasPin && !isAppUnlocked
     var hasPassedSessionPicker by remember { mutableStateOf(false) }
-    var hasPassedBreathGate by remember { mutableStateOf(!settings.showBreathGate) }
+    var hasPassedBreathGate by remember { mutableStateOf(!initialSettings.showBreathGate || initialSettings.breathGateSeconds <= 0) }
+    var hasPassedEffortFriction by remember { mutableStateOf(!initialSettings.effortFrictionEnabled || initialSettings.wordChallengeCount <= 0) }
     val lastSessionEndTimestamp by settingsRepository.lastSessionEndTimestampFlow.collectAsState(initial = 0L)
     var hasPassedCooldownGate by remember { mutableStateOf(false) }
+
+    val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US) }
+    val today = remember { dateFormat.format(Date()) }
+    val todayRecord by database.screenTimeDao().getForDate(today).collectAsState(initial = null)
+    val isDailyLimitExhausted = settings.dailyLimitMinutes > 0 && ((todayRecord?.seconds ?: 0) >= settings.dailyLimitMinutes * 60)
 
     val remainingCooldownSeconds = remember(lastSessionEndTimestamp, settings.cooldownMinutes) {
         if (settings.cooldownMinutes <= 0 || lastSessionEndTimestamp <= 0L) {
@@ -208,29 +224,92 @@ fun FocusGramApp() {
     filePickerHandler.launchMulti = { mimes -> multiFilePickerLauncher.launch(mimes) }
     filePickerHandler.launchSingle = { mimes -> singleFilePickerLauncher.launch(mimes) }
 
-    // Foreground Session Limit Ticker
-    LaunchedEffect(hasPassedSessionPicker, isSessionExhausted) {
-        if (hasPassedSessionPicker && !isSessionExhausted) {
-            while (sessionRemainingSeconds > 0) {
-                delay(1000L)
-                totalElapsedSeconds += 1
-                sessionRemainingSeconds -= 1
-                if (sessionRemainingSeconds <= 0) {
-                    isSessionExhausted = true
-                    scope.launch { settingsRepository.recordSessionEnd() }
-                    if (settings.notifySessionEnd) {
-                        postSessionExpiredNotification(context)
+    // Pre-warm Rewarded Ad container and cache in background (isolated from GeckoView)
+    LaunchedEffect(Unit) {
+        AdPreloader.prewarm(context)
+    }
+
+    // Foreground Session Limit Ticker & Real-Time Screen / Reels Time Tracker
+    LaunchedEffect(hasPassedSessionPicker, isSessionExhausted, isAppInForeground) {
+        if (hasPassedSessionPicker && !isSessionExhausted && isAppInForeground) {
+            val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+            var unsavedSeconds = 0
+            var unsavedReelsSeconds = 0
+
+            try {
+                while (sessionRemainingSeconds > 0) {
+                    delay(1000L)
+                    totalElapsedSeconds += 1
+                    sessionRemainingSeconds -= 1
+
+                    val onReels = destination == AppDestination.MAIN_WEBVIEW &&
+                            sessionManager.currentUrl.value.lowercase().contains("/reel")
+
+                    unsavedSeconds += 1
+                    if (onReels) {
+                        unsavedReelsSeconds += 1
                     }
-                    break
+
+                    // Persist to Room SQLite every second for real-time responsiveness
+                    if (unsavedSeconds >= 1) {
+                        val todayStr = dateFormat.format(java.util.Date())
+                        database.screenTimeDao().addSeconds(todayStr, unsavedSeconds, unsavedReelsSeconds)
+                        unsavedSeconds = 0
+                        unsavedReelsSeconds = 0
+                    }
+
+                    // Every 60 seconds: deduct minute credits & enforce daily limits
+                    if (totalElapsedSeconds % 60 == 0) {
+                        if (onReels) {
+                            settingsRepository.deductReelsMinute()
+                        } else {
+                            settingsRepository.deductInstaMinute()
+                        }
+
+                        if (settings.dailyLimitMinutes > 0) {
+                            val today = dateFormat.format(java.util.Date())
+                            val todayRecord = database.screenTimeDao().getForDateSync(today)
+                            val totalTodaySeconds = (todayRecord?.seconds ?: 0) + unsavedSeconds
+                            if (totalTodaySeconds >= settings.dailyLimitMinutes * 60) {
+                                isSessionExhausted = true
+                                settingsRepository.recordSessionEnd()
+                                break
+                            }
+                        }
+                    }
+
+                    if (sessionRemainingSeconds <= 0) {
+                        isSessionExhausted = true
+                        settingsRepository.recordSessionEnd()
+                        if (settings.notifySessionEnd) {
+                            postSessionExpiredNotification(context)
+                        }
+                        break
+                    }
+                }
+            } finally {
+                // Ensure any pending seconds are atomically written to Room on cancel or pause
+                if (unsavedSeconds > 0) {
+                    withContext(NonCancellable) {
+                        val today = dateFormat.format(java.util.Date())
+                        database.screenTimeDao().addSeconds(today, unsavedSeconds, unsavedReelsSeconds)
+                    }
                 }
             }
+        }
+    }
+
+    // Update persistent notification route state if ScreenTimeService is running
+    LaunchedEffect(isViewingReels, settings.notifyPersistent, hasPassedSessionPicker, isSessionExhausted) {
+        if (settings.notifyPersistent && hasPassedSessionPicker && !isSessionExhausted) {
+            ScreenTimeService.updateRoute(context, isViewingReels)
         }
     }
 
     // Manage persistent countdown notification via ScreenTimeService
     DisposableEffect(hasPassedSessionPicker, isSessionExhausted, settings.notifyPersistent) {
         if (hasPassedSessionPicker && !isSessionExhausted && settings.notifyPersistent) {
-            ScreenTimeService.startSession(context)
+            ScreenTimeService.startSession(context, isViewingReels)
         }
         onDispose {
             ScreenTimeService.stopSession(context)
@@ -246,10 +325,11 @@ fun FocusGramApp() {
         }
     }
 
-    // Re-lock app when backgrounded and pause media
+    // Lifecycle observer for foreground/background state, media pausing, and auto-lock
     DisposableEffect(lifecycleOwner, settings.appLockEnabled, settings.autoLockOnBackground) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) {
+                isAppInForeground = false
                 sessionManager.pauseMedia()
                 if (hasPassedSessionPicker && totalElapsedSeconds >= 15) {
                     scope.launch { settingsRepository.recordSessionEnd() }
@@ -258,6 +338,7 @@ fun FocusGramApp() {
                     isAppUnlocked = false
                 }
             } else if (event == Lifecycle.Event.ON_START) {
+                isAppInForeground = true
                 if (destination == AppDestination.MAIN_WEBVIEW) {
                     sessionManager.resumeMedia()
                 }
@@ -325,10 +406,11 @@ fun FocusGramApp() {
             filePickerHandler = filePickerHandler
         )
 
-        val initialUrl = when (settings.startupPage) {
-            "following" -> "https://www.instagram.com/?variant=following"
-            "favorites" -> "https://www.instagram.com/?variant=favorites"
-            "direct" -> "https://www.instagram.com/direct/inbox/"
+        val initialUrl = when {
+            settings.minimalModeEnabled -> "https://www.instagram.com/direct/inbox/"
+            settings.startupPage == "following" -> "https://www.instagram.com/?variant=following"
+            settings.startupPage == "favorites" -> "https://www.instagram.com/?variant=favorites"
+            settings.startupPage == "direct" -> "https://www.instagram.com/direct/inbox/"
             else -> GeckoSessionManager.DEFAULT_URL
         }
         sessionManager.openAndLoad(initialUrl)
@@ -347,6 +429,12 @@ fun FocusGramApp() {
             val needsReload = prev.grayscaleEnabled != settings.grayscaleEnabled ||
                     prev.blurExplore != settings.blurExplore ||
                     prev.blurReels != settings.blurReels ||
+                    prev.blurFeed != settings.blurFeed ||
+                    prev.unblurMode != settings.unblurMode ||
+                    prev.hideLikeCounts != settings.hideLikeCounts ||
+                    prev.hideFollowerCounts != settings.hideFollowerCounts ||
+                    prev.noAutoplay != settings.noAutoplay ||
+                    prev.blockDmReelsSwiping != settings.blockDmReelsSwiping ||
                     prev.videoDownloadEnabled != settings.videoDownloadEnabled ||
                     prev.minimalModeEnabled != settings.minimalModeEnabled ||
                     prev.hideSuggestedPosts != settings.hideSuggestedPosts ||
@@ -358,7 +446,7 @@ fun FocusGramApp() {
         previousReloadSettings = settings
     }
 
-    // App Lock Enforcement Gate
+    // 1. App Lock Enforcement Gate
     if (shouldShowLock) {
         AppLockScreen(
             encryptedStorage = encryptedStorage,
@@ -368,7 +456,28 @@ fun FocusGramApp() {
         return
     }
 
-    // Cooldown Interval Gate between sessions
+    // 2. Time limit reached (Daily limit exhausted or Session exhausted)
+    if ((isDailyLimitExhausted || isSessionExhausted) && destination != AppDestination.ADSTERRA_REWARDED) {
+        val elapsedMins = max(sessionDurationMinutes, (totalElapsedSeconds + 59) / 60)
+        val extensionsLeft = if (isDailyLimitExhausted) {
+            if (settings.dailyLimitAdClaimedDate == today) 0 else 1
+        } else {
+            (3 - adExtensionsUsed).coerceAtLeast(0)
+        }
+        SessionExhaustedScreen(
+            elapsedMinutes = elapsedMins,
+            extensionsRemaining = extensionsLeft,
+            onExit = { activity?.finish() },
+            onWatchAdToExtend = {
+                if (extensionsLeft > 0) {
+                    destination = AppDestination.ADSTERRA_REWARDED
+                }
+            }
+        )
+        return
+    }
+
+    // 3. Cooldown Interval Gate between sessions
     if (remainingCooldownSeconds > 0 && !hasPassedCooldownGate) {
         CooldownGateScreen(
             remainingSecondsInitial = remainingCooldownSeconds,
@@ -378,8 +487,8 @@ fun FocusGramApp() {
         return
     }
 
-    // Mindfulness Breath Gate
-    if (settings.showBreathGate && !hasPassedBreathGate) {
+    // 4. Mindfulness Breath Gate
+    if (settings.showBreathGate && settings.breathGateSeconds > 0 && !hasPassedBreathGate) {
         BreathGateScreen(
             durationSeconds = settings.breathGateSeconds,
             onFinish = { hasPassedBreathGate = true }
@@ -387,7 +496,21 @@ fun FocusGramApp() {
         return
     }
 
-    // Cold-start Conscious Session Picker
+    // 5. Effort Friction Challenge
+    if (settings.effortFrictionEnabled && settings.wordChallengeCount > 0 && !hasPassedEffortFriction) {
+        EffortFrictionGate(
+            sessionType = "Instagram",
+            remainingCreditMinutes = settings.instaMinutes,
+            onProceed = { hasPassedEffortFriction = true },
+            onWatchAd = {
+                destination = AppDestination.ADSTERRA_REWARDED
+            },
+            onCancel = { activity?.finish() }
+        )
+        return
+    }
+
+    // 6. Cold-start Conscious Session Picker (Set your intention)
     if (!hasPassedSessionPicker) {
         AppSessionPicker(
             onSessionSelected = { minutes ->
@@ -402,27 +525,30 @@ fun FocusGramApp() {
         return
     }
 
-    // Session Limit Exhausted Lockdown Screen
-    if (isSessionExhausted && destination != AppDestination.ADSTERRA_REWARDED) {
-        val elapsedMins = max(sessionDurationMinutes, (totalElapsedSeconds + 59) / 60)
-        val extensionsLeft = (3 - adExtensionsUsed).coerceAtLeast(0)
-        SessionExhaustedScreen(
-            elapsedMinutes = elapsedMins,
-            extensionsRemaining = extensionsLeft,
-            onExit = { activity?.finish() },
-            onWatchAdToExtend = {
-                if (extensionsLeft > 0) {
-                    destination = AppDestination.ADSTERRA_REWARDED
-                }
-            }
-        )
-        return
-    }
-
-    // Back button handling
+    // Back button handling: going back from subpages ALWAYS takes to Settings main screen
     BackHandler(enabled = true) {
         when {
-            destination != AppDestination.MAIN_WEBVIEW -> {
+            destination == AppDestination.APP_LOCK_SETUP -> {
+                destination = AppDestination.APP_LOCK_SETTINGS
+            }
+            destination in listOf(
+                AppDestination.APP_LOCK_SETTINGS,
+                AppDestination.SCREEN_TIME,
+                AppDestination.REELS_HISTORY,
+                AppDestination.SNAPSHOTS,
+                AppDestination.GUARDRAILS,
+                AppDestination.DEBUG_MENU
+            ) -> {
+                destination = AppDestination.SETTINGS
+            }
+            destination == AppDestination.ADSTERRA_REWARDED -> {
+                if (isDailyLimitExhausted || isSessionExhausted) {
+                    destination = AppDestination.MAIN_WEBVIEW
+                } else {
+                    destination = AppDestination.SETTINGS
+                }
+            }
+            destination == AppDestination.SETTINGS -> {
                 destination = AppDestination.MAIN_WEBVIEW
             }
             sessionManager.canGoBack.value -> {
@@ -526,7 +652,6 @@ fun FocusGramApp() {
 
             // Native Bottom Navigation Bar (OLED floating island)
             if (destination == AppDestination.MAIN_WEBVIEW) {
-                val currentUrl by sessionManager.currentUrl.collectAsState()
                 val instagramTheme by sessionManager.instagramTheme.collectAsState()
                 NativeBottomNavBar(
                     currentUrl = currentUrl,
@@ -595,7 +720,8 @@ fun FocusGramApp() {
                                 onNavigateUrl = { url ->
                                     destination = AppDestination.MAIN_WEBVIEW
                                     sessionManager.navigateTo(url)
-                                }
+                                },
+                                screenTimeDao = database.screenTimeDao()
                             )
                         }
 
@@ -613,7 +739,6 @@ fun FocusGramApp() {
                         AppDestination.SNAPSHOTS -> {
                             SnapshotManagerScreen(
                                 snapshotDao = database.snapshotDao(),
-                                userLevel = settings.userLevel,
                                 onBack = { destination = AppDestination.SETTINGS },
                                 onOpenSnapshot = { url ->
                                     destination = AppDestination.MAIN_WEBVIEW
@@ -664,20 +789,29 @@ fun FocusGramApp() {
 
                         AppDestination.ADSTERRA_REWARDED -> {
                             AdsterraAdScreen(
-                                sessionType = if (isSessionExhausted) "session_extend" else "voluntary",
+                                sessionType = if (isDailyLimitExhausted || isSessionExhausted) "session_extend" else "voluntary",
                                 onRewardClaimed = {
-                                    if (isSessionExhausted) {
+                                    if (isDailyLimitExhausted) {
+                                        scope.launch { settingsRepository.extendDailyLimit5Minutes(today) }
+                                        sessionRemainingSeconds += 5 * 60
+                                        sessionDurationMinutes += 5
+                                        isSessionExhausted = false
+                                        destination = AppDestination.MAIN_WEBVIEW
+                                    } else if (isSessionExhausted) {
                                         adExtensionsUsed += 1
                                         sessionRemainingSeconds += 3 * 60
                                         sessionDurationMinutes += 3
                                         isSessionExhausted = false
+                                        destination = AppDestination.MAIN_WEBVIEW
+                                    } else if (!hasPassedEffortFriction) {
+                                        hasPassedEffortFriction = true
                                         destination = AppDestination.MAIN_WEBVIEW
                                     } else {
                                         destination = AppDestination.SETTINGS
                                     }
                                 },
                                 onCancel = {
-                                    if (isSessionExhausted) {
+                                    if (isDailyLimitExhausted || isSessionExhausted) {
                                         destination = AppDestination.MAIN_WEBVIEW
                                     } else {
                                         destination = AppDestination.SETTINGS

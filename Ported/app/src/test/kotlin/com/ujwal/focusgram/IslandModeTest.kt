@@ -51,8 +51,6 @@ class IslandModeTest {
         // Explore / Search
         assertEquals(IslandMode.NORMAL, IslandMode.fromUrl("https://www.instagram.com/explore/"))
         assertEquals(IslandMode.NORMAL, IslandMode.fromUrl("https://www.instagram.com/explore"))
-        // DM Inbox
-        assertEquals(IslandMode.NORMAL, IslandMode.fromUrl("https://www.instagram.com/direct/inbox/"))
         // Profile
         assertEquals(IslandMode.NORMAL, IslandMode.fromUrl("https://www.instagram.com/someuser/"))
     }
@@ -71,7 +69,9 @@ class IslandModeTest {
         assertEquals(IslandMode.HIDDEN, IslandMode.fromUrl("https://www.instagram.com/accounts/emailsignup/"))
         assertEquals(IslandMode.HIDDEN, IslandMode.fromUrl("https://www.instagram.com/login/"))
         assertEquals(IslandMode.HIDDEN, IslandMode.fromUrl("https://www.instagram.com/signup/"))
-        // Direct conversation thread
+        // Direct conversation thread and Inbox
+        assertEquals(IslandMode.HIDDEN, IslandMode.fromUrl("https://www.instagram.com/direct/inbox/"))
+        assertEquals(IslandMode.HIDDEN, IslandMode.fromUrl("https://www.instagram.com/direct/inbox"))
         assertEquals(IslandMode.HIDDEN, IslandMode.fromUrl("https://www.instagram.com/direct/t/178414000000000/"))
         // Comments route
         assertEquals(IslandMode.HIDDEN, IslandMode.fromUrl("https://www.instagram.com/p/C-xyz123/comments/"))

@@ -17,7 +17,7 @@ import androidx.room.RoomDatabase
         SessionRecord::class,
         SnapshotItem::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class FocusGramDatabase : RoomDatabase() {

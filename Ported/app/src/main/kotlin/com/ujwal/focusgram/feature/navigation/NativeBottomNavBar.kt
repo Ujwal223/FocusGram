@@ -115,20 +115,29 @@ fun NativeBottomNavBar(
     val scope = rememberCoroutineScope()
     val isImeVisible = WindowInsets.ime.getBottom(density) > 0
     val lowerUrl = currentUrl.lowercase()
-    val isInDirect = lowerUrl.contains("/direct/t/")
+    val isInDirect = lowerUrl.contains("/direct")
 
-    val activeTabs = remember(settings.noReels, settings.noDMs) {
-        listOfNotNull(
-            NavTab.HOME,
-            if (!settings.noReels) NavTab.REELS else null,
-            if (!settings.noDMs) NavTab.MESSAGES else null,
-            NavTab.SEARCH,
-            NavTab.PROFILE
-        )
+    val activeTabs = remember(settings.noReels, settings.noDMs, settings.minimalModeEnabled) {
+        if (settings.minimalModeEnabled) {
+            listOf(NavTab.MESSAGES, NavTab.PROFILE)
+        } else {
+            listOfNotNull(
+                NavTab.HOME,
+                if (!settings.noReels) NavTab.REELS else null,
+                if (!settings.noDMs) NavTab.MESSAGES else null,
+                NavTab.SEARCH,
+                NavTab.PROFILE
+            )
+        }
     }
 
     val navShape = RoundedCornerShape(32.dp)
-    val isVisible = !isImeVisible && !isInDirect && !isWebInputFocused && !isModalActive && islandMode != IslandMode.HIDDEN
+    val shouldHideInDirect = if (settings.minimalModeEnabled) {
+        lowerUrl.contains("/direct/t/")
+    } else {
+        isInDirect
+    }
+    val isVisible = !isImeVisible && !shouldHideInDirect && !isWebInputFocused && !isModalActive && islandMode != IslandMode.HIDDEN
 
     // Real-time animated color palette matching Instagram's web theme
     val isSystemDark = isSystemInDarkTheme()

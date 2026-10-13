@@ -39,6 +39,8 @@ class UserScriptManager(private val context: Context) {
                     hideFeedPosts: ${settings.hideFeedPosts},
                     blurExplore: ${settings.blurExplore},
                     blurReels: ${settings.blurReels},
+                    blurFeed: ${settings.blurFeed},
+                    unblurMode: '${settings.unblurMode}',
                     tapToUnblur: ${settings.tapToUnblur},
                     requireLongPress: ${settings.requireLongPress},
                     hideLikeCounts: ${settings.hideLikeCounts},
@@ -67,6 +69,16 @@ class UserScriptManager(private val context: Context) {
                 if (window.__fgSetGrayscale) {
                     window.__fgSetGrayscale(${settings.grayscaleEnabled});
                 }
+                document.documentElement.setAttribute('data-fg-block-dm-reels', '${settings.blockDmReelsSwiping}');
+                window.postMessage({
+                    source: "GHOSTIFY_EXTENSION",
+                    type: "GHOSTIFY_SETTINGS_UPDATE",
+                    settings: {
+                        igTyping: ${settings.ghostModeEnabled && settings.ghostHideTypingIndicator},
+                        igSeen: ${settings.ghostModeEnabled && settings.ghostHideDirectSeen},
+                        igStory: ${settings.ghostModeEnabled && settings.ghostHideStorySeen}
+                    }
+                }, "*");
                 window.postMessage({
                     source: "FOCUSGRAM_HOST",
                     type: "FOCUSGRAM_UPDATE",

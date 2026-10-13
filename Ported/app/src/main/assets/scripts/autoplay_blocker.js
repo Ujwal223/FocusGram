@@ -1,8 +1,8 @@
 /**
  * FocusGram — Feed & Video Autoplay Blocker UserScript
  *
- * Terminates automated HTML5 video autoplay and loop loops in feed and explore,
- * while preserving intentional user clicks and reels playback.
+ * Terminates automated HTML5 video autoplay and loops in feed and explore,
+ * while seamlessly preserving intentional user clicks and reels playback.
  */
 
 'use strict';
@@ -11,7 +11,7 @@
     if (window.__fgAutoplayPatched) return;
     window.__fgAutoplayPatched = true;
 
-    const ALLOW_KEY = '__fgUserExplicitlyPlayed';
+    const allowedVideos = new WeakSet();
 
     function isReelVideo() {
         try {
@@ -28,12 +28,41 @@
         return config.blockAutoplay !== false;
     }
 
+    function findVideoInTarget(target) {
+        if (!target) return null;
+        if (target.tagName === 'VIDEO') return target;
+        const closestVid = target.closest('video');
+        if (closestVid) return closestVid;
+
+        // Check if inside post container or media wrapper
+        const container = target.closest('article, [role="presentation"], div[style*="aspect-ratio"], div:has(video)');
+        if (container) {
+            const v = container.querySelector('video');
+            if (v) return v;
+        }
+
+        // Search upward through ancestor elements
+        let p = target;
+        for (let i = 0; i < 6 && p; i++) {
+            const v = p.querySelector('video');
+            if (v) return v;
+            p = p.parentElement;
+        }
+        return null;
+    }
+
     const originalPlay = HTMLVideoElement.prototype.play;
 
     if (HTMLVideoElement.prototype.play) {
         HTMLVideoElement.prototype.play = function () {
             try {
-                if (!shouldBlock() || this[ALLOW_KEY]) {
+                // If on Reels or blockAutoplay is off, allow playback
+                if (!shouldBlock()) {
+                    return originalPlay.apply(this, arguments);
+                }
+
+                // Strictly allow ONLY videos that the user explicitly tapped
+                if (allowedVideos.has(this)) {
                     return originalPlay.apply(this, arguments);
                 }
 
@@ -51,16 +80,23 @@
         };
     }
 
-    // Capture user taps to unlock explicit playback
-    document.addEventListener('click', function (e) {
-        const video = e.target.closest('video') || e.target.querySelector('video');
-        if (video) {
-            video[ALLOW_KEY] = true;
-            try {
-                video.play();
-            } catch (_) {}
-        }
-    }, true);
+    // Capture explicit user click/tap gestures directly on post videos
+    ['click', 'pointerup'].forEach((eventType) => {
+        document.addEventListener(eventType, function (e) {
+            if (!e.isTrusted) return;
+            // Ignore if tapped on buttons/comments/links outside the video area
+            if (e.target.closest('button[aria-label="Like"], button[aria-label="Comment"], button[aria-label="Share"], a[role="link"]:not(:has(video))')) {
+                return;
+            }
+            const video = findVideoInTarget(e.target);
+            if (video) {
+                allowedVideos.add(video);
+                try {
+                    originalPlay.apply(video);
+                } catch (_) {}
+            }
+        }, true);
+    });
 
-    console.log('[FocusGram] Feed Autoplay Blocker active.');
+    console.log('[FocusGram] Feed Autoplay Blocker active (strict per-post mode).');
 })();
