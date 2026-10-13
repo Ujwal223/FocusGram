@@ -45,6 +45,13 @@ class GeckoRuntimeManager private constructor(context: Context) {
         Log.i(TAG, "Initializing Mozilla GeckoRuntime with strict privacy & WebExtension runtime...")
         runtime = GeckoRuntime.create(appContext, runtimeSettings)
         extensionManager = ExtensionManager(runtime)
+
+        runtime.webExtensionController
+            .ensureBuiltIn("resource://android/assets/reellock/", "reellock@focusgram.app")
+            .accept(
+                { Log.d(TAG, "✓ Reel lock WebExtension installed") },
+                { e -> Log.e(TAG, "Reel lock WebExtension installation failed", e) }
+            )
     }
 
     companion object {

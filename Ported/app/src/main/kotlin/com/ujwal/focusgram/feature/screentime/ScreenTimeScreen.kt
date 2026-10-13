@@ -25,15 +25,20 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.Insights
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -59,6 +64,8 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.max
 
+import androidx.activity.compose.BackHandler
+
 /**
  * ScreenTimeScreen
  * Visualizes user digital wellness trends, daily screen time, and session limit adherence.
@@ -71,14 +78,45 @@ fun ScreenTimeScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    BackHandler {
+        onBack()
+    }
+
     val records by screenTimeDao.getAll().collectAsState(initial = emptyList())
     val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US) }
     val dayLabelFormat = remember { SimpleDateFormat("EEE", Locale.US) }
     val todayStr = remember { dateFormat.format(Date()) }
 
+    var liveOffset by remember { mutableIntStateOf(0) }
+    LaunchedEffect(records) {
+        liveOffset = 0
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1000L)
+            liveOffset++
+        }
+    }
+
     val todayRecord = records.firstOrNull { it.date == todayStr }
-    val todayMinutes = (todayRecord?.seconds ?: 0) / 60
+    val todaySeconds = (todayRecord?.seconds ?: 0) + liveOffset
+    val todayReelsSeconds = todayRecord?.reelsSeconds ?: 0
+    val todayMinutes = todaySeconds / 60
+    val todayReelsMinutes = todayReelsSeconds / 60
     val limitFraction = (todayMinutes.toFloat() / max(1, dailyLimitMinutes)).coerceIn(0f, 1f)
+
+    val todayUsageText = when {
+        todaySeconds < 60 -> "${todaySeconds}s"
+        todaySeconds % 60 == 0 -> "$todayMinutes min"
+        else -> "$todayMinutes min ${todaySeconds % 60}s"
+    }
+
+    val todayReelsText = when {
+        todayReelsSeconds == 0 -> "0 min"
+        todayReelsSeconds < 60 -> "${todayReelsSeconds}s"
+        todayReelsSeconds % 60 == 0 -> "$todayReelsMinutes min"
+        else -> "$todayReelsMinutes min ${todayReelsSeconds % 60}s"
+    }
 
     // Compute past 7 days breakdown for bar chart
     val last7Days = remember(records) {
@@ -140,35 +178,73 @@ fun ScreenTimeScreen(
             item {
                 IOSGroupedCard(modifier = Modifier.padding(top = 8.dp)) {
                     Column(modifier = Modifier.padding(18.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(IOSTeal.copy(alpha = 0.15f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.HourglassTop,
-                                    contentDescription = null,
-                                    tint = IOSTeal,
-                                    modifier = Modifier.size(22.dp)
-                                )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape)
+                                        .background(IOSTeal.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.HourglassTop,
+                                        contentDescription = null,
+                                        tint = IOSTeal,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = "Today's Usage",
+                                        color = IOSTextSecondary,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = todayUsageText,
+                                        color = IOSTextPrimary,
+                                        fontSize = 20.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Today's Usage",
-                                    color = IOSTextSecondary,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
-                                    text = "$todayMinutes min",
-                                    color = IOSTextPrimary,
-                                    fontSize = 28.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape)
+                                        .background(IOSPurple.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayArrow,
+                                        contentDescription = null,
+                                        tint = IOSPurple,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = "Reels Time",
+                                        color = IOSTextSecondary,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = todayReelsText,
+                                        color = IOSTextPrimary,
+                                        fontSize = 20.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
 
@@ -344,6 +420,9 @@ fun ScreenTimeScreen(
                         } else {
                             records.take(7).forEachIndexed { idx, record ->
                                 val mins = record.seconds / 60
+                                val reelsM = record.reelsSeconds / 60
+                                val reelsS = record.reelsSeconds % 60
+                                val totalDisplay = if (record.seconds < 60) "${record.seconds}s" else "$mins min"
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -351,13 +430,24 @@ fun ScreenTimeScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    Column {
+                                        Text(
+                                            text = if (record.date == todayStr) "Today" else record.date,
+                                            color = IOSTextPrimary,
+                                            fontSize = 15.sp
+                                        )
+                                        if (record.reelsSeconds > 0) {
+                                            val reelsLabel = if (record.reelsSeconds < 60) "${reelsS}s reels" else "${reelsM}m reels"
+                                            Text(
+                                                text = reelsLabel,
+                                                color = IOSPurple,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                    }
                                     Text(
-                                        text = if (record.date == todayStr) "Today" else record.date,
-                                        color = IOSTextPrimary,
-                                        fontSize = 15.sp
-                                    )
-                                    Text(
-                                        text = "$mins min",
+                                        text = totalDisplay,
                                         color = if (mins >= dailyLimitMinutes) Color(0xFFFF453A) else IOSTextSecondary,
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.Medium

@@ -106,7 +106,7 @@
             }
         `;
 
-        if (config.hideStories) {
+        if (config.hideStories || config.minimalMode) {
             css += `
                 div[data-pagelet="story_tray"],
                 div[data-pagelet*="story"],
@@ -150,41 +150,82 @@
             `;
         }
 
+        if (config.blurFeed) {
+            css += `
+                /* Feed Carousel Slides & Single Post Media - ONLY blur media elements, NEVER parent wrappers! */
+                html[data-fg-feed] article img:not(header img):not([alt*="profile" i]):not([data-fg-reveal]):not(.fg-unblurred),
+                html[data-fg-feed] article video:not([data-fg-reveal]):not(.fg-unblurred),
+                html[data-fg-feed] article canvas:not([data-fg-reveal]):not(.fg-unblurred) {
+                    filter: blur(28px) !important;
+                    transition: filter 0.25s ease-in-out !important;
+                }
+
+                /* Preserve feed header avatars unblurred */
+                html[data-fg-feed] article header img,
+                html[data-fg-feed] article img[alt*="profile" i] {
+                    filter: none !important;
+                }
+            `;
+        }
+
         if (config.blurExplore) {
             css += `
-                main a[href*="/p/"] img,
-                main a[href*="/reel/"] img,
-                div[style*="grid"] img {
+                main a[href*="/p/"]:not([data-fg-reveal]):not(.fg-unblurred) img,
+                main a[href*="/reel/"]:not([data-fg-reveal]):not(.fg-unblurred) img,
+                div[style*="grid"]:not([data-fg-reveal]):not(.fg-unblurred) img {
                     filter: blur(24px) !important;
                     transition: filter 0.2s ease-in-out !important;
-                }
-                main a[href*="/p/"] img:active,
-                main a[href*="/reel/"] img:active {
-                    filter: none !important;
                 }
             `;
         }
 
         if (config.blurReels) {
             css += `
-                main div:has(> video),
-                article div:has(> video) {
+                main div:has(> video):not([data-fg-reveal]):not(.fg-unblurred),
+                article div:has(> video):not([data-fg-reveal]):not(.fg-unblurred),
+                div[data-fg-reel-container]:not([data-fg-reveal]):not(.fg-unblurred) video {
                     filter: blur(24px) !important;
                     transition: filter 0.2s ease-in-out !important;
                 }
-                main div:has(> video):active,
-                article div:has(> video):active {
-                    filter: none !important;
-                }
             `;
         }
+
+        css += `
+            [data-fg-reveal],
+            [data-fg-reveal] img,
+            [data-fg-reveal] video,
+            [data-fg-reveal] canvas,
+            [data-fg-reveal] div,
+            .fg-unblurred,
+            .fg-unblurred img,
+            .fg-unblurred video,
+            .fg-unblurred canvas,
+            .fg-unblurred div {
+                filter: none !important;
+            }
+        `;
 
         if (config.hideLikeCounts) {
             css += `
                 a[href*="/liked_by/"],
                 section a[href*="/liked_by/"],
-                span:has(> a[href*="/liked_by/"]) {
+                span:has(> a[href*="/liked_by/"]),
+                div:has(> a[href*="/liked_by/"]),
+                section:has(svg[aria-label="Like"]) + div:not(:has(form)):not(:has(input)),
+                section:has(svg[aria-label="Unlike"]) + div:not(:has(form)):not(:has(input)),
+                section:has(svg[aria-label="Activity Feed"]) + div:not(:has(form)):not(:has(input)),
+                div[role="button"]:has(svg[aria-label="Like"]) + div span,
+                div[role="button"]:has(svg[aria-label="Unlike"]) + div span,
+                span[role="button"]:has(svg[aria-label="Like"]) + span,
+                span[role="button"]:has(svg[aria-label="Unlike"]) + span,
+                div:has(> svg[aria-label="Like"]) + span,
+                div:has(> svg[aria-label="Unlike"]) + span,
+                button:has(svg[aria-label="Like"]) + span,
+                button:has(svg[aria-label="Unlike"]) + span,
+                [role="button"]:has(svg[aria-label="Like"]) span,
+                [role="button"]:has(svg[aria-label="Unlike"]) span {
                     display: none !important;
+                    visibility: hidden !important;
                 }
             `;
         }
@@ -280,6 +321,41 @@
                         window.dispatchEvent(new Event('scroll'));
                     }
                 });
+
+                // Filter Reels video ads on reels and feed
+                document.querySelectorAll('video').forEach((video) => {
+                    let container = video.closest('article') || video.closest('section') || video.closest('[role="region"]') || video.parentElement;
+                    while (container && container !== document.body && container !== document.documentElement) {
+                        if (container.tagName === 'ARTICLE' || container.tagName === 'SECTION' || container.parentElement?.tagName === 'MAIN') break;
+                        const r = container.getBoundingClientRect();
+                        if (r.height > window.innerHeight * 0.45) break;
+                        container = container.parentElement;
+                    }
+                    if (!container || container.dataset.fgAdFiltered) return;
+
+                    const t = (container.textContent || '').trim().toLowerCase();
+                    const isSponsored = SPONSORED_KW.some(kw => t.includes(kw)) ||
+                                        !!container.querySelector('a[href*="/ad_"], a[href*="/ads/"], a[href*="/about/ads"], a[href*="ads.instagram.com"]') ||
+                                        !!container.querySelector('[aria-label*="Sponsored" i], [aria-label*="sponsored" i], [data-ad-preview]');
+
+                    const hasAdCTA = !!container.querySelector('div[role="button"], a[role="button"]') &&
+                                     AD_CTA.some(cta => t.includes(cta));
+
+                    if (isSponsored || hasAdCTA) {
+                        video.muted = true;
+                        try { video.pause(); } catch (_) {}
+                        container.style.setProperty('display', 'none', 'important');
+                        container.style.setProperty('height', '0px', 'important');
+                        container.style.setProperty('opacity', '0', 'important');
+                        container.style.setProperty('pointer-events', 'none', 'important');
+                        container.dataset.fgAdFiltered = 'true';
+
+                        const r = container.getBoundingClientRect();
+                        if (r.top >= -100 && r.top <= window.innerHeight * 0.8) {
+                            window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, which: 40, bubbles: true }));
+                        }
+                    }
+                });
             }
 
             // Filter Suggested Posts
@@ -312,10 +388,40 @@
 
             // Hide Like Counts
             if (config.hideLikeCounts) {
-                document.querySelectorAll('span, a').forEach((el) => {
+                document.querySelectorAll('a[href*="/liked_by/"]').forEach((el) => {
+                    el.style.setProperty('display', 'none', 'important');
+                    const parent = el.closest('div');
+                    if (parent && parent.textContent && /liked/i.test(parent.textContent)) {
+                        parent.style.setProperty('display', 'none', 'important');
+                    }
+                });
+                document.querySelectorAll('article section ~ div span, article section ~ div div, div[role="presentation"] span, article span, article div').forEach((el) => {
+                    if (el.children.length > 2) return;
                     const text = (el.textContent || '').trim();
-                    if (/^[\d,.]+[KkMm]?\s+(like|likes|view|views)$/i.test(text) || /^liked by\s+/i.test(text.toLowerCase())) {
+                    if (/^(liked\s+by|[\d,.]+[KkMm]?\s+likes?|[\d,.]+\s+others|be\s+the\s+first\s+to\s+like)/i.test(text)) {
                         el.style.setProperty('display', 'none', 'important');
+                    }
+                });
+                document.querySelectorAll('svg[aria-label="Like"], svg[aria-label="Unlike"]').forEach((svg) => {
+                    const btn = svg.closest('[role="button"]') || svg.parentElement;
+                    if (btn) {
+                        btn.querySelectorAll('span, div').forEach(child => {
+                            if (!child.contains(svg) && /^\d+[\d,.]*[KkMm]?$/.test((child.textContent || '').trim())) {
+                                child.style.setProperty('display', 'none', 'important');
+                            }
+                        });
+                        let sibling = btn.nextElementSibling;
+                        if (sibling && /^\d+[\d,.]*[KkMm]?$/.test((sibling.textContent || '').trim())) {
+                            sibling.style.setProperty('display', 'none', 'important');
+                        }
+                        const parent = btn.parentElement;
+                        if (parent && parent.children.length <= 4) {
+                            parent.querySelectorAll('span').forEach(sp => {
+                                if (/^\d+[\d,.]*[KkMm]?$/.test((sp.textContent || '').trim())) {
+                                    sp.style.setProperty('display', 'none', 'important');
+                                }
+                            });
+                        }
                     }
                 });
             }
@@ -328,8 +434,146 @@
                     });
                 });
             }
+
+            // Minimal Mode in-page SPA redirect guard
+            if (config.minimalMode) {
+                const curPath = (window.location.pathname || '').toLowerCase();
+                if (curPath === '/' || curPath === '' || curPath.startsWith('/explore') || curPath.startsWith('/reels') || curPath.startsWith('/reel') || curPath.startsWith('/p/')) {
+                    window.__focusgramNavigate('/direct/inbox/');
+                }
+            }
         } catch (_) {}
     }
+
+    // --- Feed Path Monitoring & Unblur Interaction Engine ---
+    function updateFeedAttr() {
+        const path = window.location.pathname || '';
+        const isFeed = path === '/' || path === '';
+        document.documentElement.toggleAttribute('data-fg-feed', isFeed);
+    }
+    updateFeedAttr();
+    window.addEventListener('popstate', updateFeedAttr);
+    new MutationObserver(updateFeedAttr).observe(document.documentElement, { childList: true, subtree: true });
+
+    let holdTimer = null;
+    let holdStartX = 0;
+    let holdStartY = 0;
+    let swallowUntil = 0;
+
+    function getBlurredTarget(el) {
+        if (!el) return null;
+        const config = window.__FOCUSGRAM_CONFIG__ || {};
+
+        if (config.blurFeed) {
+            // Never treat carousel next/prev arrows or navigation buttons as unblur triggers
+            if (el.closest('button[aria-label="Next"], button[aria-label="Go back"], button[aria-label="Next slide"], button[aria-label="Previous slide"], button[aria-label="Chevron"], header, section:has(svg[aria-label="Like"])')) {
+                return null;
+            }
+
+            const article = el.closest('article');
+            if (article) {
+                // Find specific clicked media element or its immediate slide
+                const media = el.matches('img, video, canvas') ? el : (el.closest('img, video, canvas') || el.querySelector('img, video, canvas'));
+                const slide = el.closest('li, [role="group"], [style*="scroll-snap-align"], [data-testid*="slide"]') ||
+                              (media ? media.closest('div[style*="width: 100%"], div[style*="min-width"]') : null);
+
+                if (slide && !slide.hasAttribute('data-fg-reveal') && !slide.classList.contains('fg-unblurred')) {
+                    return slide;
+                }
+                if (media && !media.hasAttribute('data-fg-reveal') && !media.classList.contains('fg-unblurred')) {
+                    return media;
+                }
+
+                // Fallback for clicking media container of single post
+                const mediaContainer = article.querySelector('div[style*="aspect-ratio"], div:has(> img), div:has(> video)');
+                if (mediaContainer && mediaContainer.contains(el)) {
+                    const postImg = mediaContainer.querySelector('img:not(header img), video');
+                    if (postImg && !postImg.hasAttribute('data-fg-reveal') && !postImg.classList.contains('fg-unblurred')) {
+                        return postImg;
+                    }
+                }
+            }
+        }
+
+        if (config.blurReels) {
+            const reelContainer = el.closest('main div:has(> video), article div:has(> video)');
+            if (reelContainer && !reelContainer.hasAttribute('data-fg-reveal') && !reelContainer.classList.contains('fg-unblurred')) {
+                return reelContainer;
+            }
+            const video = el.closest('video');
+            if (video && video.parentElement && !video.parentElement.hasAttribute('data-fg-reveal') && !video.parentElement.classList.contains('fg-unblurred')) {
+                return video.parentElement;
+            }
+        }
+
+        if (config.blurExplore) {
+            const expLink = el.closest('main a[href*="/p/"], main a[href*="/reel/"]');
+            if (expLink && !expLink.hasAttribute('data-fg-reveal') && !expLink.classList.contains('fg-unblurred')) {
+                return expLink;
+            }
+        }
+        return null;
+    }
+
+    function revealTarget(target) {
+        if (!target) return;
+        target.setAttribute('data-fg-reveal', '1');
+        target.classList.add('fg-unblurred');
+        target.style.setProperty('filter', 'none', 'important');
+        target.querySelectorAll('*').forEach(c => {
+            c.setAttribute('data-fg-reveal', '1');
+            c.classList.add('fg-unblurred');
+            c.style.setProperty('filter', 'none', 'important');
+        });
+    }
+
+    document.addEventListener('pointerdown', (e) => {
+        const config = window.__FOCUSGRAM_CONFIG__ || {};
+        const mode = config.unblurMode || (config.tapToUnblur ? 'tap' : 'hold');
+        if (mode !== 'hold') return;
+        const target = getBlurredTarget(e.target);
+        if (!target) return;
+        holdStartX = e.clientX;
+        holdStartY = e.clientY;
+        holdTimer = setTimeout(() => {
+            revealTarget(target);
+            swallowUntil = Date.now() + 450;
+        }, 350);
+    }, true);
+
+    document.addEventListener('pointermove', (e) => {
+        if (holdTimer && Math.hypot(e.clientX - holdStartX, e.clientY - holdStartY) > 12) {
+            clearTimeout(holdTimer);
+            holdTimer = null;
+        }
+    }, true);
+
+    ['pointerup', 'pointercancel'].forEach(evt => {
+        document.addEventListener(evt, () => {
+            if (holdTimer) {
+                clearTimeout(holdTimer);
+                holdTimer = null;
+            }
+        }, true);
+    });
+
+    document.addEventListener('click', (e) => {
+        if (Date.now() < swallowUntil) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+        const config = window.__FOCUSGRAM_CONFIG__ || {};
+        const mode = config.unblurMode || (config.tapToUnblur ? 'tap' : 'hold');
+        const target = getBlurredTarget(e.target);
+        if (!target) return;
+
+        if (mode === 'tap') {
+            e.preventDefault();
+            e.stopPropagation();
+            revealTarget(target);
+        }
+    }, true);
 
     // Expose hook to reload styles on config update
     window.__focusgramUpdateStyles = function () {

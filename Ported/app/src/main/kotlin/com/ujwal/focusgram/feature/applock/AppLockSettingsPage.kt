@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.dp
 import com.ujwal.focusgram.core.datastore.SettingsRepository
 import com.ujwal.focusgram.core.model.FocusSettings
 import com.ujwal.focusgram.core.security.EncryptedStorage
+import androidx.activity.compose.BackHandler
+import com.ujwal.focusgram.core.ui.components.FocusGramCard
 import com.ujwal.focusgram.core.ui.components.FocusGramSectionHeader
 import com.ujwal.focusgram.core.ui.components.FocusGramToggleRow
 import com.ujwal.focusgram.core.ui.components.FocusGramTopBar
@@ -49,6 +51,10 @@ fun AppLockSettingsPage(
 ) {
     val settings by repository.settingsFlow.collectAsState(initial = FocusSettings())
     val scope = rememberCoroutineScope()
+
+    BackHandler {
+        onBack()
+    }
 
     Column(
         modifier = modifier

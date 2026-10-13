@@ -14,6 +14,7 @@ data class FocusSettings(
     val noDMs: Boolean = false,
     val blurExplore: Boolean = true,
     val blurReels: Boolean = false,
+    val blurFeed: Boolean = false,
     val unblurMode: String = "tap", // "tap" or "hold"
     val tapToUnblur: Boolean = true,
     val requireLongPress: Boolean = false,
@@ -23,6 +24,7 @@ data class FocusSettings(
     val hideShopTab: Boolean = true,
     val minimalModeEnabled: Boolean = false,
     val hideFeedPosts: Boolean = false,
+    val blockDmReelsSwiping: Boolean = true,
 
     // Mindful Gates & Wellness
     val showBreathGate: Boolean = true,
@@ -32,6 +34,7 @@ data class FocusSettings(
     val effortFrictionEnabled: Boolean = true,
     val cooldownMinutes: Int = 15,
     val dailyLimitMinutes: Int = 60,
+    val dailyLimitAdClaimedDate: String = "",
 
     // Appearance & System
     val grayscaleEnabled: Boolean = false,

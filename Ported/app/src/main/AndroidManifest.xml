@@ -21,6 +21,7 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.FocusGram"
+        android:enableOnBackInvokedCallback="true"
         android:usesCleartextTraffic="false">
 
         <activity

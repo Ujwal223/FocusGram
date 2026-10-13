@@ -22,8 +22,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import kotlinx.coroutines.delay
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
@@ -68,6 +73,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.filled.Person
+import com.ujwal.focusgram.core.database.ScreenTimeDao
 import com.ujwal.focusgram.core.datastore.SettingsRepository
 import com.ujwal.focusgram.core.model.FocusSettings
 import com.ujwal.focusgram.core.ui.components.CupertinoOptionWheelPicker
@@ -86,7 +93,11 @@ import com.ujwal.focusgram.core.ui.components.IOSTeal
 import com.ujwal.focusgram.core.ui.components.IOSTextPrimary
 import com.ujwal.focusgram.core.ui.components.IOSTextSecondary
 import com.ujwal.focusgram.feature.session.AppSessionPicker
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 enum class SettingsSubpage {
     MAIN,
@@ -95,7 +106,8 @@ enum class SettingsSubpage {
     EXTRAS,
     APPEARANCE,
     NOTIFICATIONS,
-    GHOST
+    GHOST,
+    LICENSES
 }
 
 /**
@@ -110,19 +122,20 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onNavigateReelsHistory: () -> Unit,
     onNavigateScreenTime: () -> Unit,
-    onNavigateLevelPanel: () -> Unit = {},
     onNavigateAppLock: () -> Unit,
     onWatchAd: () -> Unit = {},
     onNavigateUrl: (String) -> Unit = {},
+    screenTimeDao: ScreenTimeDao? = null,
     modifier: Modifier = Modifier
 ) {
     val settings by repository.settingsFlow.collectAsState(initial = FocusSettings())
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
+    val mainListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
     var currentSubpage by remember { mutableStateOf(SettingsSubpage.MAIN) }
     var showLegalDialog by remember { mutableStateOf(false) }
-    var showLicenseDialog by remember { mutableStateOf(false) }
+    var showDeveloperDialog by remember { mutableStateOf(false) }
 
     // Intercept back presses: go back to MAIN subpage first, or pop screen
     BackHandler {
@@ -173,39 +186,83 @@ fun SettingsScreen(
         )
     }
 
-    // Licenses Dialog
-    if (showLicenseDialog) {
+    // Developer Dialog
+    if (showDeveloperDialog) {
         AlertDialog(
-            onDismissRequest = { showLicenseDialog = false },
+            onDismissRequest = { showDeveloperDialog = false },
             containerColor = Color(0xFF1C1C1E),
+            icon = {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF2C2C2E)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            },
             title = {
                 Text(
-                    text = "Open Source License",
+                    text = "Developer Profile",
                     color = Color.White,
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp
                 )
             },
             text = {
-                Text(
-                    text = "FocusGram is published under the GNU Affero General Public License v3.0 (AGPL-3.0).\n\n" +
-                            "You are free to view, audit, study, and modify the source code on GitHub. " +
-                            "Contains zero telemetry, zero analytics trackers, and zero proprietary ad SDKs.",
-                    color = Color(0xFF8E8E93),
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Ujwal",
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 16.sp
+                    )
+                    Text(
+                        text = "Creator and maintainer of FocusGram. Independent open-source developer focused on privacy, digital wellbeing, and user-centric software.",
+                        color = Color(0xFF8E8E93),
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp
+                    )
+                    Text(
+                        text = "GitHub: @Ujwal223",
+                        color = IOSBlue,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             },
             confirmButton = {
                 Button(
-                    onClick = { showLicenseDialog = false },
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Ujwal223"))
+                        context.startActivity(intent)
+                        showDeveloperDialog = false
+                    },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color.White,
                         contentColor = Color.Black
                     ),
                     shape = RoundedCornerShape(20.dp)
                 ) {
-                    Text("OK", fontWeight = FontWeight.Bold)
+                    Text("GitHub Profile", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { showDeveloperDialog = false },
+                    border = BorderStroke(1.dp, Color(0xFF3A3A3C)),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Color.White
+                    )
+                ) {
+                    Text("Close")
                 }
             }
         )
@@ -246,6 +303,7 @@ fun SettingsScreen(
                     SettingsSubpage.APPEARANCE -> "Appearance"
                     SettingsSubpage.NOTIFICATIONS -> "Privacy & Notifications"
                     SettingsSubpage.GHOST -> "Ghost Mode"
+                    SettingsSubpage.LICENSES -> "Open Source & Credits"
                 },
                 color = IOSTextPrimary,
                 fontSize = 17.sp,
@@ -259,14 +317,15 @@ fun SettingsScreen(
             SettingsSubpage.MAIN -> {
                 MainSettingsContent(
                     settings = settings,
+                    listState = mainListState,
                     onNavigateSubpage = { currentSubpage = it },
                     onNavigateAppLock = onNavigateAppLock,
                     onNavigateScreenTime = onNavigateScreenTime,
-                    onNavigateLevelPanel = onNavigateLevelPanel,
                     onNavigateReelsHistory = onNavigateReelsHistory,
                     onWatchAd = onWatchAd,
                     onShowLegal = { showLegalDialog = true },
-                    onShowLicenses = { showLicenseDialog = true }
+                    onShowDeveloper = { showDeveloperDialog = true },
+                    screenTimeDao = screenTimeDao
                 )
             }
             SettingsSubpage.FOCUS -> {
@@ -275,7 +334,9 @@ fun SettingsScreen(
             SettingsSubpage.GUARDRAILS -> {
                 GuardrailsSubpage(
                     repository = repository,
-                    settings = settings
+                    settings = settings,
+                    screenTimeDao = screenTimeDao,
+                    onWatchAd = onWatchAd
                 )
             }
             SettingsSubpage.EXTRAS -> {
@@ -297,6 +358,9 @@ fun SettingsScreen(
             SettingsSubpage.GHOST -> {
                 GhostModeSubpage(repository = repository, settings = settings)
             }
+            SettingsSubpage.LICENSES -> {
+                LicensesSubpage()
+            }
         }
     }
 }
@@ -306,18 +370,48 @@ fun SettingsScreen(
 @Composable
 private fun MainSettingsContent(
     settings: FocusSettings,
+    listState: LazyListState,
     onNavigateSubpage: (SettingsSubpage) -> Unit,
     onNavigateAppLock: () -> Unit,
     onNavigateScreenTime: () -> Unit,
-    onNavigateLevelPanel: () -> Unit,
     onNavigateReelsHistory: () -> Unit,
     onWatchAd: () -> Unit,
     onShowLegal: () -> Unit,
-    onShowLicenses: () -> Unit
+    onShowDeveloper: () -> Unit,
+    screenTimeDao: ScreenTimeDao? = null
 ) {
     val context = LocalContext.current
+    val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US) }
+    val todayStr = remember { dateFormat.format(Date()) }
+    val todayRecord by (screenTimeDao?.getForDate(todayStr) ?: flowOf(null)).collectAsState(initial = null)
+
+    var liveOffset by remember { mutableIntStateOf(0) }
+    LaunchedEffect(todayRecord) {
+        liveOffset = 0
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1000L)
+            liveOffset++
+        }
+    }
+
+    val todaySeconds = (todayRecord?.seconds ?: (settings.instaMinutes * 60)) + liveOffset
+    val todayReelsSeconds = todayRecord?.reelsSeconds ?: (settings.reelsMinutes * 60)
+
+    val appTimeText = when {
+        todaySeconds < 60 -> "${todaySeconds}s"
+        todaySeconds % 60 == 0 -> "${todaySeconds / 60}m"
+        else -> "${todaySeconds / 60}m ${todaySeconds % 60}s"
+    }
+    val reelsTimeText = when {
+        todayReelsSeconds < 60 -> "${todayReelsSeconds}s"
+        todayReelsSeconds % 60 == 0 -> "${todayReelsSeconds / 60}m"
+        else -> "${todayReelsSeconds / 60}m ${todayReelsSeconds % 60}s"
+    }
 
     LazyColumn(
+        state = listState,
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp)
@@ -450,12 +544,12 @@ private fun MainSettingsContent(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = "${settings.instaMinutes}m", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text(text = appTimeText, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         Text(text = "App Time", color = Color(0xFF8E8E93), fontSize = 11.sp)
                     }
                     Box(modifier = Modifier.width(1.dp).height(24.dp).background(Color(0xFF2C2C2E)))
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = "${settings.reelsMinutes}m", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text(text = reelsTimeText, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         Text(text = "Reels Time", color = Color(0xFF8E8E93), fontSize = 11.sp)
                     }
                 }
@@ -557,13 +651,6 @@ private fun MainSettingsContent(
                     onClick = onNavigateScreenTime
                 )
                 IOSSettingsRow(
-                    title = "Your Journey",
-                    subtitle = "Level ${settings.userLevel} · ${settings.userXP} XP",
-                    icon = Icons.Default.Star,
-                    iconBgColor = IOSOrange,
-                    onClick = onNavigateLevelPanel
-                )
-                IOSSettingsRow(
                     title = "Reels Watch History",
                     subtitle = "View and export reels you previously viewed",
                     icon = Icons.Default.History,
@@ -578,6 +665,13 @@ private fun MainSettingsContent(
         item {
             IOSSectionTitle(title = "ABOUT")
             IOSGroupedCard {
+                IOSSettingsRow(
+                    title = "Developer",
+                    subtitle = "Ujwal (@Ujwal223)",
+                    icon = Icons.Default.Person,
+                    iconBgColor = Color(0xFF3A3A3C),
+                    onClick = onShowDeveloper
+                )
                 IOSSettingsRow(
                     title = "GitHub Repository",
                     subtitle = "Source code, issues, and releases",
@@ -596,12 +690,12 @@ private fun MainSettingsContent(
                     onClick = onShowLegal
                 )
                 IOSSettingsRow(
-                    title = "Open Source License",
-                    subtitle = "AGPL-3.0 Free and Open Source",
+                    title = "Open Source License & Credits",
+                    subtitle = "AGPL-3.0 and third-party dependencies",
                     icon = Icons.Default.Security,
                     iconBgColor = Color(0xFF3A3A3C),
                     trailingText = "v2.0.0",
-                    onClick = onShowLicenses,
+                    onClick = { onNavigateSubpage(SettingsSubpage.LICENSES) },
                     showDivider = false
                 )
             }
@@ -633,7 +727,7 @@ private fun FocusModeSubpage(
             IOSGroupedCard {
                 IOSSettingsRow(
                     title = "Minimal Mode",
-                    subtitle = "Ultra-distraction-free layout. Hides feed, stories, reels, explore grid, and blocks infinite scroll",
+                    subtitle = "Only DMs and your Profile are accessible. Reels, Explore, and feed posts are strictly disabled. Friends' sent reels work in DMs via Reel Lock; posts sent by friends will not load.",
                     icon = Icons.Default.DarkMode,
                     iconBgColor = Color(0xFF636366),
                     checked = settings.minimalModeEnabled,
@@ -655,6 +749,14 @@ private fun FocusModeSubpage(
         item {
             IOSSectionTitle(title = "CONTENT FILTERING")
             IOSGroupedCard {
+                IOSSettingsRow(
+                    title = "Blur Home Feed",
+                    subtitle = "Blur all posts, videos, and multi-image carousels on the home feed",
+                    icon = Icons.Default.Visibility,
+                    iconBgColor = IOSTeal,
+                    checked = settings.blurFeed,
+                    onCheckedChange = { scope.launch { repository.setBlurFeed(it) } }
+                )
                 IOSSettingsRow(
                     title = "Blur Explore Grid",
                     subtitle = "Blur explore grid thumbnails until tapped",
@@ -713,6 +815,14 @@ private fun FocusModeSubpage(
                     iconBgColor = IOSRed,
                     checked = settings.noReels,
                     onCheckedChange = { scope.launch { repository.setNoReels(it) } }
+                )
+                IOSSettingsRow(
+                    title = "Block Reels Swiping in DMs",
+                    subtitle = "Watch reels sent to you in DMs without doomscrolling into suggested reels feeds",
+                    icon = Icons.Default.Lock,
+                    iconBgColor = IOSPurple,
+                    checked = settings.blockDmReelsSwiping,
+                    onCheckedChange = { scope.launch { repository.setBlockDmReelsSwiping(it) } }
                 )
                 IOSSettingsRow(
                     title = "Hide Suggested Posts",
@@ -788,14 +898,29 @@ private fun FocusModeSubpage(
     }
 }
 
-// ─── GUARDRAILS SUBPAGE ─────────────────────────────────────────────────────
-
 @Composable
 private fun GuardrailsSubpage(
     repository: SettingsRepository,
-    settings: FocusSettings
+    settings: FocusSettings,
+    screenTimeDao: ScreenTimeDao? = null,
+    onWatchAd: () -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
+    val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US) }
+    val todayStr = remember { dateFormat.format(Date()) }
+    val todayRecord by (screenTimeDao?.getForDate(todayStr) ?: flowOf(null)).collectAsState(initial = null)
+    val isDailyLimitExhausted = settings.dailyLimitMinutes > 0 && ((todayRecord?.seconds ?: 0) >= settings.dailyLimitMinutes * 60)
+
+    val lastSessionEndTimestamp by repository.lastSessionEndTimestampFlow.collectAsState(initial = 0L)
+    val isCooldownActive = settings.cooldownMinutes > 0 && lastSessionEndTimestamp > 0L &&
+            (System.currentTimeMillis() - lastSessionEndTimestamp < settings.cooldownMinutes * 60 * 1000L)
+
+    var showDailyLimitModal by remember { mutableStateOf(false) }
+    var showCooldownModal by remember { mutableStateOf(false) }
+    var showBreathModal by remember { mutableStateOf(false) }
+    var showFrictionModal by remember { mutableStateOf(false) }
+    var showDailyLimitExhaustedDialog by remember { mutableStateOf(false) }
+    var showCooldownActiveDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier
@@ -805,325 +930,60 @@ private fun GuardrailsSubpage(
         // SESSION LIMITS
         item {
             IOSSectionTitle(title = "SESSION LIMITS")
-
-            // 1. Daily Limit Timer
-            val dailyLimitOptions = remember { listOf(0, 15, 30, 45, 60, 90, 120, 180, 240) }
-            val selectedDailyIndex = remember(settings.dailyLimitMinutes) {
-                dailyLimitOptions.indexOf(settings.dailyLimitMinutes).takeIf { it >= 0 }
-                    ?: dailyLimitOptions.indexOfFirst { it >= settings.dailyLimitMinutes }.coerceAtLeast(0)
-            }
-
-            IOSGroupedCard(modifier = Modifier.padding(bottom = 12.dp)) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(IOSOrange),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Timer,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Daily Limit Timer",
-                                    color = Color.White,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = "Max session duration before Instagram locks",
-                                    color = Color(0xFF8E8E93),
-                                    fontSize = 12.sp
-                                )
-                            }
+            IOSGroupedCard {
+                IOSSettingsRow(
+                    title = "Daily Limit Timer",
+                    subtitle = if (isDailyLimitExhausted) "Limit exhausted for today (Locked)" else "Max session duration before Instagram locks",
+                    icon = Icons.Default.Timer,
+                    iconBgColor = if (isDailyLimitExhausted) Color(0xFF636366) else IOSOrange,
+                    trailingText = if (settings.dailyLimitMinutes > 0) "${settings.dailyLimitMinutes} min" else "Off",
+                    onClick = {
+                        if (isDailyLimitExhausted) {
+                            showDailyLimitExhaustedDialog = true
+                        } else {
+                            showDailyLimitModal = true
                         }
-                        Text(
-                            text = if (settings.dailyLimitMinutes > 0) "${settings.dailyLimitMinutes} min" else "Off",
-                            color = if (settings.dailyLimitMinutes > 0) Color.White else Color(0xFF8E8E93),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
                     }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    CupertinoOptionWheelPicker<Int>(
-                        options = dailyLimitOptions,
-                        selectedIndex = selectedDailyIndex,
-                        onOptionSelected = { _, mins: Int ->
-                            scope.launch { repository.setDailyLimitMinutes(mins) }
-                        },
-                        labelProvider = { mins: Int ->
-                            when {
-                                mins == 0 -> "Off"
-                                mins < 60 -> "$mins min"
-                                mins % 60 == 0 -> "${mins / 60} hour" + (if (mins / 60 > 1) "s" else "")
-                                else -> "${mins / 60}h ${mins % 60}m"
-                            }
-                        },
-                        visibleItemsCount = 3,
-                        itemHeight = 38.dp
-                    )
-                }
-            }
-
-            // 2. Cooldown Between Sessions
-            val cooldownOptions = remember { listOf(0, 1, 2, 5, 10, 15, 30, 45, 60) }
-            val selectedCooldownIndex = remember(settings.cooldownMinutes) {
-                cooldownOptions.indexOf(settings.cooldownMinutes).takeIf { it >= 0 }
-                    ?: cooldownOptions.indexOfFirst { it >= settings.cooldownMinutes }.coerceAtLeast(0)
-            }
-
-            IOSGroupedCard(modifier = Modifier.padding(bottom = 12.dp)) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(IOSBlue),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Timer,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Cooldown Between Sessions",
-                                    color = Color.White,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = "Mandatory resting pause between sessions",
-                                    color = Color(0xFF8E8E93),
-                                    fontSize = 12.sp
-                                )
-                            }
+                )
+                IOSSettingsRow(
+                    title = "Cooldown Between Sessions",
+                    subtitle = if (isCooldownActive) "Cooldown currently active (Locked)" else "Mandatory resting pause between sessions",
+                    icon = Icons.Default.Timer,
+                    iconBgColor = if (isCooldownActive) Color(0xFF636366) else IOSBlue,
+                    trailingText = if (settings.cooldownMinutes > 0) "${settings.cooldownMinutes} min" else "Off",
+                    onClick = {
+                        if (isCooldownActive) {
+                            showCooldownActiveDialog = true
+                        } else {
+                            showCooldownModal = true
                         }
-                        Text(
-                            text = if (settings.cooldownMinutes > 0) "${settings.cooldownMinutes} min" else "Off",
-                            color = if (settings.cooldownMinutes > 0) Color.White else Color(0xFF8E8E93),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    CupertinoOptionWheelPicker<Int>(
-                        options = cooldownOptions,
-                        selectedIndex = selectedCooldownIndex,
-                        onOptionSelected = { _, mins: Int ->
-                            scope.launch { repository.setCooldownMinutes(mins) }
-                        },
-                        labelProvider = { mins: Int ->
-                            when {
-                                mins == 0 -> "Off"
-                                mins < 60 -> "$mins min"
-                                else -> "1 hour"
-                            }
-                        },
-                        visibleItemsCount = 3,
-                        itemHeight = 38.dp
-                    )
-                }
+                    },
+                    showDivider = false
+                )
             }
         }
 
         // MINDFUL GATES
         item {
             IOSSectionTitle(title = "MINDFUL GATES")
-
-            // 3. Mindful Breath Gate
-            val breathOptions = remember { listOf(0, 3, 5, 10, 15, 20, 30, 60) }
-            val currentBreathVal = if (settings.showBreathGate) settings.breathGateSeconds else 0
-            val selectedBreathIndex = remember(currentBreathVal) {
-                breathOptions.indexOf(currentBreathVal).takeIf { it >= 0 }
-                    ?: breathOptions.indexOfFirst { it >= currentBreathVal }.coerceAtLeast(0)
-            }
-
-            IOSGroupedCard(modifier = Modifier.padding(bottom = 12.dp)) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(IOSTeal),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Notifications,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Mindful Breath Gate",
-                                    color = Color.White,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = "Deep breath meditation before Instagram opens",
-                                    color = Color(0xFF8E8E93),
-                                    fontSize = 12.sp
-                                )
-                            }
-                        }
-                        Text(
-                            text = if (settings.showBreathGate && settings.breathGateSeconds > 0) "${settings.breathGateSeconds}s" else "Off",
-                            color = if (settings.showBreathGate && settings.breathGateSeconds > 0) Color.White else Color(0xFF8E8E93),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    CupertinoOptionWheelPicker<Int>(
-                        options = breathOptions,
-                        selectedIndex = selectedBreathIndex,
-                        onOptionSelected = { _, sec: Int ->
-                            scope.launch {
-                                if (sec == 0) {
-                                    repository.setBreathGate(false, 0)
-                                } else {
-                                    repository.setBreathGate(true, sec)
-                                }
-                            }
-                        },
-                        labelProvider = { sec: Int ->
-                            if (sec == 0) "Off" else "${sec} seconds"
-                        },
-                        visibleItemsCount = 3,
-                        itemHeight = 38.dp
-                    )
-                }
-            }
-
-            // 4. Effort Friction Challenge
-            val frictionOptions = remember { listOf(0, 10, 15, 20, 30, 50) }
-            val currentFrictionVal = if (settings.effortFrictionEnabled) settings.wordChallengeCount else 0
-            val selectedFrictionIndex = remember(currentFrictionVal) {
-                frictionOptions.indexOf(currentFrictionVal).takeIf { it >= 0 }
-                    ?: frictionOptions.indexOfFirst { it >= currentFrictionVal }.coerceAtLeast(0)
-            }
-
-            IOSGroupedCard(modifier = Modifier.padding(bottom = 12.dp)) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(IOSPurple),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Lock,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Effort Friction Challenge",
-                                    color = Color.White,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = "Type a mindful reflection phrase before unlock",
-                                    color = Color(0xFF8E8E93),
-                                    fontSize = 12.sp
-                                )
-                            }
-                        }
-                        Text(
-                            text = if (settings.effortFrictionEnabled && settings.wordChallengeCount > 0) "${settings.wordChallengeCount} words" else "Off",
-                            color = if (settings.effortFrictionEnabled && settings.wordChallengeCount > 0) Color.White else Color(0xFF8E8E93),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    CupertinoOptionWheelPicker<Int>(
-                        options = frictionOptions,
-                        selectedIndex = selectedFrictionIndex,
-                        onOptionSelected = { _, words: Int ->
-                            scope.launch {
-                                if (words == 0) {
-                                    repository.setEffortFriction(false, 0)
-                                } else {
-                                    repository.setEffortFriction(true, words)
-                                }
-                            }
-                        },
-                        labelProvider = { words: Int ->
-                            if (words == 0) "Off" else "$words words"
-                        },
-                        visibleItemsCount = 3,
-                        itemHeight = 38.dp
-                    )
-                }
+            IOSGroupedCard {
+                IOSSettingsRow(
+                    title = "Mindful Breath Gate",
+                    subtitle = "Deep breath meditation before Instagram opens",
+                    icon = Icons.Default.Notifications,
+                    iconBgColor = IOSTeal,
+                    trailingText = if (settings.showBreathGate && settings.breathGateSeconds > 0) "${settings.breathGateSeconds}s" else "Off",
+                    onClick = { showBreathModal = true }
+                )
+                IOSSettingsRow(
+                    title = "Effort Friction Challenge",
+                    subtitle = "Type a mindful reflection phrase before unlock",
+                    icon = Icons.Default.Lock,
+                    iconBgColor = IOSPurple,
+                    trailingText = if (settings.effortFrictionEnabled && settings.wordChallengeCount > 0) "${settings.wordChallengeCount} words" else "Off",
+                    onClick = { showFrictionModal = true },
+                    showDivider = false
+                )
             }
         }
 
@@ -1131,7 +991,284 @@ private fun GuardrailsSubpage(
             Spacer(modifier = Modifier.height(40.dp))
         }
     }
+
+    if (showDailyLimitModal) {
+        val dailyLimitOptions = remember { listOf(0, 15, 30, 45, 60, 90, 120, 180, 240) }
+        val selectedDailyIndex = remember(settings.dailyLimitMinutes) {
+            dailyLimitOptions.indexOf(settings.dailyLimitMinutes).takeIf { it >= 0 }
+                ?: dailyLimitOptions.indexOfFirst { it >= settings.dailyLimitMinutes }.coerceAtLeast(0)
+        }
+        WheelPickerModalDialog(
+            title = "Daily Limit Timer",
+            subtitle = "Choose maximum daily allowed usage time before Instagram locks",
+            options = dailyLimitOptions,
+            initialIndex = selectedDailyIndex,
+            onDismiss = { showDailyLimitModal = false },
+            onConfirm = { mins -> scope.launch { repository.setDailyLimitMinutes(mins) } },
+            labelProvider = { mins ->
+                when {
+                    mins == 0 -> "Off"
+                    mins < 60 -> "$mins min"
+                    mins % 60 == 0 -> "${mins / 60} hour" + (if (mins / 60 > 1) "s" else "")
+                    else -> "${mins / 60}h ${mins % 60}m"
+                }
+            }
+        )
+    }
+
+    if (showCooldownModal) {
+        val cooldownOptions = remember { listOf(0, 1, 2, 5, 10, 15, 30, 45, 60) }
+        val selectedCooldownIndex = remember(settings.cooldownMinutes) {
+            cooldownOptions.indexOf(settings.cooldownMinutes).takeIf { it >= 0 }
+                ?: cooldownOptions.indexOfFirst { it >= settings.cooldownMinutes }.coerceAtLeast(0)
+        }
+        WheelPickerModalDialog(
+            title = "Cooldown Between Sessions",
+            subtitle = "Choose mandatory resting period after reaching limits",
+            options = cooldownOptions,
+            initialIndex = selectedCooldownIndex,
+            onDismiss = { showCooldownModal = false },
+            onConfirm = { mins -> scope.launch { repository.setCooldownMinutes(mins) } },
+            labelProvider = { mins ->
+                when {
+                    mins == 0 -> "Off"
+                    mins < 60 -> "$mins min"
+                    else -> "1 hour"
+                }
+            }
+        )
+    }
+
+    if (showBreathModal) {
+        val breathOptions = remember { listOf(0, 3, 5, 10, 15, 20, 30, 60) }
+        val currentBreathVal = if (settings.showBreathGate) settings.breathGateSeconds else 0
+        val selectedBreathIndex = remember(currentBreathVal) {
+            breathOptions.indexOf(currentBreathVal).takeIf { it >= 0 }
+                ?: breathOptions.indexOfFirst { it >= currentBreathVal }.coerceAtLeast(0)
+        }
+        WheelPickerModalDialog(
+            title = "Mindful Breath Gate",
+            subtitle = "Choose breath pause length before opening Instagram",
+            options = breathOptions,
+            initialIndex = selectedBreathIndex,
+            onDismiss = { showBreathModal = false },
+            onConfirm = { sec ->
+                scope.launch {
+                    if (sec == 0) repository.setBreathGate(false, 0)
+                    else repository.setBreathGate(true, sec)
+                }
+            },
+            labelProvider = { sec -> if (sec == 0) "Off" else "$sec seconds" }
+        )
+    }
+
+    if (showFrictionModal) {
+        val frictionOptions = remember { listOf(0, 10, 15, 20, 30, 50) }
+        val currentFrictionVal = if (settings.effortFrictionEnabled) settings.wordChallengeCount else 0
+        val selectedFrictionIndex = remember(currentFrictionVal) {
+            frictionOptions.indexOf(currentFrictionVal).takeIf { it >= 0 }
+                ?: frictionOptions.indexOfFirst { it >= currentFrictionVal }.coerceAtLeast(0)
+        }
+        WheelPickerModalDialog(
+            title = "Effort Friction Challenge",
+            subtitle = "Choose phrase word challenge length to bypass lock",
+            options = frictionOptions,
+            initialIndex = selectedFrictionIndex,
+            onDismiss = { showFrictionModal = false },
+            onConfirm = { words ->
+                scope.launch {
+                    if (words == 0) repository.setEffortFriction(false, 0)
+                    else repository.setEffortFriction(true, words)
+                }
+            },
+            labelProvider = { words -> if (words == 0) "Off" else "$words words" }
+        )
+    }
+
+    if (showDailyLimitExhaustedDialog) {
+        AlertDialog(
+            onDismissRequest = { showDailyLimitExhaustedDialog = false },
+            containerColor = Color(0xFF1C1C1E),
+            title = {
+                Text(
+                    text = "Daily Limit Exhausted",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Your limit is already exhausted, you cannot change this setting today.",
+                        color = Color(0xFF8E8E93),
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp
+                    )
+                    if (settings.dailyLimitAdClaimedDate == todayStr) {
+                        Text(
+                            text = "Daily +5m extension already claimed today.",
+                            color = IOSOrange,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    } else {
+                        Text(
+                            text = "You may watch a voluntary sponsored ad to extend your daily limit by 5 minutes (once today).",
+                            color = IOSBlue,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                if (settings.dailyLimitAdClaimedDate != todayStr) {
+                    Button(
+                        onClick = {
+                            showDailyLimitExhaustedDialog = false
+                            scope.launch {
+                                repository.extendDailyLimit5Minutes(todayStr)
+                            }
+                            onWatchAd()
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.White,
+                            contentColor = Color.Black
+                        ),
+                        shape = RoundedCornerShape(20.dp)
+                    ) {
+                        Text("Watch Ad (+5 min)", fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { showDailyLimitExhaustedDialog = false },
+                    border = BorderStroke(1.dp, Color(0xFF3A3A3C)),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                ) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+
+    if (showCooldownActiveDialog) {
+        AlertDialog(
+            onDismissRequest = { showCooldownActiveDialog = false },
+            containerColor = Color(0xFF1C1C1E),
+            title = {
+                Text(
+                    text = "Cooldown Active",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Text(
+                    text = "A mandatory resting pause between sessions is currently active. You cannot change this setting until the active cooldown expires.",
+                    color = Color(0xFF8E8E93),
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showCooldownActiveDialog = false },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.White,
+                        contentColor = Color.Black
+                    ),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Text("OK", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
 }
+
+@Composable
+private fun <T> WheelPickerModalDialog(
+    title: String,
+    subtitle: String,
+    options: List<T>,
+    initialIndex: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (T) -> Unit,
+    labelProvider: (T) -> String
+) {
+    var selectedIdx by remember { mutableStateOf(initialIndex.coerceIn(0, options.lastIndex)) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF1C1C1E),
+        title = {
+            Column {
+                Text(
+                    text = title,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = subtitle,
+                    color = Color(0xFF8E8E93),
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp
+                )
+            }
+        },
+        text = {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                CupertinoOptionWheelPicker(
+                    options = options,
+                    selectedIndex = selectedIdx,
+                    onOptionSelected = { idx, _ -> selectedIdx = idx },
+                    labelProvider = labelProvider,
+                    visibleItemsCount = 3,
+                    itemHeight = 40.dp,
+                    showGradientShadows = false
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onConfirm(options[selectedIdx])
+                    onDismiss()
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.White,
+                    contentColor = Color.Black
+                ),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Text("Save", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            OutlinedButton(
+                onClick = onDismiss,
+                border = BorderStroke(1.dp, Color(0xFF3A3A3C)),
+                shape = RoundedCornerShape(20.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = Color.White
+                )
+            ) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
 
 // ─── GHOST MODE SUBPAGE ─────────────────────────────────────────────────────
 
@@ -1399,6 +1536,129 @@ private fun NotificationsSubpage(
                     iconBgColor = IOSBlue,
                     checked = settings.notifyPersistent,
                     onCheckedChange = { scope.launch { repository.setNotifyPersistent(it) } },
+                    showDivider = false
+                )
+            }
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(40.dp))
+        }
+    }
+}
+
+// ─── LICENSES SUBPAGE ────────────────────────────────────────────────────────
+
+@Composable
+private fun LicensesSubpage() {
+    val context = LocalContext.current
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp)
+    ) {
+        item {
+            IOSSectionTitle(title = "FOCUSGRAM LICENSE")
+            IOSGroupedCard {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "GNU Affero General Public License v3.0 (AGPL-3.0)",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "FocusGram is 100% free and open-source software. You are entitled to inspect, modify, study, and redistribute the application code under the terms of AGPL-3.0.\n\n" +
+                                "Core Privacy Guarantees:\n" +
+                                "• 100% Client-side execution\n" +
+                                "• Zero analytics trackers, telemetry, or profiling\n" +
+                                "• Zero proprietary ad SDKs or background tracking",
+                        color = Color(0xFF8E8E93),
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp
+                    )
+                }
+            }
+        }
+
+        item {
+            IOSSectionTitle(title = "DEVELOPER")
+            IOSGroupedCard {
+                IOSSettingsRow(
+                    title = "Ujwal (@Ujwal223)",
+                    subtitle = "Creator & maintainer of FocusGram · Independent open-source developer",
+                    icon = Icons.Default.Person,
+                    iconUrl = "https://avatars.githubusercontent.com/u/74640103?s=120",
+                    iconBgColor = IOSPurple,
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Ujwal223"))
+                        context.startActivity(intent)
+                    },
+                    showDivider = false
+                )
+            }
+        }
+
+        item {
+            IOSSectionTitle(title = "THIRD-PARTY OPEN SOURCE CREDITS")
+            IOSGroupedCard {
+                IOSSettingsRow(
+                    title = "Mozilla GeckoView",
+                    subtitle = "Mozilla Public License 2.0 · Independent privacy-focused Android browser engine",
+                    icon = Icons.Default.Security,
+                    iconUrl = "https://avatars.githubusercontent.com/u/131524?s=120",
+                    iconBgColor = IOSOrange,
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://mozilla.github.io/geckoview/"))
+                        context.startActivity(intent)
+                    }
+                )
+                IOSSettingsRow(
+                    title = "uBlock Origin",
+                    subtitle = "GPLv3 · High-performance content filtering and declarative rule evaluation",
+                    icon = Icons.Default.Block,
+                    iconUrl = "https://avatars.githubusercontent.com/u/585534?s=120",
+                    iconBgColor = IOSRed,
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/gorhill/uBlock"))
+                        context.startActivity(intent)
+                    }
+                )
+                IOSSettingsRow(
+                    title = "Ghostify",
+                    subtitle = "MIT License · Groundbreaking research & telemetry suppression architecture",
+                    icon = Icons.Default.VisibilityOff,
+                    iconUrl = "https://avatars.githubusercontent.com/u/131580970?s=120",
+                    iconBgColor = IOSPurple,
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Hendrizzzz/Ghostify"))
+                        context.startActivity(intent)
+                    }
+                )
+                IOSSettingsRow(
+                    title = "Android Jetpack & Compose",
+                    subtitle = "Apache 2.0 · Declarative UI framework, Navigation, and Lifecycle libraries",
+                    icon = Icons.Default.Settings,
+                    iconUrl = "https://avatars.githubusercontent.com/u/32689599?s=120",
+                    iconBgColor = IOSGreen,
+                    onClick = {}
+                )
+                IOSSettingsRow(
+                    title = "Room Database & SQLite",
+                    subtitle = "Apache 2.0 · On-device SQLite persistence and screen time tracking",
+                    icon = Icons.Default.Timer,
+                    iconUrl = "https://avatars.githubusercontent.com/u/1715421?s=120",
+                    iconBgColor = IOSTeal,
+                    onClick = {}
+                )
+                IOSSettingsRow(
+                    title = "Jetpack DataStore & Coroutines",
+                    subtitle = "Apache 2.0 · Reactive asynchronous persistence and state management",
+                    icon = Icons.Default.Star,
+                    iconBgColor = IOSBlue,
+                    onClick = {},
                     showDivider = false
                 )
             }

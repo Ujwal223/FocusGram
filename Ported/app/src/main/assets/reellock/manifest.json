@@ -1,0 +1,13 @@
+{
+  "manifest_version": 2,
+  "name": "FocusGram Reel Lock",
+  "version": "1.0",
+  "browser_specific_settings": { "gecko": { "id": "reellock@focusgram.app" } },
+  "permissions": ["webRequest", "webRequestBlocking", "*://www.instagram.com/*"],
+  "background": { "scripts": ["bg.js"] },
+  "content_scripts": [{
+    "matches": ["*://www.instagram.com/*"],
+    "js": ["reellock.js"],
+    "run_at": "document_start"
+  }]
+}

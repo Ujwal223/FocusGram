@@ -45,7 +45,21 @@ const BLOCKED_URL_PATTERNS = [
     "*://*.googleadservices.com/*",
     "*://*.googlesyndication.com/*",
     "*://*.adservice.google.*/*",
-    "*://*.cdninstagram.com/v/t51.2885-15/e35/*_ad*"
+    "*://*.cdninstagram.com/v/t51.2885-15/e35/*_ad*",
+    "*://*.instagram.com/api/v1/clips/home/ads*",
+    "*://*.instagram.com/api/v1/clips/ads*",
+    "*://*.instagram.com/api/v1/clips/stream/ads*",
+    "*://*.instagram.com/api/v1/ads/*",
+    "*://*.instagram.com/api/v1/feed/saved/ads*",
+    "*://*.instagram.com/api/v1/stories/tray/ads*",
+    "*://*.instagram.com/api/v1/feed/timeline/ads*"
+];
+
+const GHOST_BLOCKED_URL_PATTERNS = [
+    "*://*.instagram.com/api/v1/stories/reel/seen*",
+    "*://*.instagram.com/api/v1/direct_v2/threads/*/items/*/seen*",
+    "*://*.instagram.com/api/v1/direct_v2/threads/broadcast/typing*",
+    "*://*.instagram.com/api/v1/direct_v2/threads/typing*"
 ];
 
 // Network-level interception: ONLY active when noAds is enabled in settings
@@ -63,6 +77,29 @@ if (typeof browser !== 'undefined' && browser.webRequest && browser.webRequest.o
         ["blocking"]
     );
     console.log('[Content Blocker] Network interception active across', BLOCKED_URL_PATTERNS.length, 'patterns.');
+
+    // Ghost Mode WebRequest Level Interception
+    browser.webRequest.onBeforeRequest.addListener(
+        function (details) {
+            if (!cachedSettings.ghostModeEnabled) return { cancel: false };
+            const url = (details.url || '').toLowerCase();
+            if (cachedSettings.ghostHideStorySeen && url.includes('stories/reel/seen')) {
+                console.log('[Ghost Mode] Blocked story seen network call:', details.url);
+                return { cancel: true };
+            }
+            if (cachedSettings.ghostHideDirectSeen && url.includes('/seen')) {
+                console.log('[Ghost Mode] Blocked direct seen network call:', details.url);
+                return { cancel: true };
+            }
+            if (cachedSettings.ghostHideTypingIndicator && url.includes('/typing')) {
+                console.log('[Ghost Mode] Blocked direct typing network call:', details.url);
+                return { cancel: true };
+            }
+            return { cancel: false };
+        },
+        { urls: GHOST_BLOCKED_URL_PATTERNS },
+        ["blocking"]
+    );
 }
 
 // Establish native messaging port with FocusGram Android host

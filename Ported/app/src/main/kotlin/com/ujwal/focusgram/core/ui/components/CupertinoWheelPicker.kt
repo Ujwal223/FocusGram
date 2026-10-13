@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.os.VibratorManager
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -61,7 +62,8 @@ fun CupertinoWheelPicker(
     modifier: Modifier = Modifier,
     visibleItemsCount: Int = 5,
     itemHeight: Dp = 46.dp,
-    label: String = "min"
+    label: String = "min",
+    showGradientShadows: Boolean = true
 ) {
     val view = LocalView.current
     val density = LocalDensity.current
@@ -95,7 +97,7 @@ fun CupertinoWheelPicker(
                             HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING
                         )
                         if (!performed) {
-                            val vibrator = view.context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                            val vibrator = getVibrator(view.context)
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                                 vibrator?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
                             } else {
@@ -192,39 +194,41 @@ fun CupertinoWheelPicker(
             }
         }
 
-        // Top cylinder gradient shadow (fades upper tilted items into pure black)
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .height(itemHeight * 1.5f)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            PureBlack,
-                            PureBlack.copy(alpha = 0.85f),
-                            Color.Transparent
+        if (showGradientShadows) {
+            // Top cylinder gradient shadow (fades upper tilted items into pure black)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .height(itemHeight * 1.5f)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                PureBlack,
+                                PureBlack.copy(alpha = 0.85f),
+                                Color.Transparent
+                            )
                         )
                     )
-                )
-        )
+            )
 
-        // Bottom cylinder gradient shadow (fades lower tilted items into pure black)
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(itemHeight * 1.5f)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            PureBlack.copy(alpha = 0.85f),
-                            PureBlack
+            // Bottom cylinder gradient shadow (fades lower tilted items into pure black)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(itemHeight * 1.5f)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                PureBlack.copy(alpha = 0.85f),
+                                PureBlack
+                            )
                         )
                     )
-                )
-        )
+            )
+        }
     }
 }
 
@@ -242,7 +246,8 @@ fun <T> CupertinoOptionWheelPicker(
     modifier: Modifier = Modifier,
     labelProvider: (T) -> String = { it.toString() },
     visibleItemsCount: Int = 3,
-    itemHeight: Dp = 38.dp
+    itemHeight: Dp = 38.dp,
+    showGradientShadows: Boolean = true
 ) {
     val view = LocalView.current
     val density = LocalDensity.current
@@ -274,7 +279,7 @@ fun <T> CupertinoOptionWheelPicker(
                             HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING
                         )
                         if (!performed) {
-                            val vibrator = view.context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                            val vibrator = getVibrator(view.context)
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                                 vibrator?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
                             } else {
@@ -357,39 +362,49 @@ fun <T> CupertinoOptionWheelPicker(
             }
         }
 
-        // Top cylinder shadow
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .height(itemHeight * 0.9f)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            PureBlack,
-                            PureBlack.copy(alpha = 0.75f),
-                            Color.Transparent
+        if (showGradientShadows) {
+            // Top cylinder shadow
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .height(itemHeight * 0.9f)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                PureBlack,
+                                PureBlack.copy(alpha = 0.75f),
+                                Color.Transparent
+                            )
                         )
                     )
-                )
-        )
+            )
 
-        // Bottom cylinder shadow
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(itemHeight * 0.9f)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            PureBlack.copy(alpha = 0.75f),
-                            PureBlack
+            // Bottom cylinder shadow
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(itemHeight * 0.9f)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                PureBlack.copy(alpha = 0.75f),
+                                PureBlack
+                            )
                         )
                     )
-                )
-        )
+            )
+        }
     }
 }
 
+private fun getVibrator(context: Context): Vibrator? {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val vibratorManager = context.getSystemService(VibratorManager::class.java)
+        vibratorManager?.defaultVibrator
+    } else {
+        context.getSystemService(Vibrator::class.java)
+    }
+}

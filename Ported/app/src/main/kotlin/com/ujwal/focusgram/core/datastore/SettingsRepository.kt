@@ -11,7 +11,9 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.ujwal.focusgram.core.model.FocusSettings
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.runBlocking
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "focusgram_settings")
 
@@ -22,6 +24,8 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
  */
 class SettingsRepository(private val context: Context) {
 
+    fun getSettingsSync(): FocusSettings = runBlocking { settingsFlow.first() }
+
     val settingsFlow: Flow<FocusSettings> = context.dataStore.data.map { prefs ->
         FocusSettings(
             noAds = prefs[KEY_NO_ADS] ?: true,
@@ -31,6 +35,7 @@ class SettingsRepository(private val context: Context) {
             noDMs = prefs[KEY_NO_DMS] ?: false,
             blurExplore = prefs[KEY_BLUR_EXPLORE] ?: true,
             blurReels = prefs[KEY_BLUR_REELS] ?: false,
+            blurFeed = prefs[KEY_BLUR_FEED] ?: false,
             unblurMode = prefs[KEY_UNBLUR_MODE] ?: if (prefs[KEY_REQUIRE_LONG_PRESS] == true && prefs[KEY_TAP_TO_UNBLUR] == false) "hold" else "tap",
             tapToUnblur = (prefs[KEY_UNBLUR_MODE] ?: if (prefs[KEY_REQUIRE_LONG_PRESS] == true && prefs[KEY_TAP_TO_UNBLUR] == false) "hold" else "tap") == "tap",
             requireLongPress = (prefs[KEY_UNBLUR_MODE] ?: if (prefs[KEY_REQUIRE_LONG_PRESS] == true && prefs[KEY_TAP_TO_UNBLUR] == false) "hold" else "tap") == "hold",
@@ -40,6 +45,7 @@ class SettingsRepository(private val context: Context) {
             hideShopTab = prefs[KEY_HIDE_SHOP_TAB] ?: true,
             minimalModeEnabled = prefs[KEY_MINIMAL_MODE_ENABLED] ?: false,
             hideFeedPosts = prefs[KEY_HIDE_FEED_POSTS] ?: false,
+            blockDmReelsSwiping = prefs[KEY_BLOCK_DM_REELS_SWIPING] ?: true,
 
             showBreathGate = prefs[KEY_SHOW_BREATH_GATE] ?: true,
             breathGateSeconds = prefs[KEY_BREATH_GATE_SECONDS] ?: 10,
@@ -48,6 +54,7 @@ class SettingsRepository(private val context: Context) {
             effortFrictionEnabled = prefs[KEY_EFFORT_FRICTION_ENABLED] ?: true,
             cooldownMinutes = prefs[KEY_COOLDOWN_MINUTES] ?: 15,
             dailyLimitMinutes = prefs[KEY_DAILY_LIMIT_MINUTES] ?: 60,
+            dailyLimitAdClaimedDate = prefs[KEY_DAILY_LIMIT_AD_DATE] ?: "",
 
             grayscaleEnabled = prefs[KEY_GRAYSCALE_ENABLED] ?: false,
             smoothScroll120Hz = prefs[KEY_SMOOTH_SCROLL_120HZ] ?: true,
@@ -96,6 +103,7 @@ class SettingsRepository(private val context: Context) {
     suspend fun setNoDMs(enabled: Boolean) = setBoolean(KEY_NO_DMS, enabled)
     suspend fun setBlurExplore(enabled: Boolean) = setBoolean(KEY_BLUR_EXPLORE, enabled)
     suspend fun setBlurReels(enabled: Boolean) = setBoolean(KEY_BLUR_REELS, enabled)
+    suspend fun setBlurFeed(enabled: Boolean) = setBoolean(KEY_BLUR_FEED, enabled)
     suspend fun setTapToUnblur(enabled: Boolean) = setBoolean(KEY_TAP_TO_UNBLUR, enabled)
     suspend fun setRequireLongPress(enabled: Boolean) = setBoolean(KEY_REQUIRE_LONG_PRESS, enabled)
     suspend fun setUnblurMode(mode: String) {
@@ -111,6 +119,7 @@ class SettingsRepository(private val context: Context) {
     suspend fun setHideShopTab(enabled: Boolean) = setBoolean(KEY_HIDE_SHOP_TAB, enabled)
     suspend fun setMinimalMode(enabled: Boolean) = setBoolean(KEY_MINIMAL_MODE_ENABLED, enabled)
     suspend fun setHideFeedPosts(enabled: Boolean) = setBoolean(KEY_HIDE_FEED_POSTS, enabled)
+    suspend fun setBlockDmReelsSwiping(enabled: Boolean) = setBoolean(KEY_BLOCK_DM_REELS_SWIPING, enabled)
 
     suspend fun setBreathGate(enabled: Boolean, seconds: Int = 10) {
         context.dataStore.edit { prefs ->
@@ -131,6 +140,14 @@ class SettingsRepository(private val context: Context) {
     suspend fun setSmoothScroll120Hz(enabled: Boolean) = setBoolean(KEY_SMOOTH_SCROLL_120HZ, enabled)
     suspend fun setCooldownMinutes(minutes: Int) = setInt(KEY_COOLDOWN_MINUTES, minutes)
     suspend fun setDailyLimitMinutes(minutes: Int) = setInt(KEY_DAILY_LIMIT_MINUTES, minutes)
+
+    suspend fun extendDailyLimit5Minutes(today: String) {
+        context.dataStore.edit { prefs ->
+            val current = prefs[KEY_DAILY_LIMIT_MINUTES] ?: 60
+            prefs[KEY_DAILY_LIMIT_MINUTES] = current + 5
+            prefs[KEY_DAILY_LIMIT_AD_DATE] = today
+        }
+    }
 
     suspend fun setStartupPage(page: String) = setString(KEY_STARTUP_PAGE, page)
     suspend fun setVideoDownloadEnabled(enabled: Boolean) = setBoolean(KEY_VIDEO_DOWNLOAD_ENABLED, enabled)
@@ -226,6 +243,7 @@ class SettingsRepository(private val context: Context) {
         val KEY_NO_DMS = booleanPreferencesKey("no_dms")
         val KEY_BLUR_EXPLORE = booleanPreferencesKey("set_blur_explore")
         val KEY_BLUR_REELS = booleanPreferencesKey("set_blur_reels")
+        val KEY_BLUR_FEED = booleanPreferencesKey("set_blur_feed")
         val KEY_TAP_TO_UNBLUR = booleanPreferencesKey("set_tap_to_unblur")
         val KEY_REQUIRE_LONG_PRESS = booleanPreferencesKey("set_require_long_press")
         val KEY_UNBLUR_MODE = stringPreferencesKey("unblur_mode")
@@ -235,6 +253,7 @@ class SettingsRepository(private val context: Context) {
         val KEY_HIDE_SHOP_TAB = booleanPreferencesKey("hide_shop_tab")
         val KEY_MINIMAL_MODE_ENABLED = booleanPreferencesKey("minimal_mode_enabled")
         val KEY_HIDE_FEED_POSTS = booleanPreferencesKey("content_posts")
+        val KEY_BLOCK_DM_REELS_SWIPING = booleanPreferencesKey("block_dm_reels_swiping")
 
         val KEY_SHOW_BREATH_GATE = booleanPreferencesKey("set_show_breath_gate")
         val KEY_BREATH_GATE_SECONDS = intPreferencesKey("breath_gate_seconds")
@@ -243,6 +262,7 @@ class SettingsRepository(private val context: Context) {
         val KEY_EFFORT_FRICTION_ENABLED = booleanPreferencesKey("effort_friction_enabled")
         val KEY_COOLDOWN_MINUTES = intPreferencesKey("cooldown_minutes")
         val KEY_DAILY_LIMIT_MINUTES = intPreferencesKey("daily_limit_minutes")
+        val KEY_DAILY_LIMIT_AD_DATE = stringPreferencesKey("daily_limit_ad_date")
 
         val KEY_GRAYSCALE_ENABLED = booleanPreferencesKey("grayscale_enabled")
         val KEY_SMOOTH_SCROLL_120HZ = booleanPreferencesKey("smooth_scroll_120hz")

@@ -54,6 +54,18 @@ class ScreenTimeService : Service() {
                 sessionType = if (isReelsSession) "REELS" else "INSTAGRAM"
                 startTracking()
             }
+            ACTION_UPDATE_ROUTE -> {
+                val wasReels = isReelsSession
+                isReelsSession = intent.getBooleanExtra(EXTRA_IS_REELS, false)
+                sessionType = if (isReelsSession) "REELS" else "INSTAGRAM"
+                if (wasReels != isReelsSession && trackingJob?.isActive == true) {
+                    val minutes = sessionSeconds / 60
+                    val secs = sessionSeconds % 60
+                    val timeStr = String.format("%02d:%02d", minutes, secs)
+                    val title = if (isReelsSession) "Reels Focus: $timeStr" else "Instagram Focus: $timeStr"
+                    updateNotification(title, "Discipline active. Stay intentional.")
+                }
+            }
             ACTION_STOP -> {
                 stopTracking()
                 stopSelf()
@@ -93,11 +105,8 @@ class ScreenTimeService : Service() {
                     updateNotification(title, "Discipline active. Stay intentional.")
                 }
 
-                // Every 60 seconds: Persist screen time & drain credits
+                // Every 60 seconds: Drain credits & check daily limits
                 if (secondsAccumulator >= 60) {
-                    val today = dateFormat.format(Date())
-                    db.screenTimeDao().incrementSeconds(today, 60)
-
                     // Drain credit if applicable
                     if (isReelsSession) {
                         settingsRepo.deductReelsMinute()
@@ -107,6 +116,7 @@ class ScreenTimeService : Service() {
 
                     // Check daily limit
                     val settings = settingsRepo.settingsFlow.first()
+                    val today = dateFormat.format(Date())
                     val todayRecord = db.screenTimeDao().getForDateSync(today)
                     val todayTotalSeconds = todayRecord?.seconds ?: 0
                     val dailyLimitSeconds = settings.dailyLimitMinutes * 60
@@ -136,12 +146,6 @@ class ScreenTimeService : Service() {
             serviceScope.launch {
                 try {
                     val app = FocusGramApp.instance
-                    val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-                    // Save remaining seconds
-                    val remainingSeconds = duration % 60
-                    if (remainingSeconds > 0) {
-                        app.database.screenTimeDao().incrementSeconds(today, remainingSeconds)
-                    }
                     // Insert completed session record
                     app.database.sessionRecordDao().insert(
                         SessionRecord(
@@ -215,6 +219,7 @@ class ScreenTimeService : Service() {
 
         const val ACTION_START = "com.ujwal.focusgram.action.START_SESSION"
         const val ACTION_STOP = "com.ujwal.focusgram.action.STOP_SESSION"
+        const val ACTION_UPDATE_ROUTE = "com.ujwal.focusgram.action.UPDATE_ROUTE"
         const val ACTION_LIMIT_EXCEEDED = "com.ujwal.focusgram.action.LIMIT_EXCEEDED"
         const val EXTRA_IS_REELS = "extra_is_reels"
 
@@ -227,6 +232,18 @@ class ScreenTimeService : Service() {
                 context.startForegroundService(intent)
             } else {
                 context.startService(intent)
+            }
+        }
+
+        fun updateRoute(context: Context, isReels: Boolean) {
+            val intent = Intent(context, ScreenTimeService::class.java).apply {
+                action = ACTION_UPDATE_ROUTE
+                putExtra(EXTRA_IS_REELS, isReels)
+            }
+            try {
+                context.startService(intent)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to send route update to ScreenTimeService: ${e.message}")
             }
         }
 

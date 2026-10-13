@@ -20,13 +20,20 @@ class FocusSettingsTest {
         assertTrue(settings.noAds)
         // Video autoplay default blocked
         assertTrue(settings.noAutoplay)
-        // Explore blurred by default
+        // Explore blurred by default, Feed and Reels unblurred by default
         assertTrue(settings.blurExplore)
+        assertFalse(settings.blurReels)
+        assertFalse(settings.blurFeed)
+        assertEquals("tap", settings.unblurMode)
+        assertTrue(settings.tapToUnblur)
+        assertFalse(settings.requireLongPress)
         // Suggested posts false by default to prevent feed blanking after ~9 posts
         assertFalse(settings.hideSuggestedPosts)
         // Breathing gate enabled by default
         assertTrue(settings.showBreathGate)
         assertEquals(10, settings.breathGateSeconds)
+        // Block Reels swiping in DMs enabled by default
+        assertTrue(settings.blockDmReelsSwiping)
         // Initial user level
         assertEquals(1, settings.userLevel)
         assertEquals(0, settings.userXP)

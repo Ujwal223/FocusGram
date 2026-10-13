@@ -45,7 +45,7 @@ enum class IslandMode {
 
             return when {
                 path.startsWith("/accounts/") || path.startsWith("/login") || path.startsWith("/signup") -> HIDDEN
-                path.startsWith("/direct/t/") -> HIDDEN
+                path.startsWith("/direct") -> HIDDEN
                 path.contains("/comments") -> HIDDEN
                 path.startsWith("/stories/") -> HIDDEN
                 path.startsWith("/create") -> HIDDEN

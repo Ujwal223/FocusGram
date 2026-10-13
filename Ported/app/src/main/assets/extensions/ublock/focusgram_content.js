@@ -47,6 +47,10 @@
         noStories: false,
         noReels: false,
         blurExplore: false,
+        blurReels: false,
+        blurFeed: false,
+        unblurMode: 'tap',
+        tapToUnblur: true,
         hideLikeCounts: false,
         hideFollowerCounts: false,
         hideSuggestedPosts: false,
@@ -470,18 +474,23 @@
     }
 
     function syncGhostSettings() {
-        const updateScript = document.createElement('script');
-        updateScript.textContent = `
-            if (window.__focusgramGhostSettings) {
-                window.__focusgramGhostSettings.enabled = ${currentSettings.ghostModeEnabled};
-                window.__focusgramGhostSettings.hideStorySeen = ${currentSettings.ghostHideStorySeen};
-                window.__focusgramGhostSettings.hideDirectSeen = ${currentSettings.ghostHideDirectSeen};
-                window.__focusgramGhostSettings.hideTyping = ${currentSettings.ghostHideTypingIndicator};
+        const isGhostActive = !!currentSettings.ghostModeEnabled;
+        window.postMessage({
+            type: "GHOSTIFY_SETTINGS_UPDATE",
+            source: "GHOSTIFY_EXTENSION",
+            settings: {
+                igTyping: isGhostActive && !!currentSettings.ghostHideTypingIndicator,
+                igSeen: isGhostActive && !!currentSettings.ghostHideDirectSeen,
+                igStory: isGhostActive && !!currentSettings.ghostHideStorySeen
             }
-        `;
-        (document.head || document.documentElement).appendChild(updateScript);
-        updateScript.remove();
+        }, "*");
     }
+
+    window.addEventListener("message", (event) => {
+        if (event.data && event.data.type === "GHOSTIFY_SETTINGS_REQUEST") {
+            syncGhostSettings();
+        }
+    });
 
     // --- 2. BOTTOM NAVBAR TRIMMING & DYNAMIC MARGINS ---
     const STYLE_ID = 'focusgram-ui-guardrails-style';
@@ -727,61 +736,83 @@
             `;
         }
 
-        if (currentSettings.blurExplore) {
+        if (currentSettings.blurFeed) {
             css += `
-                main a[href*="/p/"] img,
-                main a[href*="/reel/"] img,
-                div[style*="grid"] img {
-                    filter: blur(24px) !important;
-                    transition: filter 0.2s ease-in-out !important;
+                /* Feed Carousel Slides & Single Post Media - ONLY blur leaf media elements, NEVER parent wrappers! */
+                html[data-fg-feed] article img:not(header img):not([alt*="profile" i]):not([data-fg-reveal]):not(.fg-unblurred),
+                html[data-fg-feed] article video:not([data-fg-reveal]):not(.fg-unblurred),
+                html[data-fg-feed] article canvas:not([data-fg-reveal]):not(.fg-unblurred) {
+                    filter: blur(28px) !important;
+                    transition: filter 0.25s ease-in-out !important;
                 }
-                .fg-unblurred,
-                .fg-unblurred img,
-                a.fg-unblurred img {
+
+                /* Preserve feed header avatars unblurred */
+                html[data-fg-feed] article header img,
+                html[data-fg-feed] article img[alt*="profile" i] {
                     filter: none !important;
                 }
             `;
-            if (currentSettings.requireLongPress || currentSettings.unblurMode === 'hold') {
-                css += `
-                    main a[href*="/p/"] img:active,
-                    main a[href*="/reel/"] img:active {
-                        filter: none !important;
-                    }
-                `;
-            }
+        }
+
+        if (currentSettings.blurExplore) {
+            css += `
+                main a[href*="/p/"]:not([data-fg-reveal]):not(.fg-unblurred) img,
+                main a[href*="/reel/"]:not([data-fg-reveal]):not(.fg-unblurred) img,
+                div[style*="grid"]:not([data-fg-reveal]):not(.fg-unblurred) img {
+                    filter: blur(24px) !important;
+                    transition: filter 0.2s ease-in-out !important;
+                }
+            `;
         }
 
         if (currentSettings.blurReels) {
             css += `
-                main div:has(> video),
-                article div:has(> video) {
+                main div:has(> video):not([data-fg-reveal]):not(.fg-unblurred),
+                article div:has(> video):not([data-fg-reveal]):not(.fg-unblurred),
+                div[data-fg-reel-container]:not([data-fg-reveal]):not(.fg-unblurred) video {
                     filter: blur(24px) !important;
                     transition: filter 0.2s ease-in-out !important;
                 }
-                .fg-unblurred,
-                .fg-unblurred video,
-                div.fg-unblurred video {
-                    filter: none !important;
-                }
             `;
-            if (currentSettings.requireLongPress || currentSettings.unblurMode === 'hold') {
-                css += `
-                    main div:has(> video):active,
-                    article div:has(> video):active {
-                        filter: none !important;
-                    }
-                `;
-            }
         }
+
+        css += `
+            [data-fg-reveal],
+            [data-fg-reveal] img,
+            [data-fg-reveal] video,
+            [data-fg-reveal] canvas,
+            [data-fg-reveal] div,
+            .fg-unblurred,
+            .fg-unblurred img,
+            .fg-unblurred video,
+            .fg-unblurred canvas,
+            .fg-unblurred div {
+                filter: none !important;
+            }
+        `;
 
         if (currentSettings.hideLikeCounts) {
             css += `
                 a[href*="/liked_by/"],
                 section a[href*="/liked_by/"],
                 span:has(> a[href*="/liked_by/"]),
-                article section:has(svg[aria-label="Like"]) + div span,
-                article section:has(svg[aria-label="Activity Feed"]) + div span,
-                article div:has(> a[href*="/liked_by/"]) {
+                div:has(> a[href*="/liked_by/"]),
+                section:has(svg[aria-label="Like"]) + div:not(:has(form)):not(:has(input)),
+                section:has(svg[aria-label="Unlike"]) + div:not(:has(form)):not(:has(input)),
+                section:has(svg[aria-label="Activity Feed"]) + div:not(:has(form)):not(:has(input)),
+                div[role="button"]:has(svg[aria-label="Like"]) + div span,
+                div[role="button"]:has(svg[aria-label="Unlike"]) + div span,
+                span[role="button"]:has(svg[aria-label="Like"]) + span,
+                span[role="button"]:has(svg[aria-label="Unlike"]) + span,
+                div[role="button"]:has(svg[aria-label="Like"]) span,
+                div[role="button"]:has(svg[aria-label="Unlike"]) span,
+                div:has(> span > svg[aria-label="Like"]) + div span,
+                div:has(> span > svg[aria-label="Unlike"]) + div span,
+                /* In Reels overlay: the count text right below the like heart icon */
+                div:has(> svg[aria-label="Like"]) + div,
+                div:has(> svg[aria-label="Unlike"]) + div,
+                div:has(> svg[aria-label="Like"]) ~ div,
+                div:has(> svg[aria-label="Unlike"]) ~ div {
                     display: none !important;
                 }
             `;
@@ -980,6 +1011,41 @@
             }
 
             if (!card) return;
+
+            // Check if this reel is an ad / sponsored
+            if (currentSettings.noAds !== false) {
+                const cardText = (card.textContent || '').toLowerCase();
+                const isSponsored = cardText.includes('sponsored') ||
+                                    cardText.includes('paid partnership') ||
+                                    cardText.includes('gesponsert') ||
+                                    cardText.includes('sponsorisé') ||
+                                    cardText.includes('publicidad') ||
+                                    cardText.includes('patrocinado') ||
+                                    cardText.includes('sponsorizzato') ||
+                                    !!card.querySelector('a[href*="/ads/"], a[href*="/ad_"], a[href*="/about/ads"], a[href*="ads.instagram.com"]') ||
+                                    !!card.querySelector('[aria-label*="Sponsored" i], [aria-label*="sponsored" i], [data-ad-preview]');
+
+                const hasAdCTA = !!card.querySelector('div[role="button"], a[role="button"]') &&
+                    ['learn more', 'shop now', 'install now', 'sign up', 'apply now', 'book now', 'download', 'order now', 'get offer', 'subscribe', 'contact us']
+                    .some(cta => cardText.includes(cta));
+
+                if (isSponsored || hasAdCTA) {
+                    card.setAttribute('data-fg-reel-ad', '1');
+                    card.style.setProperty('display', 'none', 'important');
+                    card.style.setProperty('height', '0px', 'important');
+                    card.style.setProperty('opacity', '0', 'important');
+                    card.style.setProperty('pointer-events', 'none', 'important');
+                    v.muted = true;
+                    try { v.pause(); } catch (_) {}
+
+                    const rect = card.getBoundingClientRect();
+                    if (rect.top >= -100 && rect.top <= window.innerHeight * 0.8) {
+                        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, which: 40, bubbles: true }));
+                    }
+                    return;
+                }
+            }
+
             card.setAttribute('data-fg-reel-card', '1');
             card.setAttribute('data-fg-reel', '1');
 
@@ -1222,30 +1288,88 @@
         return originalFetch.apply(this, args);
     };
 
-    // --- 6. FEED POST REVEAL ENGINE (Tap & 350ms Hold) ---
+    // --- 6. UNBLUR REVEAL ENGINE (Tap & 350ms Hold) ---
     const HOLD_MS = 350, MOVE_TOL = 10;
     const root = document.documentElement;
-    let mode = "hold"; // "tap" | "hold"
     let timer = 0, sx = 0, sy = 0, swallowUntil = 0;
 
     function updateFeedFlag() {
-      root.toggleAttribute("data-fg-feed", location.pathname === "/");
+      root.toggleAttribute("data-fg-feed", location.pathname === "/" || location.pathname === "");
     }
     updateFeedFlag();
     new MutationObserver(updateFeedFlag).observe(document, { childList: true, subtree: true });
     addEventListener("popstate", updateFeedFlag);
 
-    const blurredPost = el =>
-      root.hasAttribute("data-fg-feed") && el.closest("article:not([data-fg-reveal])");
+    function getBlurredTarget(el) {
+        if (!el) return null;
+
+        if (currentSettings.blurFeed) {
+            // Never treat carousel next/prev arrows or navigation buttons as unblur triggers
+            if (el.closest('button[aria-label="Next"], button[aria-label="Go back"], button[aria-label="Next slide"], button[aria-label="Previous slide"], button[aria-label="Chevron"]')) {
+                return null;
+            }
+
+            // 1. Check if clicked inside a specific carousel slide
+            const carouselSlide = el.closest('article ul li, article div[role="group"]');
+            if (carouselSlide) {
+                if (!carouselSlide.hasAttribute('data-fg-reveal') && !carouselSlide.classList.contains('fg-unblurred')) {
+                    return carouselSlide;
+                }
+                return null; // Already unblurred slide; pass through to native Instagram actions
+            }
+
+            // 2. Fallback to single post (non-carousel)
+            const feedArticle = el.closest('article');
+            if (feedArticle && !feedArticle.hasAttribute('data-fg-reveal') && !feedArticle.classList.contains('fg-unblurred')) {
+                const inHeader = !!el.closest('header');
+                const inFooter = !!el.closest('section:has(svg[aria-label="Like"]), section:has(svg[aria-label="Comment"]), form');
+                if (!inHeader && !inFooter) {
+                    return feedArticle;
+                }
+            }
+        }
+
+        if (currentSettings.blurReels) {
+            const reelContainer = el.closest('main div:has(> video), article div:has(> video)');
+            if (reelContainer && !reelContainer.hasAttribute('data-fg-reveal') && !reelContainer.classList.contains('fg-unblurred')) {
+                return reelContainer;
+            }
+            const video = el.closest('video');
+            if (video && video.parentElement && !video.parentElement.hasAttribute('data-fg-reveal') && !video.parentElement.classList.contains('fg-unblurred')) {
+                return video.parentElement;
+            }
+        }
+
+        if (currentSettings.blurExplore) {
+            const expLink = el.closest('main a[href*="/p/"], main a[href*="/reel/"]');
+            if (expLink && !expLink.hasAttribute('data-fg-reveal') && !expLink.classList.contains('fg-unblurred')) {
+                return expLink;
+            }
+        }
+        return null;
+    }
+
+    function revealTarget(target) {
+        if (!target) return;
+        target.setAttribute('data-fg-reveal', '1');
+        target.classList.add('fg-unblurred');
+        target.style.setProperty('filter', 'none', 'important');
+        target.querySelectorAll('*').forEach(c => {
+            c.setAttribute('data-fg-reveal', '1');
+            c.classList.add('fg-unblurred');
+            c.style.setProperty('filter', 'none', 'important');
+        });
+    }
 
     addEventListener("pointerdown", e => {
-      if (mode !== "hold") return;
-      const post = blurredPost(e.target);
-      if (!post) return;
+      const activeMode = currentSettings.unblurMode || (currentSettings.tapToUnblur ? "tap" : "hold");
+      if (activeMode !== "hold") return;
+      const target = getBlurredTarget(e.target);
+      if (!target) return;
       sx = e.clientX; sy = e.clientY;
       timer = setTimeout(() => {
-        post.setAttribute("data-fg-reveal", "1");
-        swallowUntil = Date.now() + 400; // stop the release from clicking through
+        revealTarget(target);
+        swallowUntil = Date.now() + 450; // stop the release from clicking through
       }, HOLD_MS);
     }, true);
 
@@ -1260,14 +1384,17 @@
 
     addEventListener("click", e => {
       if (Date.now() < swallowUntil) { e.preventDefault(); e.stopPropagation(); return; }
-      const post = blurredPost(e.target);
-      if (!post) return;
-      e.preventDefault(); e.stopPropagation(); // a blurred post never gets a real click
-      if (mode === "tap") post.setAttribute("data-fg-reveal", "1");
+      const target = getBlurredTarget(e.target);
+      if (!target) return;
+      const activeMode = currentSettings.unblurMode || (currentSettings.tapToUnblur ? "tap" : "hold");
+      if (activeMode === "tap") {
+        e.preventDefault(); e.stopPropagation();
+        revealTarget(target);
+      }
     }, true);
 
     addEventListener("contextmenu", e => {
-      if (blurredPost(e.target)) e.preventDefault();
+      if (getBlurredTarget(e.target)) e.preventDefault();
     }, true);
 
     // --- In-Page Reels Metadata Extractor ---
@@ -1466,7 +1593,7 @@
     function updateIslandModeFromUrl() {
         const path = window.location.pathname.toLowerCase();
         let mode = 'NORMAL';
-        if (isAuthRoute(path) || path.startsWith('/direct/t/') || path.startsWith('/stories/') || path.startsWith('/create')) {
+        if (isAuthRoute(path) || path.startsWith('/direct') || path.startsWith('/stories/') || path.startsWith('/create')) {
             mode = 'HIDDEN';
         } else if (path.startsWith('/reels') || path.startsWith('/reel/')) {
             mode = 'FLOATING';
@@ -1486,7 +1613,7 @@
         }
 
         const lower = currentUrl.toLowerCase();
-        const isInDirect = lower.includes('/direct/t/');
+        const isInDirect = lower.includes('/direct');
         const modalActive = isAnyModalOpen();
 
         updateIslandModeFromUrl();
@@ -1548,12 +1675,65 @@
         hideNav();
     });
 
+    function cleanUpDynamicContent() {
+        try {
+            // Hide Like Counts dynamic text
+            if (currentSettings.hideLikeCounts) {
+                document.querySelectorAll('a[href*="/liked_by/"]').forEach((el) => {
+                    el.style.setProperty('display', 'none', 'important');
+                    const parent = el.closest('div');
+                    if (parent && parent.textContent && /liked/i.test(parent.textContent)) {
+                        parent.style.setProperty('display', 'none', 'important');
+                    }
+                });
+                document.querySelectorAll('article section ~ div span, article section ~ div div, div[role="presentation"] span, article span, article div').forEach((el) => {
+                    if (el.children.length > 2) return;
+                    const text = (el.textContent || '').trim();
+                    if (/^(liked\s+by|[\d,.]+[KkMm]?\s+likes?|[\d,.]+\s+others|be\s+the\s+first\s+to\s+like)/i.test(text)) {
+                        el.style.setProperty('display', 'none', 'important');
+                    }
+                });
+                document.querySelectorAll('svg[aria-label="Like"], svg[aria-label="Unlike"]').forEach((svg) => {
+                    const btn = svg.closest('[role="button"]') || svg.parentElement;
+                    if (btn) {
+                        btn.querySelectorAll('span, div').forEach(child => {
+                            if (!child.contains(svg) && /^\d+[\d,.]*[KkMm]?$/.test((child.textContent || '').trim())) {
+                                child.style.setProperty('display', 'none', 'important');
+                            }
+                        });
+                        let sibling = btn.nextElementSibling;
+                        if (sibling && /^\d+[\d,.]*[KkMm]?$/.test((sibling.textContent || '').trim())) {
+                            sibling.style.setProperty('display', 'none', 'important');
+                        }
+                        const parent = btn.parentElement;
+                        if (parent && parent.children.length <= 4) {
+                            parent.querySelectorAll('span').forEach(sp => {
+                                if (/^\d+[\d,.]*[KkMm]?$/.test((sp.textContent || '').trim())) {
+                                    sp.style.setProperty('display', 'none', 'important');
+                                }
+                            });
+                        }
+                    }
+                });
+            }
+
+            // Minimal mode redirect: restrict access to DMs and profile only
+            if (currentSettings.minimalMode) {
+                const curPath = (window.location.pathname || '').toLowerCase();
+                if (curPath === '/' || curPath === '' || curPath.startsWith('/explore') || curPath.startsWith('/reels') || curPath.startsWith('/reel') || curPath.startsWith('/p/')) {
+                    performNavClick('direct');
+                }
+            }
+        } catch (_) {}
+    }
+
     // 250ms periodic heartbeat guarantees zero missed state changes during React renders
     setInterval(() => {
         checkStateAndNotify();
         hideNav();
         updateShareSheetState();
         fixReels();
+        cleanUpDynamicContent();
     }, 250);
 
     // --- CREATE (+) DROPDOWN "POST" & "STORY" HANDLER ---
@@ -1703,6 +1883,10 @@
                 noStories: config.hideStories !== undefined ? config.hideStories : currentSettings.noStories,
                 noReels: config.hideReels !== undefined ? config.hideReels : currentSettings.noReels,
                 blurExplore: config.blurExplore !== undefined ? config.blurExplore : currentSettings.blurExplore,
+                blurReels: config.blurReels !== undefined ? config.blurReels : currentSettings.blurReels,
+                blurFeed: config.blurFeed !== undefined ? config.blurFeed : currentSettings.blurFeed,
+                unblurMode: config.unblurMode || (config.tapToUnblur ? 'tap' : 'hold') || currentSettings.unblurMode,
+                tapToUnblur: config.tapToUnblur !== undefined ? config.tapToUnblur : currentSettings.tapToUnblur,
                 hideLikeCounts: config.hideLikeCounts !== undefined ? config.hideLikeCounts : currentSettings.hideLikeCounts,
                 hideFollowerCounts: config.hideFollowerCounts !== undefined ? config.hideFollowerCounts : currentSettings.hideFollowerCounts,
                 hideSuggestedPosts: config.hideSuggestedPosts !== undefined ? config.hideSuggestedPosts : currentSettings.hideSuggestedPosts,
