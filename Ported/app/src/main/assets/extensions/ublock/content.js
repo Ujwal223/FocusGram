@@ -1,6 +1,5 @@
 /**
- * uBlock Origin for FocusGram — Cosmetic Filtering & DOM Scriptlet
- * License: GNU General Public License v3.0 (GPL-3.0)
+ * FocusGram — Cosmetic Filtering & DOM Scriptlet
  *
  * Injects CSS cosmetic filtering rules and monitors dynamic SPA DOM
  * insertions to eliminate sponsored posts and ad banners when enabled.
@@ -9,26 +8,32 @@
 'use strict';
 
 (function () {
-    const COSMETIC_STYLE_ID = 'ublock-focusgram-cosmetic-filters';
+    const COSMETIC_STYLE_ID = 'focusgram-cosmetic-filters';
     let adBlockingEnabled = true;
 
     const CSS_RULES = `
-        /* Hide sponsored feed articles and containers */
-        article:has(a[href*="/explore/locations/"]),
-        article:has(div[role="button"]:has(span:empty)),
+        /* Hide sponsored feed articles and containers without breaking Infinite Scroll IntersectionObserver */
         div[data-ad-preview],
         div[data-testid="post_ad"],
-        div[aria-label*="Sponsored"],
-        div[aria-label*="sponsored"],
-        a[href*="/ad/"],
-        a[href*="ads.instagram.com"] {
-            display: none !important;
-            visibility: hidden !important;
-            height: 0 !important;
-            min-height: 0 !important;
+        div[aria-label*="Sponsored" i]:not(main):not([role="feed"]),
+        div[aria-label*="sponsored" i]:not(main):not([role="feed"]),
+        article:has(a[href*="/ads/"]),
+        article:has(a[href*="/about/ads"]),
+        article:has(a[href*="ads.instagram.com"]),
+        article[data-ad-filtered="true"] {
+            height: 1px !important;
+            min-height: 1px !important;
+            max-height: 1px !important;
+            overflow: hidden !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
             margin: 0 !important;
             padding: 0 !important;
-            pointer-events: none !important;
+            border: none !important;
+        }
+        a[href*="/ads/"],
+        a[href*="ads.instagram.com"] {
+            display: none !important;
         }
     `;
 
@@ -53,24 +58,65 @@
 
     const SPONSORED_KEYWORDS = [
         'sponsored', 'gesponsert', 'sponsorisé', 'sponsorise',
-        'publicidad', 'patrocinado', 'sponsorizzato', 'sponsrad'
+        'publicidad', 'patrocinado', 'sponsorizzato', 'sponsrad',
+        'paid partnership'
+    ];
+
+    const AD_CTA_KEYWORDS = [
+        'learn more', 'shop now', 'install now', 'sign up', 'apply now',
+        'book now', 'download', 'order now', 'get offer', 'subscribe'
     ];
 
     function filterDynamicSponsoredPosts() {
         if (!adBlockingEnabled) return;
+        // Strictly target individual article posts to avoid hiding high-level feed containers
         const articles = document.querySelectorAll('article');
         for (let i = 0; i < articles.length; i++) {
             const article = articles[i];
-            if (article.dataset.ublockFiltered) continue;
+            if (article.dataset.adFiltered) continue;
 
-            const spans = article.querySelectorAll('header span, header a, span[dir="auto"]');
+            let isAd = false;
+
+            // Check header text (Sponsored, Paid partnership)
+            const spans = article.querySelectorAll('header span, header a, span[dir="auto"], [role="button"] span');
             for (let j = 0; j < spans.length; j++) {
                 const text = (spans[j].textContent || '').trim().toLowerCase();
-                if (SPONSORED_KEYWORDS.includes(text)) {
-                    article.style.setProperty('display', 'none', 'important');
-                    article.dataset.ublockFiltered = 'true';
+                if (SPONSORED_KEYWORDS.some(kw => text === kw || text.startsWith(kw) || text.includes(kw))) {
+                    isAd = true;
                     break;
                 }
+            }
+
+            // Check CTA button text
+            if (!isAd) {
+                const buttons = article.querySelectorAll('div[role="button"], a[role="button"]');
+                for (let k = 0; k < buttons.length; k++) {
+                    const btnText = (buttons[k].textContent || '').trim().toLowerCase();
+                    if (AD_CTA_KEYWORDS.some(cta => btnText === cta)) {
+                        isAd = true;
+                        break;
+                    }
+                }
+            }
+
+            // Check ad-specific links (strictly /ads/, /ad_, ads.instagram.com, /about/ads)
+            if (!isAd) {
+                if (article.querySelector('a[href*="/ads/"], a[href*="/ad_"], a[href*="/about/ads"], a[href*="ads.instagram.com"]')) {
+                    isAd = true;
+                }
+            }
+
+            if (isAd) {
+                article.style.setProperty('height', '1px', 'important');
+                article.style.setProperty('min-height', '1px', 'important');
+                article.style.setProperty('max-height', '1px', 'important');
+                article.style.setProperty('overflow', 'hidden', 'important');
+                article.style.setProperty('opacity', '0', 'important');
+                article.style.setProperty('pointer-events', 'none', 'important');
+                article.style.setProperty('margin', '0', 'important');
+                article.style.setProperty('padding', '0', 'important');
+                article.dataset.adFiltered = 'true';
+                window.dispatchEvent(new Event('scroll'));
             }
         }
     }

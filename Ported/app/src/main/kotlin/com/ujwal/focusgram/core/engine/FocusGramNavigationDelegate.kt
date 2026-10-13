@@ -38,12 +38,20 @@ class FocusGramNavigationDelegate(
             return GeckoResult.fromValue(AllowOrDeny.DENY)
         }
 
-        // 3. Allow Instagram, Meta CDN, and Authentication login domains
+        // 3. Intercept navigation trap to suggested accounts (/explore/people) from Favorites
+        val path = uri.path?.lowercase() ?: ""
+        if (path.contains("/explore/people")) {
+            Log.i(TAG, "Intercepted suggested accounts trap (/explore/people). Redirecting to home feed.")
+            session.loadUri("https://www.instagram.com/")
+            return GeckoResult.fromValue(AllowOrDeny.DENY)
+        }
+
+        // 4. Allow Instagram, Meta CDN, and Authentication login domains
         if (isAllowedHost(host)) {
             return GeckoResult.fromValue(AllowOrDeny.ALLOW)
         }
 
-        // 4. For external links:
+        // 5. For external links:
         // ONLY launch external system browser if the navigation was triggered by an explicit user gesture
         // (tapping an external link in bio/story) or opening a new tab (target="_blank").
         // NEVER launch external browser for background pings, telemetry, iframes, or non-user requests!
@@ -65,6 +73,11 @@ class FocusGramNavigationDelegate(
         hasUserGesture: Boolean
     ) {
         url?.let {
+            if (it.lowercase().contains("/explore/people")) {
+                Log.i(TAG, "Location redirected away from /explore/people to home")
+                sessionManager.loadUrl("https://www.instagram.com/")
+                return
+            }
             Log.d(TAG, "Location changed to: $it")
             sessionManager.updateCurrentUrl(it)
             onRouteChanged?.invoke(it)
@@ -88,13 +101,39 @@ class FocusGramNavigationDelegate(
 
     private fun handleExternalIntent(uri: Uri) {
         try {
-            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+            val targetUri = if (sessionManager.currentSettings.sanitizeLinks) {
+                sanitizeUri(uri)
+            } else {
+                uri
+            }
+            val intent = Intent(Intent.ACTION_VIEW, targetUri).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
         } catch (e: Exception) {
             Log.w(TAG, "No activity found to handle external URI: $uri", e)
         }
+    }
+
+    private fun sanitizeUri(uri: Uri): Uri {
+        if (!uri.isHierarchical) return uri
+        val trackingParams = setOf(
+            "igsh", "igshid", "fbclid",
+            "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+            "source_ve_path"
+        )
+        val queryNames = uri.queryParameterNames
+        if (queryNames.none { it.lowercase() in trackingParams }) return uri
+
+        val builder = uri.buildUpon().clearQuery()
+        for (param in queryNames) {
+            if (param.lowercase() !in trackingParams) {
+                for (value in uri.getQueryParameters(param)) {
+                    builder.appendQueryParameter(param, value)
+                }
+            }
+        }
+        return builder.build()
     }
 
     companion object {

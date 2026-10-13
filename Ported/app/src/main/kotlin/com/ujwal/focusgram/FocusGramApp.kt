@@ -45,7 +45,7 @@ class FocusGramApp : Application() {
         settingsRepository = SettingsRepository(this)
         encryptedStorage = EncryptedStorage(this)
 
-        // Pre-warm GeckoRuntime, mount uBlock Origin, and run legacy migration
+        // Pre-warm GeckoRuntime, mount Content Blocker WebExtension, and run legacy migration
         applicationScope.launch(Dispatchers.Main) {
             try {
                 // 1. Migrate legacy Flutter data if present
@@ -54,10 +54,10 @@ class FocusGramApp : Application() {
                     migrator.checkAndMigrate()
                 }
 
-                // 2. Pre-warm GeckoRuntime singleton & mount uBlock Origin on UI thread
+                // 2. Pre-warm GeckoRuntime singleton & mount Content Blocker on UI thread
                 val manager = GeckoRuntimeManager.getInstance(this@FocusGramApp)
                 manager.extensionManager.initializeUBlockOrigin()
-                Log.i(TAG, "GeckoRuntime & uBlock Origin initialized successfully.")
+                Log.i(TAG, "GeckoRuntime & Content Blocker initialized successfully.")
             } catch (e: Exception) {
                 Log.e(TAG, "Initialization error in background scope: ${e.message}", e)
             }

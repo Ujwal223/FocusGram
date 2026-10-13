@@ -1,8 +1,12 @@
 package com.ujwal.focusgram.feature.session
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,10 +16,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,21 +31,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ujwal.focusgram.core.ui.components.CupertinoWheelPicker
-import com.ujwal.focusgram.core.ui.theme.InstagramBlue
 import com.ujwal.focusgram.core.ui.theme.PureBlack
 
 /**
  * AppSessionPicker
- * Intention Timer displayed on launch.
+ * Premium iOS monochrome intention timer displayed on launch or settings.
  * Allows users to mindfully set their planned Instagram session duration (1 to 60 minutes)
- * using an authentic Apple Clock rotating drum wheel picker with iOS CLOCK_TICK haptics.
+ * using an authentic Apple Clock rotating drum wheel picker or quick preset chips.
  */
 @Composable
 fun AppSessionPicker(
@@ -48,73 +52,95 @@ fun AppSessionPicker(
     modifier: Modifier = Modifier
 ) {
     val minutesList = remember { (1..60).toList() }
-    // Default to 15 minutes (index 14)
-    var selectedMinuteIndex by remember { mutableIntStateOf(14) }
+    var selectedMinuteIndex by remember { mutableIntStateOf(14) } // Default: 15 min
     val selectedMinutes = minutesList.getOrElse(selectedMinuteIndex) { 15 }
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(PureBlack)
-            .padding(horizontal = 28.dp, vertical = 32.dp),
+            .padding(horizontal = 24.dp, vertical = 24.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Spacer(modifier = Modifier.height(28.dp))
+            // Top Dismiss Button (if modal)
+            if (onDismiss != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF1C1C1E))
+                            .border(0.5.dp, Color(0xFF2C2C2E), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            } else {
+                Spacer(modifier = Modifier.height(24.dp))
+            }
 
-            // Glowing Timer Icon
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Monochrome iOS Timer Badge
             Box(
                 modifier = Modifier
-                    .size(72.dp)
+                    .size(64.dp)
                     .clip(CircleShape)
-                    .background(
-                        Brush.linearGradient(
-                            listOf(Color(0xFF1E88E5), Color(0xFF42A5F5))
-                        )
-                    ),
+                    .background(Color(0xFF1C1C1E))
+                    .border(1.dp, Color(0xFF2C2C2E), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.Timer,
                     contentDescription = "Timer",
                     tint = Color.White,
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(30.dp)
                 )
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             Text(
                 text = "Set Your Intention",
                 color = Color.White,
-                fontSize = 26.sp,
+                fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = (-0.5).sp
             )
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             Text(
                 text = "How long do you plan to use\nInstagram right now?",
-                color = Color(0xFFA0A0A5),
+                color = Color(0xFF8E8E93),
                 fontSize = 15.sp,
                 textAlign = TextAlign.Center,
-                lineHeight = 22.sp,
+                lineHeight = 20.sp,
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
 
             Spacer(modifier = Modifier.weight(1f))
 
-            // Apple Clock Single Minutes Drum Wheel (1..60) with iOS haptics & 3D perspective
+            // Apple Clock Single Minutes Drum Wheel (1..60)
             CupertinoWheelPicker(
                 items = minutesList,
                 selectedIndex = selectedMinuteIndex,
                 onItemSelected = { selectedMinuteIndex = it },
                 label = "min",
-                itemHeight = 50.dp,
+                itemHeight = 48.dp,
                 visibleItemsCount = 5,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -123,36 +149,36 @@ fun AppSessionPicker(
 
             Spacer(modifier = Modifier.weight(1f))
 
-            // Start Session Button (single full-width action button)
+            // Official Apple Style Pill Button (Pure White with Bold Black Text)
             Button(
                 onClick = { onSessionSelected(selectedMinutes) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(54.dp),
-                shape = RoundedCornerShape(16.dp),
+                    .height(52.dp),
+                shape = RoundedCornerShape(26.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = InstagramBlue,
-                    contentColor = Color.White
+                    containerColor = Color.White,
+                    contentColor = Color.Black
                 )
             ) {
                 Text(
                     text = "Start $selectedMinutes-Minute Session",
-                    color = Color.White,
+                    color = Color.Black,
                     fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.Bold
                 )
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             Text(
-                text = "You'll be prompted to close the app when your time is up.",
+                text = "FocusGram will pause your session when time expires.",
                 color = Color(0xFF636366),
                 fontSize = 12.sp,
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }

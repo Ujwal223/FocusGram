@@ -228,4 +228,30 @@ object InstagramIcons {
     val SettingsFilled: ImageVector by lazy {
         SettingsOutline
     }
+
+    // 11. Camera Outline: Instagram Reels Camera Header Icon (24x24)
+    val CameraOutline: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "CameraOutline",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f
+        ).apply {
+            addPath(
+                pathData = parseNodes("M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"),
+                stroke = SolidColor(Color.White),
+                strokeLineWidth = 2.0f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            )
+            addPath(
+                pathData = parseNodes("M12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"),
+                stroke = SolidColor(Color.White),
+                strokeLineWidth = 2.0f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            )
+        }.build()
+    }
 }

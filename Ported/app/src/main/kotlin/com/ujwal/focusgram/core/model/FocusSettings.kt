@@ -14,13 +14,15 @@ data class FocusSettings(
     val noDMs: Boolean = false,
     val blurExplore: Boolean = true,
     val blurReels: Boolean = false,
+    val unblurMode: String = "tap", // "tap" or "hold"
     val tapToUnblur: Boolean = true,
-    val requireLongPress: Boolean = true,
-    val hideSuggestedPosts: Boolean = true,
+    val requireLongPress: Boolean = false,
+    val hideSuggestedPosts: Boolean = false,
     val hideLikeCounts: Boolean = false,
     val hideFollowerCounts: Boolean = false,
     val hideShopTab: Boolean = true,
     val minimalModeEnabled: Boolean = false,
+    val hideFeedPosts: Boolean = false,
 
     // Mindful Gates & Wellness
     val showBreathGate: Boolean = true,
@@ -50,6 +52,13 @@ data class FocusSettings(
     val biometricEnabled: Boolean = false,
     val autoLockOnBackground: Boolean = true,
     val isFirstRun: Boolean = false,
+
+    // Extras & Notifications
+    val startupPage: String = "home",
+    val videoDownloadEnabled: Boolean = false,
+    val sanitizeLinks: Boolean = true,
+    val notifySessionEnd: Boolean = false,
+    val notifyPersistent: Boolean = false,
 
     // Ghost Mode (Privacy & Stealth)
     val ghostModeEnabled: Boolean = false,

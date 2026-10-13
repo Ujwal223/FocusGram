@@ -2,6 +2,7 @@ package com.ujwal.focusgram.feature.wellness
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -98,7 +100,8 @@ fun CooldownGateScreen(
                     .size(80.dp)
                     .clip(CircleShape)
                     .background(Color(0xFFFF9800).copy(alpha = 0.12f))
-                    .border(1.5.dp, Color(0xFFFF9800).copy(alpha = 0.4f), CircleShape),
+                    .border(1.5.dp, Color(0xFFFF9800).copy(alpha = 0.4f), CircleShape)
+                    .clickable { onCooldownExpired() },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -186,6 +189,18 @@ fun CooldownGateScreen(
                 Text(
                     text = "Close App & Rest",
                     fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            TextButton(
+                onClick = onCooldownExpired
+            ) {
+                Text(
+                    text = "Skip Cooldown",
+                    color = TextMuted,
+                    fontSize = 14.sp
                 )
             }
         }

@@ -20,7 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Backspace
+import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Icon
@@ -78,31 +78,54 @@ fun AppLockScreen(
     val shakeOffset = remember { Animatable(0f) }
 
     fun triggerBiometricPrompt() {
-        if (isBiometricAllowed && context is FragmentActivity) {
-            val biometricManager = BiometricManager.from(context)
-            if (biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.BIOMETRIC_WEAK)
-                == BiometricManager.BIOMETRIC_SUCCESS
-            ) {
-                val executor = ContextCompat.getMainExecutor(context)
-                val prompt = BiometricPrompt(
-                    context,
-                    executor,
-                    object : BiometricPrompt.AuthenticationCallback() {
-                        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                            super.onAuthenticationSucceeded(result)
-                            onUnlockSuccess()
+        if (!isBiometricAllowed) return
+        var ctx = context
+        while (ctx is android.content.ContextWrapper) {
+            if (ctx is FragmentActivity) break
+            ctx = ctx.baseContext
+        }
+        val activity = ctx as? FragmentActivity ?: return
+
+        val biometricManager = BiometricManager.from(activity)
+        val canAuth = biometricManager.canAuthenticate(
+            BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.BIOMETRIC_WEAK
+        )
+        if (canAuth == BiometricManager.BIOMETRIC_SUCCESS) {
+            val executor = ContextCompat.getMainExecutor(activity)
+            val prompt = BiometricPrompt(
+                activity,
+                executor,
+                object : BiometricPrompt.AuthenticationCallback() {
+                    override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                        super.onAuthenticationSucceeded(result)
+                        onUnlockSuccess()
+                    }
+
+                    override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                        super.onAuthenticationError(errorCode, errString)
+                        if (errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
+                            errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON &&
+                            errorCode != BiometricPrompt.ERROR_CANCELED
+                        ) {
+                            errorMessage = errString.toString()
                         }
                     }
-                )
 
-                val promptInfo = BiometricPrompt.PromptInfo.Builder()
-                    .setTitle("Unlock FocusGram")
-                    .setSubtitle("Confirm your biometric to proceed")
-                    .setNegativeButtonText("Use PIN")
-                    .build()
+                    override fun onAuthenticationFailed() {
+                        super.onAuthenticationFailed()
+                        errorMessage = "Biometric not recognized"
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    }
+                }
+            )
 
-                prompt.authenticate(promptInfo)
-            }
+            val promptInfo = BiometricPrompt.PromptInfo.Builder()
+                .setTitle("Unlock FocusGram")
+                .setSubtitle("Confirm your biometric to proceed")
+                .setNegativeButtonText("Use PIN")
+                .build()
+
+            prompt.authenticate(promptInfo)
         }
     }
 
@@ -306,7 +329,7 @@ private fun KeypadButton(
     ) {
         when (key) {
             "DEL" -> Icon(
-                imageVector = Icons.Default.Backspace,
+                imageVector = Icons.AutoMirrored.Filled.Backspace,
                 contentDescription = "Delete",
                 tint = Color.White.copy(alpha = 0.7f),
                 modifier = Modifier.size(24.dp)

@@ -92,7 +92,6 @@
             clearTimeout(resizeTimer);
             resizeTimer = setTimeout(() => {
                 try {
-                    window.dispatchEvent(new Event('orientationchange'));
                     window.dispatchEvent(new Event('resize'));
                 } catch (_) {}
             }, 80);

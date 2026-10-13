@@ -1,12 +1,10 @@
 /**
- * uBlock Origin & FocusGram Privacy Engine — WebExtension Background Script
- * License: GNU General Public License v3.0 (GPL-3.0)
- * Author: Raymond Hill (gorhill) / FocusGram Project
+ * FocusGram Privacy & Content Blocker Engine — WebExtension Background Script
  *
  * Provides:
  *  1. Network-level interception of Instagram ads & telemetry (toggled dynamically via settings).
  *  2. Native messaging bridge connecting GeckoView Android host with in-page content scripts.
- *  3. Dispatcher for SPA navigation, Ghost Mode updates, and UI events.
+ *  3. Dispatcher for SPA navigation, stealth updates, Reels metadata, and UI events.
  */
 
 'use strict';
@@ -22,24 +20,31 @@ let cachedSettings = {
     hideShopTab: false,
     noAutoplay: false,
     grayscale: false,
+    minimalMode: false,
     ghostModeEnabled: false,
     ghostHideStorySeen: true,
     ghostHideDirectSeen: true,
-    ghostHideTypingIndicator: true
+    ghostHideTypingIndicator: true,
+    unblurMode: 'tap'
 };
 
 const BLOCKED_URL_PATTERNS = [
     "*://*.instagram.com/logging_client_events*",
     "*://*.instagram.com/ajax/bz*",
-    "*://graph.instagram.com/logging_client_events*",
+    "*://graph.instagram.com/*",
     "*://*.instagram.com/api/v1/ads/*",
     "*://*.instagram.com/api/v1/feed/saved/ads*",
+    "*://*.instagram.com/api/v1/stories/tray/ads*",
+    "*://*.instagram.com/api/v1/feed/timeline/ads*",
     "*://*.facebook.com/tr/*",
     "*://*.facebook.com/tr?*",
     "*://*.facebook.net/*",
     "*://connect.facebook.net/*",
     "*://*.meta.com/telemetry*",
-    "*://*.instagram.com/api/v1/stories/tray/ads*",
+    "*://*.doubleclick.net/*",
+    "*://*.googleadservices.com/*",
+    "*://*.googlesyndication.com/*",
+    "*://*.adservice.google.*/*",
     "*://*.cdninstagram.com/v/t51.2885-15/e35/*_ad*"
 ];
 
@@ -51,13 +56,13 @@ if (typeof browser !== 'undefined' && browser.webRequest && browser.webRequest.o
                 // User turned ad blocker off: do not cancel requests
                 return { cancel: false };
             }
-            console.log('[uBlock Origin] Intercepted and blocked network ad request:', details.url);
+            console.log('[Content Blocker] Intercepted and blocked network ad request:', details.url);
             return { cancel: true };
         },
         { urls: BLOCKED_URL_PATTERNS },
         ["blocking"]
     );
-    console.log('[uBlock Origin] Network interception active across', BLOCKED_URL_PATTERNS.length, 'patterns.');
+    console.log('[Content Blocker] Network interception active across', BLOCKED_URL_PATTERNS.length, 'patterns.');
 }
 
 // Establish native messaging port with FocusGram Android host
@@ -75,21 +80,22 @@ function connectNativePort() {
 
                 if (msg.action === 'updateSettings' && msg.settings) {
                     Object.assign(cachedSettings, msg.settings);
-                    broadcastToTabs(msg);
-                } else if (msg.action === 'navigateSpa' || msg.action === 'openProfileSpa' || msg.action === 'nav' || msg.nav || msg.action === 'setIslandMode' || msg.island) {
-                    broadcastToTabs(msg);
                 }
+                if (msg.revealMode) {
+                    cachedSettings.unblurMode = msg.revealMode;
+                }
+                broadcastToTabs(msg);
             });
 
             nativePort.onDisconnect.addListener((p) => {
                 console.warn('[FocusGram Background] Native port disconnected, will retry...');
                 nativePort = null;
-                setTimeout(connectNativePort, 10000);
+                setTimeout(connectNativePort, 5000);
             });
         }
     } catch (e) {
         console.error('[FocusGram Background] Error connecting native port:', e);
-        setTimeout(connectNativePort, 10000);
+        setTimeout(connectNativePort, 5000);
     }
 }
 
@@ -97,7 +103,7 @@ connectNativePort();
 
 function broadcastToTabs(message) {
     if (typeof browser !== 'undefined' && browser.tabs && browser.tabs.query) {
-        browser.tabs.query({ url: "*://*.instagram.com/*" }, (tabs) => {
+        browser.tabs.query({}, (tabs) => {
             if (tabs && tabs.length > 0) {
                 for (const tab of tabs) {
                     try {
@@ -119,16 +125,31 @@ if (typeof browser !== 'undefined' && browser.runtime && browser.runtime.onMessa
             return true;
         }
 
-        if (message.action === 'openSettings' || message.action === 'inputFocused' || message.action === 'urlChanged' || message.action === 'modalOrChatActive') {
-            if (nativePort) {
-                try {
-                    nativePort.postMessage(message);
-                } catch (e) {
-                    console.error('[FocusGram Background] Failed to forward message to native host:', e);
-                }
-            }
-            sendResponse({ status: 'forwarded' });
-            return true;
+        if (!nativePort) {
+            connectNativePort();
         }
+
+        if (nativePort) {
+            try {
+                if (message.type === 'ReelMetadata' || message.action === 'reelViewed') {
+                    const payload = message.payload || message.data || message.reel || message;
+                    nativePort.postMessage({
+                        action: 'reelViewed',
+                        type: 'reelViewed',
+                        url: payload.url || '',
+                        title: payload.title || 'Instagram Reel',
+                        author: payload.author || 'Instagram Creator',
+                        thumbnailUrl: payload.thumbnailUrl || ''
+                    });
+                } else {
+                    nativePort.postMessage(message);
+                }
+                console.log('[FocusGram Background] Forwarded to native host:', JSON.stringify(message));
+            } catch (e) {
+                console.error('[FocusGram Background] Failed to forward message to native host:', e);
+            }
+        }
+        sendResponse({ status: 'forwarded' });
+        return true;
     });
 }

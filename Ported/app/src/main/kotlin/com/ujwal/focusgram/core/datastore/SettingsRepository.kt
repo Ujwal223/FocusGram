@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.ujwal.focusgram.core.model.FocusSettings
@@ -17,7 +18,7 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 /**
  * SettingsRepository
  * Reactive Jetpack DataStore repository managing all focus toggles,
- * mindful gate configurations, and rewarded credit balances on-device.
+ * digital wellness guardrails, mindful gate parameters, and rewarded credit balances on-device.
  */
 class SettingsRepository(private val context: Context) {
 
@@ -30,13 +31,15 @@ class SettingsRepository(private val context: Context) {
             noDMs = prefs[KEY_NO_DMS] ?: false,
             blurExplore = prefs[KEY_BLUR_EXPLORE] ?: true,
             blurReels = prefs[KEY_BLUR_REELS] ?: false,
-            tapToUnblur = prefs[KEY_TAP_TO_UNBLUR] ?: true,
-            requireLongPress = prefs[KEY_REQUIRE_LONG_PRESS] ?: true,
-            hideSuggestedPosts = prefs[KEY_HIDE_SUGGESTED_POSTS] ?: true,
+            unblurMode = prefs[KEY_UNBLUR_MODE] ?: if (prefs[KEY_REQUIRE_LONG_PRESS] == true && prefs[KEY_TAP_TO_UNBLUR] == false) "hold" else "tap",
+            tapToUnblur = (prefs[KEY_UNBLUR_MODE] ?: if (prefs[KEY_REQUIRE_LONG_PRESS] == true && prefs[KEY_TAP_TO_UNBLUR] == false) "hold" else "tap") == "tap",
+            requireLongPress = (prefs[KEY_UNBLUR_MODE] ?: if (prefs[KEY_REQUIRE_LONG_PRESS] == true && prefs[KEY_TAP_TO_UNBLUR] == false) "hold" else "tap") == "hold",
+            hideSuggestedPosts = prefs[KEY_HIDE_SUGGESTED_POSTS] ?: false,
             hideLikeCounts = prefs[KEY_HIDE_LIKE_COUNTS] ?: false,
             hideFollowerCounts = prefs[KEY_HIDE_FOLLOWER_COUNTS] ?: false,
             hideShopTab = prefs[KEY_HIDE_SHOP_TAB] ?: true,
             minimalModeEnabled = prefs[KEY_MINIMAL_MODE_ENABLED] ?: false,
+            hideFeedPosts = prefs[KEY_HIDE_FEED_POSTS] ?: false,
 
             showBreathGate = prefs[KEY_SHOW_BREATH_GATE] ?: true,
             breathGateSeconds = prefs[KEY_BREATH_GATE_SECONDS] ?: 10,
@@ -63,11 +66,27 @@ class SettingsRepository(private val context: Context) {
             autoLockOnBackground = prefs[KEY_AUTO_LOCK_BACKGROUND] ?: true,
             isFirstRun = prefs[KEY_IS_FIRST_RUN] ?: false,
 
+            startupPage = prefs[KEY_STARTUP_PAGE] ?: "home",
+            videoDownloadEnabled = prefs[KEY_VIDEO_DOWNLOAD_ENABLED] ?: false,
+            sanitizeLinks = prefs[KEY_SANITIZE_LINKS] ?: true,
+            notifySessionEnd = prefs[KEY_NOTIFY_SESSION_END] ?: false,
+            notifyPersistent = prefs[KEY_NOTIFY_PERSISTENT] ?: false,
+
             ghostModeEnabled = prefs[KEY_GHOST_MODE_ENABLED] ?: false,
             ghostHideStorySeen = prefs[KEY_GHOST_HIDE_STORY_SEEN] ?: true,
             ghostHideDirectSeen = prefs[KEY_GHOST_HIDE_DIRECT_SEEN] ?: true,
             ghostHideTypingIndicator = prefs[KEY_GHOST_HIDE_TYPING] ?: true
         )
+    }
+
+    val lastSessionEndTimestampFlow: Flow<Long> = context.dataStore.data.map { prefs ->
+        prefs[KEY_LAST_SESSION_END_TIMESTAMP] ?: 0L
+    }
+
+    suspend fun recordSessionEnd(timestamp: Long = System.currentTimeMillis()) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_LAST_SESSION_END_TIMESTAMP] = timestamp
+        }
     }
 
     suspend fun setNoAds(enabled: Boolean) = setBoolean(KEY_NO_ADS, enabled)
@@ -78,11 +97,20 @@ class SettingsRepository(private val context: Context) {
     suspend fun setBlurExplore(enabled: Boolean) = setBoolean(KEY_BLUR_EXPLORE, enabled)
     suspend fun setBlurReels(enabled: Boolean) = setBoolean(KEY_BLUR_REELS, enabled)
     suspend fun setTapToUnblur(enabled: Boolean) = setBoolean(KEY_TAP_TO_UNBLUR, enabled)
+    suspend fun setRequireLongPress(enabled: Boolean) = setBoolean(KEY_REQUIRE_LONG_PRESS, enabled)
+    suspend fun setUnblurMode(mode: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_UNBLUR_MODE] = mode
+            prefs[KEY_TAP_TO_UNBLUR] = (mode == "tap")
+            prefs[KEY_REQUIRE_LONG_PRESS] = (mode == "hold")
+        }
+    }
     suspend fun setHideSuggestedPosts(enabled: Boolean) = setBoolean(KEY_HIDE_SUGGESTED_POSTS, enabled)
     suspend fun setHideLikeCounts(enabled: Boolean) = setBoolean(KEY_HIDE_LIKE_COUNTS, enabled)
     suspend fun setHideFollowerCounts(enabled: Boolean) = setBoolean(KEY_HIDE_FOLLOWER_COUNTS, enabled)
     suspend fun setHideShopTab(enabled: Boolean) = setBoolean(KEY_HIDE_SHOP_TAB, enabled)
     suspend fun setMinimalMode(enabled: Boolean) = setBoolean(KEY_MINIMAL_MODE_ENABLED, enabled)
+    suspend fun setHideFeedPosts(enabled: Boolean) = setBoolean(KEY_HIDE_FEED_POSTS, enabled)
 
     suspend fun setBreathGate(enabled: Boolean, seconds: Int = 10) {
         context.dataStore.edit { prefs ->
@@ -100,8 +128,15 @@ class SettingsRepository(private val context: Context) {
     }
 
     suspend fun setGrayscale(enabled: Boolean) = setBoolean(KEY_GRAYSCALE_ENABLED, enabled)
+    suspend fun setSmoothScroll120Hz(enabled: Boolean) = setBoolean(KEY_SMOOTH_SCROLL_120HZ, enabled)
     suspend fun setCooldownMinutes(minutes: Int) = setInt(KEY_COOLDOWN_MINUTES, minutes)
     suspend fun setDailyLimitMinutes(minutes: Int) = setInt(KEY_DAILY_LIMIT_MINUTES, minutes)
+
+    suspend fun setStartupPage(page: String) = setString(KEY_STARTUP_PAGE, page)
+    suspend fun setVideoDownloadEnabled(enabled: Boolean) = setBoolean(KEY_VIDEO_DOWNLOAD_ENABLED, enabled)
+    suspend fun setSanitizeLinks(enabled: Boolean) = setBoolean(KEY_SANITIZE_LINKS, enabled)
+    suspend fun setNotifySessionEnd(enabled: Boolean) = setBoolean(KEY_NOTIFY_SESSION_END, enabled)
+    suspend fun setNotifyPersistent(enabled: Boolean) = setBoolean(KEY_NOTIFY_PERSISTENT, enabled)
 
     suspend fun addInstaMinutes(minutes: Int) {
         context.dataStore.edit { prefs ->
@@ -164,6 +199,8 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
+    suspend fun setAutoLockBackground(enabled: Boolean) = setBoolean(KEY_AUTO_LOCK_BACKGROUND, enabled)
+
     suspend fun setGhostMode(enabled: Boolean) = setBoolean(KEY_GHOST_MODE_ENABLED, enabled)
     suspend fun setGhostHideStorySeen(enabled: Boolean) = setBoolean(KEY_GHOST_HIDE_STORY_SEEN, enabled)
     suspend fun setGhostHideDirectSeen(enabled: Boolean) = setBoolean(KEY_GHOST_HIDE_DIRECT_SEEN, enabled)
@@ -177,6 +214,10 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { it[key] = value }
     }
 
+    private suspend fun setString(key: Preferences.Key<String>, value: String) {
+        context.dataStore.edit { it[key] = value }
+    }
+
     companion object {
         val KEY_NO_ADS = booleanPreferencesKey("no_ads")
         val KEY_NO_STORIES = booleanPreferencesKey("no_stories")
@@ -187,11 +228,13 @@ class SettingsRepository(private val context: Context) {
         val KEY_BLUR_REELS = booleanPreferencesKey("set_blur_reels")
         val KEY_TAP_TO_UNBLUR = booleanPreferencesKey("set_tap_to_unblur")
         val KEY_REQUIRE_LONG_PRESS = booleanPreferencesKey("set_require_long_press")
+        val KEY_UNBLUR_MODE = stringPreferencesKey("unblur_mode")
         val KEY_HIDE_SUGGESTED_POSTS = booleanPreferencesKey("hide_suggested_posts")
         val KEY_HIDE_LIKE_COUNTS = booleanPreferencesKey("hide_like_counts")
         val KEY_HIDE_FOLLOWER_COUNTS = booleanPreferencesKey("hide_follower_counts")
         val KEY_HIDE_SHOP_TAB = booleanPreferencesKey("hide_shop_tab")
         val KEY_MINIMAL_MODE_ENABLED = booleanPreferencesKey("minimal_mode_enabled")
+        val KEY_HIDE_FEED_POSTS = booleanPreferencesKey("content_posts")
 
         val KEY_SHOW_BREATH_GATE = booleanPreferencesKey("set_show_breath_gate")
         val KEY_BREATH_GATE_SECONDS = intPreferencesKey("breath_gate_seconds")
@@ -218,9 +261,16 @@ class SettingsRepository(private val context: Context) {
         val KEY_AUTO_LOCK_BACKGROUND = booleanPreferencesKey("auto_lock_background")
         val KEY_IS_FIRST_RUN = booleanPreferencesKey("set_is_first_run")
 
+        val KEY_STARTUP_PAGE = stringPreferencesKey("startup_page")
+        val KEY_VIDEO_DOWNLOAD_ENABLED = booleanPreferencesKey("video_download_enabled")
+        val KEY_SANITIZE_LINKS = booleanPreferencesKey("set_sanitize_links")
+        val KEY_NOTIFY_SESSION_END = booleanPreferencesKey("set_notify_session_end")
+        val KEY_NOTIFY_PERSISTENT = booleanPreferencesKey("set_notify_persistent")
+
         val KEY_GHOST_MODE_ENABLED = booleanPreferencesKey("ghost_mode_enabled")
         val KEY_GHOST_HIDE_STORY_SEEN = booleanPreferencesKey("ghost_hide_story_seen")
         val KEY_GHOST_HIDE_DIRECT_SEEN = booleanPreferencesKey("ghost_hide_direct_seen")
         val KEY_GHOST_HIDE_TYPING = booleanPreferencesKey("ghost_hide_typing")
+        val KEY_LAST_SESSION_END_TIMESTAMP = longPreferencesKey("last_session_end_timestamp")
     }
 }

@@ -302,7 +302,7 @@ fun EffortFrictionGate(
                     .height(48.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White.copy(alpha = 0.7f)),
-                border = ButtonDefaults.outlinedButtonBorder.copy(brush = Brush.linearGradient(listOf(Color(0xFF333333), Color(0xFF333333))))
+                border = ButtonDefaults.outlinedButtonBorder(enabled = true).copy(brush = Brush.linearGradient(listOf(Color(0xFF333333), Color(0xFF333333))))
             ) {
                 Text("Close & Stay Focused")
             }

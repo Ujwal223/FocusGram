@@ -15,8 +15,8 @@
 
     function isReelVideo() {
         try {
-            const path = window.location.pathname || '';
-            return path.includes('/reel/') || path.includes('/reels/');
+            const path = (window.location.pathname || '').toLowerCase();
+            return path.startsWith('/reel') || path.includes('/reel');
         } catch (_) {
             return false;
         }

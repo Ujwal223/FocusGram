@@ -19,10 +19,10 @@ import org.mozilla.geckoview.WebExtension
  */
 class ExtensionManager(private val runtime: GeckoRuntime) {
 
-    private val _isUBlockActive = MutableStateFlow(false)
-    val isUBlockActive: StateFlow<Boolean> = _isUBlockActive.asStateFlow()
+    private val _isContentBlockerActive = MutableStateFlow(false)
+    val isContentBlockerActive: StateFlow<Boolean> = _isContentBlockerActive.asStateFlow()
 
-    private var uBlockExtension: WebExtension? = null
+    private var contentBlockerExtension: WebExtension? = null
     private var activePort: WebExtension.Port? = null
     private var cachedSettings: FocusSettings = FocusSettings()
 
@@ -30,36 +30,40 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
     var onInputFocused: ((Boolean) -> Unit)? = null
     var onUrlChanged: ((String) -> Unit)? = null
     var onModalOrChatActive: ((Boolean) -> Unit)? = null
+    var onThemeChanged: ((String) -> Unit)? = null
+    var onReelViewed: ((url: String, title: String, author: String, thumbnail: String) -> Unit)? = null
 
     /**
-     * Installs and activates uBlock Origin and FocusGram controller from APK assets.
+     * Installs and activates built-in content blocking and FocusGram controller from APK assets.
      */
-    suspend fun initializeUBlockOrigin(): Result<WebExtension> {
-        uBlockExtension?.let { return Result.success(it) }
+    suspend fun initializeContentBlocker(): Result<WebExtension> {
+        contentBlockerExtension?.let { return Result.success(it) }
         return try {
-            Log.i(TAG, "Mounting built-in uBlock Origin WebExtension from assets...")
+            Log.i(TAG, "Mounting built-in Content Blocker WebExtension from assets...")
             val extension = runtime.webExtensionController
-                .ensureBuiltIn(UBLOCK_ASSET_URI, UBLOCK_EXTENSION_ID)
+                .ensureBuiltIn(CONTENT_BLOCKER_ASSET_URI, CONTENT_BLOCKER_EXTENSION_ID)
                 .await()
 
             if (extension != null) {
-                uBlockExtension = extension
-                _isUBlockActive.value = true
+                contentBlockerExtension = extension
+                _isContentBlockerActive.value = true
                 setupMessageDelegate(extension)
-                Log.i(TAG, "✓ uBlock Origin successfully initialized and active! (ID: ${extension.id})")
+                Log.i(TAG, "✓ Content Blocker successfully initialized and active! (ID: ${extension.id})")
                 Result.success(extension)
             } else {
                 val errorMsg = "WebExtensionController returned null extension instance"
                 Log.e(TAG, errorMsg)
-                _isUBlockActive.value = false
+                _isContentBlockerActive.value = false
                 Result.failure(IllegalStateException(errorMsg))
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to mount uBlock Origin WebExtension: ${e.message}", e)
-            _isUBlockActive.value = false
+            Log.e(TAG, "Failed to mount Content Blocker WebExtension: ${e.message}", e)
+            _isContentBlockerActive.value = false
             Result.failure(e)
         }
     }
+
+    suspend fun initializeUBlockOrigin(): Result<WebExtension> = initializeContentBlocker()
 
     private fun setupMessageDelegate(extension: WebExtension) {
         extension.setMessageDelegate(object : WebExtension.MessageDelegate {
@@ -86,8 +90,13 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                         }
                     }
                 })
-                // Immediately synchronize cached settings
+                // Immediately synchronize cached settings and reveal mode
                 sendSettingsToPort(port, cachedSettings)
+                try {
+                    port.postMessage(JSONObject().put("revealMode", cachedSettings.unblurMode))
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to send initial revealMode to port: ${e.message}", e)
+                }
             }
         }, "focusgram")
     }
@@ -122,6 +131,24 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                 Log.d(TAG, "Received modalOrChatActive from Instagram web: $active")
                 mainHandler.post { onModalOrChatActive?.invoke(active) }
             }
+            "themeChanged" -> {
+                val theme = json.optString("theme", "dark")
+                Log.d(TAG, "Received themeChanged from Instagram web: $theme")
+                mainHandler.post { onThemeChanged?.invoke(theme) }
+            }
+            "reelViewed" -> {
+                val reelObj = json.optJSONObject("reel")
+                val url = reelObj?.optString("url")?.takeIf { it.isNotBlank() } ?: json.optString("url", "")
+                val title = reelObj?.optString("title")?.takeIf { it.isNotBlank() } ?: json.optString("title", "Instagram Reel")
+                val author = reelObj?.optString("author")?.takeIf { it.isNotBlank() } ?: json.optString("author", "Instagram Creator")
+                val thumbnail = reelObj?.optString("thumbnailUrl")?.takeIf { it.isNotBlank() } ?: json.optString("thumbnailUrl", "")
+                if (url.isNotBlank()) {
+                    Log.d(TAG, "Received reelViewed: url=$url, title=$title, author=$author")
+                    mainHandler.post {
+                        onReelViewed?.invoke(url, title, author, thumbnail)
+                    }
+                }
+            }
             "getSettings" -> {
                 activePort?.let { sendSettingsToPort(it, cachedSettings) }
             }
@@ -142,13 +169,19 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                 put("noAds", settings.noAds)
                 put("noStories", settings.noStories)
                 put("noReels", settings.noReels)
+                put("hideFeedPosts", settings.hideFeedPosts)
                 put("blurExplore", settings.blurExplore)
+                put("blurReels", settings.blurReels)
+                put("tapToUnblur", settings.tapToUnblur)
+                put("requireLongPress", settings.requireLongPress)
+                put("unblurMode", settings.unblurMode)
                 put("hideLikeCounts", settings.hideLikeCounts)
                 put("hideFollowerCounts", settings.hideFollowerCounts)
                 put("hideSuggestedPosts", settings.hideSuggestedPosts)
                 put("hideShopTab", settings.hideShopTab)
                 put("noAutoplay", settings.noAutoplay)
                 put("grayscale", settings.grayscaleEnabled)
+                put("minimalMode", settings.minimalModeEnabled)
                 put("ghostModeEnabled", settings.ghostModeEnabled)
                 put("ghostHideStorySeen", settings.ghostHideStorySeen)
                 put("ghostHideDirectSeen", settings.ghostHideDirectSeen)
@@ -158,11 +191,28 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
             val msg = JSONObject().apply {
                 put("action", "updateSettings")
                 put("settings", settingsJson)
+                put("revealMode", settings.unblurMode)
             }
             port.postMessage(msg)
-            Log.d(TAG, "Broadcast settings to WebExtension: noAds=${settings.noAds}, ghost=${settings.ghostModeEnabled}")
+            Log.d(TAG, "Broadcast settings to WebExtension: noAds=${settings.noAds}, ghost=${settings.ghostModeEnabled}, revealMode=${settings.unblurMode}")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to send settings to WebExtension port", e)
+        }
+    }
+
+    /**
+     * Senior Blueprint: Sets feed post reveal mode ("tap" or "hold") dynamically.
+     */
+    fun setRevealMode(mode: String) {
+        try {
+            val msg = JSONObject().apply {
+                put("action", "revealMode")
+                put("revealMode", mode)
+            }
+            activePort?.postMessage(msg)
+            Log.d(TAG, "Sent revealMode('$mode') to WebExtension port")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send revealMode to port: ${e.message}", e)
         }
     }
 
@@ -207,6 +257,21 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
     }
 
     /**
+     * Triggers post/story creation or camera dialog in Instagram Web.
+     */
+    fun triggerCreate() {
+        try {
+            val msg = JSONObject().apply {
+                put("action", "triggerCreate")
+            }
+            activePort?.postMessage(msg)
+            Log.d(TAG, "Sent triggerCreate to WebExtension port")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send triggerCreate to port: ${e.message}", e)
+        }
+    }
+
+    /**
      * Senior Blueprint: Synchronizes IslandMode (NORMAL, FLOATING, HIDDEN)
      * with the WebExtension content script to dynamically update body padding.
      */
@@ -223,30 +288,34 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
         }
     }
 
-    suspend fun setUBlockEnabled(enabled: Boolean) {
-        val extension = uBlockExtension ?: return
+    suspend fun setContentBlockerEnabled(enabled: Boolean) {
+        val extension = contentBlockerExtension ?: return
         try {
             if (enabled) {
                 runtime.webExtensionController
                     .enable(extension, org.mozilla.geckoview.WebExtensionController.EnableSource.USER)
                     .await()
-                _isUBlockActive.value = true
-                Log.i(TAG, "uBlock Origin enabled")
+                _isContentBlockerActive.value = true
+                Log.i(TAG, "Content ad-blocker enabled")
             } else {
                 runtime.webExtensionController
                     .disable(extension, org.mozilla.geckoview.WebExtensionController.EnableSource.USER)
                     .await()
-                _isUBlockActive.value = false
-                Log.i(TAG, "uBlock Origin disabled")
+                _isContentBlockerActive.value = false
+                Log.i(TAG, "Content ad-blocker disabled")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to toggle uBlock Origin state: ${e.message}", e)
+            Log.e(TAG, "Failed to toggle content ad-blocker state: ${e.message}", e)
         }
     }
 
+    suspend fun setUBlockEnabled(enabled: Boolean) = setContentBlockerEnabled(enabled)
+
     companion object {
         private const val TAG = "ExtensionManager"
-        const val UBLOCK_EXTENSION_ID = "uBlock0@raymondhill.net"
-        const val UBLOCK_ASSET_URI = "resource://android/assets/extensions/ublock/"
+        const val CONTENT_BLOCKER_EXTENSION_ID = "uBlock0@raymondhill.net"
+        const val CONTENT_BLOCKER_ASSET_URI = "resource://android/assets/extensions/ublock/"
+        const val UBLOCK_EXTENSION_ID = CONTENT_BLOCKER_EXTENSION_ID
+        const val UBLOCK_ASSET_URI = CONTENT_BLOCKER_ASSET_URI
     }
 }
