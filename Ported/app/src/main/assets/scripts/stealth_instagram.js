@@ -1,7 +1,6 @@
 /**
- * FocusGram — Ghostify Instagram Privacy & Stealth Engine
+ * FocusGram — Stealth Privacy Engine
  *
- * Adapted directly from Ghostify (https://github.com/Hendrizzzz/Ghostify)
  * Intercepts client-side network calls and DOM visibility signals on instagram.com to provide:
  * 1. Anonymous Story Viewing (suppressing story view and reel seen mutations)
  * 2. Incognito Direct Messages (blocking read receipts and seen acknowledgements)
@@ -12,8 +11,8 @@
 'use strict';
 
 (function () {
-    if (window.__GHOSTIFY_INITIALIZED__) return;
-    window.__GHOSTIFY_INITIALIZED__ = true;
+    if (window.__FG_STEALTH_INITIALIZED__) return;
+    window.__FG_STEALTH_INITIALIZED__ = true;
 
     const DEFAULT_CONFIG = {
         enabled: false,
@@ -22,7 +21,7 @@
         igTyping: true
     };
 
-    window.__GHOSTIFY_CONFIG__ = Object.assign({}, DEFAULT_CONFIG, window.__GHOSTIFY_CONFIG__ || {});
+    window.__FOCUSGRAM_GHOST_CONFIG__ = Object.assign({}, DEFAULT_CONFIG, window.__FOCUSGRAM_GHOST_CONFIG__ || {});
 
     const PATTERNS = {
         igTyping: [
@@ -35,7 +34,9 @@
             "sendtypingindicator",
             "send_typing_indicator",
             "typing_on",
-            "is_composing"
+            "is_composing",
+            "update_activity_status",
+            "activity_status"
         ],
         igSeen: [
             "mark_read",
@@ -73,7 +74,7 @@
     };
 
     function shouldBlock(data, url, method) {
-        const config = window.__GHOSTIFY_CONFIG__;
+        const config = window.__FOCUSGRAM_GHOST_CONFIG__;
         if (!config || !config.enabled) return null;
 
         const urlString = String(url || "").toLowerCase();
@@ -83,6 +84,8 @@
         // Never block actual message sending or media uploads
         if (urlString.includes("threads/broadcast/text") ||
             urlString.includes("direct_v2/threads/broadcast") ||
+            urlString.includes("broadcast/media") ||
+            urlString.includes("action=send_message") ||
             urlString.includes("configure")) {
             return null;
         }
@@ -100,6 +103,38 @@
         }
 
         return null;
+    }
+
+    function createMockPayload(blockType, url, bodyText) {
+        const combined = `${bodyText} ${url}`.toLowerCase();
+        const isGraphQL = combined.includes("/graphql") || combined.includes("fb_api_req_friendly_name") || combined.includes("doc_id");
+
+        if (!isGraphQL) {
+            return { status: "ok", blocked: blockType };
+        }
+
+        if (blockType === "IG_STORY") {
+            if (combined.includes("xdt_api__v1__stories__reel__seen") ||
+                combined.includes("polarisapiforcestoryseenmutation") ||
+                combined.includes("9647304595318258")) {
+                return {
+                    data: {
+                        xdt_api__v1__stories__reel__seen: {
+                            __typename: "XDTEmptyRecord"
+                        }
+                    }
+                };
+            }
+            return {
+                data: {
+                    xdt_mark_story_reel_seen: {
+                        __typename: "XDTMarkSeenResponse"
+                    }
+                }
+            };
+        }
+
+        return { data: {} };
     }
 
     // 1. Intercept Fetch API
@@ -120,8 +155,9 @@
 
         const blockType = shouldBlock(bodyText, url, method);
         if (blockType) {
-            console.log(`[Ghostify] Blocked fetch request: ${blockType} -> ${url}`);
-            return new Response(JSON.stringify({ status: "ok", blocked_by: "Ghostify" }), {
+            console.log(`[FocusGram Stealth] Filtered fetch: ${blockType} -> ${url}`);
+            const payload = createMockPayload(blockType, url, bodyText);
+            return new Response(JSON.stringify(payload), {
                 status: 200,
                 headers: { "Content-Type": "application/json" }
             });
@@ -135,8 +171,8 @@
     const originalXhrSend = XMLHttpRequest.prototype.send;
 
     XMLHttpRequest.prototype.open = function (method, url) {
-        this._ghostifyUrl = url;
-        this._ghostifyMethod = method;
+        this._fgStealthUrl = url;
+        this._fgStealthMethod = method;
         return originalXhrOpen.apply(this, arguments);
     };
 
@@ -146,15 +182,17 @@
             if (typeof body === "string") bodyText = body;
         } catch (_) {}
 
-        const blockType = shouldBlock(bodyText, this._ghostifyUrl, this._ghostifyMethod);
+        const blockType = shouldBlock(bodyText, this._fgStealthUrl, this._fgStealthMethod);
         if (blockType) {
-            console.log(`[Ghostify] Blocked XHR request: ${blockType} -> ${this._ghostifyUrl}`);
+            console.log(`[FocusGram Stealth] Filtered XHR: ${blockType} -> ${this._fgStealthUrl}`);
+            const payload = createMockPayload(blockType, this._fgStealthUrl, bodyText);
             Object.defineProperty(this, 'readyState', { value: 4 });
             Object.defineProperty(this, 'status', { value: 200 });
-            Object.defineProperty(this, 'responseText', { value: JSON.stringify({ status: "ok" }) });
-            if (typeof this.onload === 'function') {
-                this.onload();
-            }
+            Object.defineProperty(this, 'responseText', { value: JSON.stringify(payload) });
+            setTimeout(() => {
+                this.dispatchEvent(new Event('readystatechange'));
+                this.dispatchEvent(new Event('load'));
+            }, 10);
             return;
         }
 
@@ -164,7 +202,7 @@
     // 3. Visibility and Focus Spoofing (Prevents story seen triggers during passive browsing)
     const originalHasFocus = document.hasFocus.bind(document);
     document.hasFocus = function () {
-        const config = window.__GHOSTIFY_CONFIG__;
+        const config = window.__FOCUSGRAM_GHOST_CONFIG__;
         if (config && config.enabled && config.igStory && window.location.pathname.startsWith('/stories/')) {
             return false;
         }
@@ -174,11 +212,16 @@
     // 4. Listen for realtime configuration updates
     window.addEventListener("message", (event) => {
         if (!event.data || event.data.source !== "FOCUSGRAM_HOST") return;
-        if (event.data.type === "GHOSTIFY_UPDATE") {
-            Object.assign(window.__GHOSTIFY_CONFIG__, event.data.config || {});
-            console.log("[Ghostify] Configuration updated:", window.__GHOSTIFY_CONFIG__);
+        if (event.data.type === "FOCUSGRAM_UPDATE" || event.data.type === "STEALTH_UPDATE") {
+            const ghost = event.data.ghost || event.data.config || {};
+            Object.assign(window.__FOCUSGRAM_GHOST_CONFIG__, {
+                enabled: ghost.enabled !== undefined ? ghost.enabled : window.__FOCUSGRAM_GHOST_CONFIG__.enabled,
+                igStory: ghost.igStory !== undefined ? ghost.igStory : window.__FOCUSGRAM_GHOST_CONFIG__.igStory,
+                igSeen: ghost.igSeen !== undefined ? ghost.igSeen : window.__FOCUSGRAM_GHOST_CONFIG__.igSeen,
+                igTyping: ghost.igTyping !== undefined ? ghost.igTyping : window.__FOCUSGRAM_GHOST_CONFIG__.igTyping
+            });
         }
     });
 
-    console.log("[FocusGram] Ghostify Instagram Privacy Engine active.");
+    console.log("[FocusGram] Stealth Privacy Engine active.");
 })();

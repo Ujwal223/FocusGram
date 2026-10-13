@@ -105,7 +105,9 @@ fun AppLockSettingsPage(
                         title = "Auto-Lock on Background",
                         subtitle = "Immediately lock whenever leaving FocusGram",
                         checked = settings.autoLockOnBackground,
-                        onCheckedChange = { /* auto lock toggled in repository */ }
+                        onCheckedChange = { isChecked ->
+                            scope.launch { repository.setAutoLockBackground(isChecked) }
+                        }
                     )
                 }
 

@@ -12,7 +12,7 @@ import org.mozilla.geckoview.GeckoRuntimeSettings
  *
  * Configures:
  * - ContentBlocking: ETP Strict, Social Tracking Protection, First-Party Cookie Isolation.
- * - Extensions Process: Enabled for uBlock Origin WebExtension execution.
+ * - Extensions Process: Enabled for Content Blocker WebExtension execution.
  * - Privacy: Query parameter stripping, DNT, Sec-GPC.
  * - Hardening: about:config disabled in production, console output managed.
  */
@@ -39,6 +39,7 @@ class GeckoRuntimeManager private constructor(context: Context) {
             .extensionsProcessEnabled(true)
             .extensionsWebAPIEnabled(true)
             .contentBlocking(contentBlockingSettings)
+            .preferredColorScheme(GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM)
             .build()
 
         Log.i(TAG, "Initializing Mozilla GeckoRuntime with strict privacy & WebExtension runtime...")

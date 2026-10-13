@@ -20,3 +20,9 @@ val FocusGold = Color(0xFFFFD700)
 val FocusGoldDark = Color(0xFFB8860B)
 val FocusGreen = Color(0xFF2ECC71)
 val AlertRed = Color(0xFFED4956)
+
+// Light Mode Tokens
+val PureWhite = Color(0xFFFFFFFF)
+val LightGrayBg = Color(0xFFF2F2F7)
+val SecondaryText = Color(0xFF8E8E93)
+val LightBorder = Color(0xFFE5E5EA)

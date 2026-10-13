@@ -8,6 +8,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,18 +20,19 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,10 +50,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import com.ujwal.focusgram.core.ui.theme.FocusGreen
 import com.ujwal.focusgram.core.ui.theme.PureBlack
-import com.ujwal.focusgram.core.ui.theme.TextMuted
-import com.ujwal.focusgram.core.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
 
 private const val AD_HTML = """
@@ -84,7 +83,7 @@ private const val AD_HTML = """
 
 /**
  * AdsterraAdScreen
- * Isolated rewarded ad viewing container running outside uBlock Origin.
+ * Premium iOS monochrome rewarded ad viewing container running in a dedicated WebView.
  * Enforces a 20s countdown timer and 2 external browser ad clicks to claim focus minutes.
  */
 @SuppressLint("SetJavaScriptEnabled")
@@ -112,13 +111,11 @@ fun AdsterraAdScreen(
     }
 
     val statusText = when {
-        isComplete -> "Reward Unlocked! Tap below to continue."
-        bothClicked -> "Both ads clicked! Waiting for timer (${requiredSeconds - elapsedSeconds}s)..."
-        timerDone -> "Timer done! Please click both ads ($adsClicked/2) to continue."
-        else -> "Tap BOTH ads below to earn reward ($adsClicked/2 clicked)"
+        isComplete -> "Reward Unlocked! Tap below to claim focus minutes."
+        bothClicked -> "Both ads clicked! Waiting for countdown (${requiredSeconds - elapsedSeconds}s)..."
+        timerDone -> "Timer completed. Please tap both ads ($adsClicked/2) to continue."
+        else -> "Tap BOTH ads below to earn reward credits ($adsClicked/2 clicked)"
     }
-
-    val statusColor = if (bothClicked) FocusGreen else TextSecondary
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -129,65 +126,99 @@ fun AdsterraAdScreen(
                 .fillMaxSize()
                 .systemBarsPadding()
         ) {
-            // Header Bar
+            // iOS Monochrome Header Bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Default.Videocam,
-                    contentDescription = null,
-                    tint = TextMuted,
-                    modifier = Modifier.size(20.dp)
-                )
-                Text(
-                    text = " Sponsored Reward",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                Text(
-                    text = "${elapsedSeconds.coerceAtMost(requiredSeconds)}s / ${requiredSeconds}s",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = if (isComplete) FocusGreen else TextSecondary
-                )
-                IconButton(onClick = onCancel) {
-                    Text("✕", color = Color.White, fontSize = 16.sp)
+                IconButton(
+                    onClick = onCancel,
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF1C1C1E))
+                        .border(0.5.dp, Color(0xFF2C2C2E), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Support FocusGram",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Sponsored Reward",
+                        color = Color(0xFF8E8E93),
+                        fontSize = 12.sp
+                    )
+                }
+
+                // Apple Style Timer Pill Badge
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF1C1C1E))
+                        .border(0.5.dp, Color(0xFF2C2C2E), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                ) {
+                    Text(
+                        text = "${elapsedSeconds.coerceAtMost(requiredSeconds)}s / ${requiredSeconds}s",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = if (isComplete) Color.White else Color(0xFF8E8E93)
+                    )
                 }
             }
 
-            // Progress Bar
+            // Monochrome Progress Bar
             LinearProgressIndicator(
                 progress = { (elapsedSeconds.toFloat() / requiredSeconds).coerceIn(0f, 1f) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(3.dp),
-                color = if (isComplete) FocusGreen else Color(0xFF3797EF),
-                trackColor = Color(0xFF222222)
+                    .height(2.dp),
+                color = Color.White,
+                trackColor = Color(0xFF2C2C2E)
             )
 
-            // Hint Text
+            // Status Card
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 8.dp),
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF1C1C1E))
+                    .border(0.5.dp, Color(0xFF2C2C2E), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = statusText,
                     fontSize = 12.sp,
-                    color = statusColor,
+                    color = if (isComplete) Color.White else Color(0xFF8E8E93),
                     fontWeight = FontWeight.Medium
                 )
             }
 
-            // Isolated Ad WebView Host (Strictly bypasses uBlock Origin for Adsterra)
+            // Dedicated ad WebView host container
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .border(0.5.dp, Color(0xFF2C2C2E), RoundedCornerShape(12.dp))
                     .background(Color(0xFF111111))
             ) {
                 AndroidView(
@@ -201,7 +232,6 @@ fun AdsterraAdScreen(
                             settings.apply {
                                 javaScriptEnabled = true
                                 domStorageEnabled = true
-                                databaseEnabled = true
                                 loadWithOverviewMode = true
                                 useWideViewPort = true
                             }
@@ -236,34 +266,36 @@ fun AdsterraAdScreen(
                 )
             }
 
-            // Bottom Action Area
+            // Bottom Action Area (iOS Monochrome Buttons)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                // Primary Claim Button: Apple Style Pill Button
                 Button(
                     onClick = onRewardClaimed,
                     enabled = isComplete,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(52.dp),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(26.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = FocusGreen,
-                        contentColor = PureBlack,
-                        disabledContainerColor = Color.White.copy(alpha = 0.12f),
-                        disabledContentColor = Color.White.copy(alpha = 0.3f)
+                        containerColor = Color.White,
+                        contentColor = Color.Black,
+                        disabledContainerColor = Color(0xFF1C1C1E),
+                        disabledContentColor = Color(0xFF636366)
                     )
                 ) {
                     Icon(
                         imageVector = if (isComplete) Icons.Default.CheckCircle else Icons.Default.Timer,
                         contentDescription = null,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(18.dp)
                     )
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (isComplete) " Continue & Earn Reward (+2 min)" else " Complete Ad Actions to Unlock",
+                        text = if (isComplete) "Continue & Earn Reward (+2 min)" else "Complete Ad Actions to Unlock",
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp
                     )
@@ -280,20 +312,23 @@ fun AdsterraAdScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(44.dp),
-                        shape = RoundedCornerShape(14.dp),
+                        shape = RoundedCornerShape(22.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF262626),
+                            containerColor = Color(0xFF1C1C1E),
                             contentColor = Color.White
-                        )
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF2C2C2E))
                     ) {
                         Icon(
                             imageVector = Icons.Default.Refresh,
                             contentDescription = null,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = " Reload Ads & Retry",
-                            fontSize = 13.sp
+                            text = "Reload Ads & Retry",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
                         )
                     }
                 }

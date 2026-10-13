@@ -22,8 +22,8 @@ class FocusSettingsTest {
         assertTrue(settings.noAutoplay)
         // Explore blurred by default
         assertTrue(settings.blurExplore)
-        // Suggested posts hidden by default
-        assertTrue(settings.hideSuggestedPosts)
+        // Suggested posts false by default to prevent feed blanking after ~9 posts
+        assertFalse(settings.hideSuggestedPosts)
         // Breathing gate enabled by default
         assertTrue(settings.showBreathGate)
         assertEquals(10, settings.breathGateSeconds)

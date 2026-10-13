@@ -96,14 +96,10 @@
     function updateStyles() {
         const config = window.__FOCUSGRAM_CONFIG__ || {};
         let css = `
-            /* ALWAYS hide Instagram web's own bottom navigation bar */
-            nav[role="navigation"],
-            div[role="navigation"]:has(a[href="/"]),
-            div[role="navigation"]:has(svg[aria-label="Home"]),
-            div[role="navigation"]:has(svg[aria-label="Search"]),
-            footer[role="contentinfo"],
-            div[style*="position: fixed"][style*="bottom: 0"]:has(a[href="/"]),
-            div[style*="position: fixed"][style*="bottom: 0px"]:has(a[href="/"]) {
+            /* ALWAYS hide Instagram web's own bottom navigation bar — strictly require Explore link so DMs are never hidden */
+            nav[role="navigation"]:has(a[href*="/explore/"]),
+            div[role="navigation"]:has(a[href*="/explore/"]),
+            footer[role="contentinfo"]:has(a[href*="/explore/"]) {
                 display: none !important;
                 visibility: hidden !important;
                 pointer-events: none !important;
@@ -112,12 +108,25 @@
 
         if (config.hideStories) {
             css += `
+                div[data-pagelet="story_tray"],
+                div[data-pagelet*="story"],
+                [data-pagelet="story_tray"],
+                [data-pagelet*="story_tray"],
+                div:has(> div > div > div[aria-label*="Story by"]),
+                div:has(> div > div > div[aria-label*="Your story"]),
                 [aria-label*="Stories"],
                 [aria-label*="stories"],
                 [role="list"]:has([aria-label*="tory"]),
                 [role="listbox"]:has([aria-label*="tory"]),
                 section > div > div[style*="overflow-x"] {
                     display: none !important;
+                    visibility: hidden !important;
+                    height: 0 !important;
+                    min-height: 0 !important;
+                    max-height: 0 !important;
+                    overflow: hidden !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
                 }
             `;
         }
@@ -127,6 +136,15 @@
                 a[href*="/reel"],
                 a[href*="/reels"],
                 div:has(> a[href*="/reel"]) {
+                    display: none !important;
+                }
+            `;
+        }
+
+        if (config.hideFeedPosts || config.minimalMode) {
+            css += `
+                main article:not([role="dialog"] article),
+                div[role="feed"] article {
                     display: none !important;
                 }
             `;
@@ -142,6 +160,20 @@
                 }
                 main a[href*="/p/"] img:active,
                 main a[href*="/reel/"] img:active {
+                    filter: none !important;
+                }
+            `;
+        }
+
+        if (config.blurReels) {
+            css += `
+                main div:has(> video),
+                article div:has(> video) {
+                    filter: blur(24px) !important;
+                    transition: filter 0.2s ease-in-out !important;
+                }
+                main div:has(> video):active,
+                article div:has(> video):active {
                     filter: none !important;
                 }
             `;
@@ -178,8 +210,23 @@
 
         if (config.noAds !== false) {
             css += `
-                article:has(span:has-text("Sponsored")),
                 article:has(a[href*="/ad_"]),
+                article:has(a[href*="/ads/"]),
+                article:has(a[href*="/about/ads"]),
+                article:has(a[href*="ads.instagram.com"]),
+                article[data-fg-ad-filtered="true"] {
+                    height: 1px !important;
+                    min-height: 1px !important;
+                    max-height: 1px !important;
+                    overflow: hidden !important;
+                    opacity: 0 !important;
+                    pointer-events: none !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    border: none !important;
+                }
+                div[data-ad-preview],
+                div[data-testid="post_ad"],
                 div[data-testid="suggested-users"] {
                     display: none !important;
                 }
@@ -201,24 +248,84 @@
     function scanDynamicDOM() {
         const config = window.__FOCUSGRAM_CONFIG__ || {};
         try {
-            if (config.hideSuggestedPosts !== false) {
-                document.querySelectorAll('span, h2, h3, h4').forEach((el) => {
-                    const text = (el.textContent || '').trim().toLowerCase();
-                    if (text === 'suggested for you' || text === 'suggested posts' || text === 'sponsored') {
-                        const parent = el.closest('article') || el.closest('div[style*="flex"]');
-                        if (parent) {
-                            parent.style.setProperty('display', 'none', 'important');
+            // Filter Sponsored Ads
+            if (config.noAds !== false) {
+                const SPONSORED_KW = ['sponsored', 'gesponsert', 'sponsorisé', 'publicidad', 'patrocinado', 'sponsorizzato', 'paid partnership'];
+                const AD_CTA = ['learn more', 'shop now', 'install now', 'sign up', 'apply now', 'book now', 'download', 'order now', 'get offer', 'subscribe', 'contact us'];
+                // Strictly target individual article elements to avoid hiding feed wrappers
+                document.querySelectorAll('article').forEach((article) => {
+                    if (article.dataset.fgAdFiltered) return;
+                    let isAd = false;
+                    const spans = article.querySelectorAll('header span, header a, div[role="button"] span, a[role="button"]');
+                    for (let i = 0; i < spans.length; i++) {
+                        const t = (spans[i].textContent || '').trim().toLowerCase();
+                        if (SPONSORED_KW.some(kw => t === kw || t.startsWith(kw)) || AD_CTA.some(cta => t === cta)) {
+                            isAd = true;
+                            break;
                         }
+                    }
+                    if (!isAd && article.querySelector('a[href*="/ad_"], a[href*="/ads/"], a[href*="/about/ads"], a[href*="ads.instagram.com"]')) {
+                        isAd = true;
+                    }
+                    if (isAd) {
+                        article.style.setProperty('height', '1px', 'important');
+                        article.style.setProperty('min-height', '1px', 'important');
+                        article.style.setProperty('max-height', '1px', 'important');
+                        article.style.setProperty('overflow', 'hidden', 'important');
+                        article.style.setProperty('opacity', '0', 'important');
+                        article.style.setProperty('pointer-events', 'none', 'important');
+                        article.style.setProperty('margin', '0', 'important');
+                        article.style.setProperty('padding', '0', 'important');
+                        article.dataset.fgAdFiltered = 'true';
+                        window.dispatchEvent(new Event('scroll'));
                     }
                 });
             }
 
+            // Filter Suggested Posts
+            if (config.hideSuggestedPosts) {
+                // Strictly target individual article elements or specific suggested-users widgets
+                document.querySelectorAll('article').forEach((article) => {
+                    if (article.dataset.fgSuggestedHidden) return;
+                    const headers = article.querySelectorAll('header span, header h2, header h3, h2, h3, h4, span');
+                    for (let i = 0; i < headers.length; i++) {
+                        const text = (headers[i].textContent || '').trim().toLowerCase();
+                        if (text === 'suggested for you' || text === 'suggested posts' || text === 'suggested post' || text === 'suggestions for you') {
+                            article.style.setProperty('height', '1px', 'important');
+                            article.style.setProperty('min-height', '1px', 'important');
+                            article.style.setProperty('max-height', '1px', 'important');
+                            article.style.setProperty('overflow', 'hidden', 'important');
+                            article.style.setProperty('opacity', '0', 'important');
+                            article.style.setProperty('pointer-events', 'none', 'important');
+                            article.style.setProperty('margin', '0', 'important');
+                            article.style.setProperty('padding', '0', 'important');
+                            article.dataset.fgSuggestedHidden = 'true';
+                            window.dispatchEvent(new Event('scroll'));
+                            break;
+                        }
+                    }
+                });
+                document.querySelectorAll('div[data-testid="suggested-users"]').forEach((el) => {
+                    el.style.setProperty('display', 'none', 'important');
+                });
+            }
+
+            // Hide Like Counts
             if (config.hideLikeCounts) {
-                document.querySelectorAll('span').forEach((el) => {
+                document.querySelectorAll('span, a').forEach((el) => {
                     const text = (el.textContent || '').trim();
-                    if (/^[\d,.]+[KkMm]?\s+(like|likes|view|views)$/i.test(text)) {
+                    if (/^[\d,.]+[KkMm]?\s+(like|likes|view|views)$/i.test(text) || /^liked by\s+/i.test(text.toLowerCase())) {
                         el.style.setProperty('display', 'none', 'important');
                     }
+                });
+            }
+
+            // Hide Follower Counts
+            if (config.hideFollowerCounts) {
+                document.querySelectorAll('a[href*="/followers/"], a[href*="/following/"]').forEach((el) => {
+                    el.querySelectorAll('span').forEach(s => {
+                        s.style.setProperty('visibility', 'hidden', 'important');
+                    });
                 });
             }
         } catch (_) {}

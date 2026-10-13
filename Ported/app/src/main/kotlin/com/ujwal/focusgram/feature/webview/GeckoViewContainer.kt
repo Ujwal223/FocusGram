@@ -44,6 +44,7 @@ import org.mozilla.geckoview.GeckoView
 @Composable
 fun GeckoViewContainer(
     sessionManager: GeckoSessionManager,
+    grayscale: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val isLoading by sessionManager.isLoading.collectAsState()
@@ -54,6 +55,22 @@ fun GeckoViewContainer(
 
     if (!isLoading && progress >= 100) {
         initialLoadCompleted = true
+    }
+
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner, sessionManager) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> sessionManager.onPause()
+                androidx.lifecycle.Lifecycle.Event.ON_START -> sessionManager.onResume()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     Box(
@@ -75,7 +92,12 @@ fun GeckoViewContainer(
                 }
             },
             update = { geckoView ->
-                // GeckoView manages its own session updates internally
+                if (geckoView.session != sessionManager.session) {
+                    geckoView.setSession(sessionManager.session)
+                }
+            },
+            onRelease = { geckoView ->
+                geckoView.releaseSession()
             }
         )
 

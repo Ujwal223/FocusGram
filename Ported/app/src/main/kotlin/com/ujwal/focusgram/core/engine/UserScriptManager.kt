@@ -7,8 +7,8 @@ import org.mozilla.geckoview.GeckoSession
 
 /**
  * UserScriptManager
- * Loads, configures, and evaluates FocusGram client-side UserScripts inside GeckoSession,
- * including Ghostify privacy hooks, ad cosmetic filters, and UI guardrails.
+ * Loads, configures, and evaluates FocusGram client-side scripts inside GeckoSession,
+ * including stealth privacy hooks, ad cosmetic filters, and UI guardrails.
  */
 class UserScriptManager(private val context: Context) {
 
@@ -36,15 +36,20 @@ class UserScriptManager(private val context: Context) {
                     noAds: ${settings.noAds},
                     hideStories: ${settings.noStories},
                     hideReels: ${settings.noReels},
+                    hideFeedPosts: ${settings.hideFeedPosts},
                     blurExplore: ${settings.blurExplore},
+                    blurReels: ${settings.blurReels},
+                    tapToUnblur: ${settings.tapToUnblur},
+                    requireLongPress: ${settings.requireLongPress},
                     hideLikeCounts: ${settings.hideLikeCounts},
                     hideFollowerCounts: ${settings.hideFollowerCounts},
                     hideSuggestedPosts: ${settings.hideSuggestedPosts},
                     hideShopTab: ${settings.hideShopTab},
                     blockAutoplay: ${settings.noAutoplay},
-                    grayscale: ${settings.grayscaleEnabled}
+                    grayscale: ${settings.grayscaleEnabled},
+                    minimalMode: ${settings.minimalModeEnabled}
                 };
-                window.__GHOSTIFY_CONFIG__ = {
+                window.__FOCUSGRAM_GHOST_CONFIG__ = {
                     enabled: ${settings.ghostModeEnabled},
                     igStory: ${settings.ghostHideStorySeen},
                     igSeen: ${settings.ghostHideDirectSeen},
@@ -53,10 +58,20 @@ class UserScriptManager(private val context: Context) {
                 if (window.__focusgramUpdateStyles) {
                     window.__focusgramUpdateStyles();
                 }
+                if (window.__focusgramGhostSettings) {
+                    window.__focusgramGhostSettings.enabled = ${settings.ghostModeEnabled};
+                    window.__focusgramGhostSettings.hideStorySeen = ${settings.ghostHideStorySeen};
+                    window.__focusgramGhostSettings.hideDirectSeen = ${settings.ghostHideDirectSeen};
+                    window.__focusgramGhostSettings.hideTyping = ${settings.ghostHideTypingIndicator};
+                }
+                if (window.__fgSetGrayscale) {
+                    window.__fgSetGrayscale(${settings.grayscaleEnabled});
+                }
                 window.postMessage({
                     source: "FOCUSGRAM_HOST",
-                    type: "GHOSTIFY_UPDATE",
-                    config: window.__GHOSTIFY_CONFIG__
+                    type: "FOCUSGRAM_UPDATE",
+                    config: window.__FOCUSGRAM_CONFIG__,
+                    ghost: window.__FOCUSGRAM_GHOST_CONFIG__
                 }, "*");
             })();
         """.trimIndent()
@@ -65,21 +80,27 @@ class UserScriptManager(private val context: Context) {
 
     /**
      * Evaluates a UserScript inside the active GeckoSession document.
+     * Safely URL-encodes the script body to prevent Gecko's C++ parser from
+     * rejecting scripts containing newlines or control characters.
      */
     fun evaluate(session: GeckoSession, script: String) {
         if (script.isBlank()) return
-        val wrapped = "javascript:(function(){ try { $script } catch(e) { console.error('[UserScriptManager] Execution error:', e); } })();"
-        session.loadUri(wrapped)
+        try {
+            val wrapped = "(function(){ try {\n$script\n} catch(e) { console.error('[UserScriptManager] Execution error:', e); } })();"
+            val encoded = "javascript:" + java.net.URLEncoder.encode(wrapped, "UTF-8").replace("+", "%20")
+            session.loadUri(encoded)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to evaluate UserScript: ${e.message}", e)
+        }
     }
 
     fun injectAll(session: GeckoSession, settings: FocusSettings) {
-        evaluate(session, loadScript("ghostify_instagram.js"))
-        evaluate(session, loadScript("content_hider.js"))
-        evaluate(session, loadScript("autoplay_blocker.js"))
-        evaluate(session, loadScript("grayscale.js"))
-        evaluate(session, loadScript("spa_navigation_monitor.js"))
-        evaluate(session, loadScript("native_feel.js"))
-        evaluate(session, loadScript("reel_metadata_extractor.js"))
+        val bundle = StringBuilder()
+        bundle.append(loadScript("content_hider.js")).append("\n")
+        bundle.append(loadScript("autoplay_blocker.js")).append("\n")
+        bundle.append(loadScript("grayscale.js")).append("\n")
+        bundle.append(loadScript("native_feel.js")).append("\n")
+        evaluate(session, bundle.toString())
         injectConfig(session, settings)
     }
 

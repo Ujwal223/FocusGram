@@ -2,6 +2,7 @@ package com.ujwal.focusgram.core.engine
 
 import android.content.Context
 import android.util.Log
+import com.ujwal.focusgram.core.model.FocusSettings
 import com.ujwal.focusgram.core.model.IslandMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,6 +19,8 @@ import org.mozilla.geckoview.GeckoSessionSettings
 class GeckoSessionManager(private val runtime: GeckoRuntime) {
 
     val session: GeckoSession
+    var userScriptManager: UserScriptManager? = null
+    var currentSettings: FocusSettings = FocusSettings()
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -37,6 +40,9 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
     private val _canGoForward = MutableStateFlow(false)
     val canGoForward: StateFlow<Boolean> = _canGoForward.asStateFlow()
 
+    private val _instagramTheme = MutableStateFlow("auto")
+    val instagramTheme: StateFlow<String> = _instagramTheme.asStateFlow()
+
     private var isOpen = false
 
     init {
@@ -45,7 +51,6 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
             .suspendMediaWhenInactive(true)
             .allowJavascript(true)
             .userAgentMode(GeckoSessionSettings.USER_AGENT_MODE_MOBILE)
-            .userAgentOverride(IOS_USER_AGENT)
             .usePrivateMode(false) // Retain Instagram authentication cookies locally
             .build()
 
@@ -68,6 +73,7 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
                 _progress.value = 100
                 if (success) {
                     injectBottomBarTrimmer()
+                    userScriptManager?.injectAll(session, currentSettings)
                 }
             }
 
@@ -133,6 +139,15 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
         _islandMode.value = mode
     }
 
+    fun updateTheme(theme: String) {
+        _instagramTheme.value = theme
+    }
+
+    fun updateSettings(settings: FocusSettings) {
+        currentSettings = settings
+        userScriptManager?.injectConfig(session, settings)
+    }
+
     fun updateCurrentUrl(url: String) {
         if (!url.startsWith("javascript:")) {
             _currentUrl.value = url
@@ -145,7 +160,60 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
      */
     fun navigateSpa(path: String) {
         val sanitized = path.replace("'", "\\'")
-        val js = "javascript:(function(){ if(window.__focusgramNavigate) { window.__focusgramNavigate('$sanitized'); } else { window.location.href='$sanitized'; } })();"
+        val fullUrl = if (path.startsWith("http")) path else "https://www.instagram.com$path"
+        val relativePath = if (path.startsWith("http")) {
+            path.removePrefix("https://www.instagram.com").removePrefix("http://www.instagram.com")
+        } else {
+            path
+        }.ifEmpty { "/" }
+
+        val js = """javascript:(function(){
+            try {
+                var p = '$relativePath';
+                var full = '$fullUrl';
+                if (window.__focusgramNavigate) {
+                    window.__focusgramNavigate(p);
+                    return;
+                }
+                var target = null;
+                if (p === '/' || p === '') {
+                    target = document.querySelector('svg[aria-label="Home"]')?.closest('a') ||
+                             document.querySelector('a[href="/"]') ||
+                             document.querySelector('a[href="/?variant=home"]');
+                } else if (p.indexOf('explore') !== -1) {
+                    target = document.querySelector('svg[aria-label="Search"]')?.closest('a') ||
+                             document.querySelector('svg[aria-label="Explore"]')?.closest('a') ||
+                             document.querySelector('a[href*="/explore"]');
+                } else if (p.indexOf('reel') !== -1) {
+                    target = document.querySelector('svg[aria-label="Reels"]')?.closest('a') ||
+                             document.querySelector('a[href*="/reels"]') ||
+                             document.querySelector('a[href*="/reel/"]');
+                } else if (p.indexOf('direct') !== -1) {
+                    target = document.querySelector('svg[aria-label="Messages"]')?.closest('a') ||
+                             document.querySelector('svg[aria-label="Direct"]')?.closest('a') ||
+                             document.querySelector('a[href*="/direct/inbox"]') ||
+                             document.querySelector('a[href*="/direct"]');
+                }
+                if (!target) {
+                    target = document.querySelector('a[href="' + p + '"]') ||
+                             document.querySelector('a[href="' + p.replace(/\/$/, '') + '"]') ||
+                             document.querySelector('a[href="' + p.replace(/\/$/, '') + '/"]') ||
+                             document.querySelector('[data-fg-hide] a[href*="' + p.replace(/\/$/, '') + '"]');
+                }
+
+                if (target) {
+                    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+                    target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+                    target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                    target.click();
+                    return;
+                }
+
+                window.location.assign(full);
+            } catch(e) {
+                window.location.assign('$fullUrl');
+            }
+        })();"""
         session.loadUri(js)
     }
 
@@ -162,7 +230,41 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
      * Executes SPA navigation to the logged-in user's profile without opening the edit profile page.
      */
     fun openProfileSpa() {
-        val js = "javascript:(function(){ if(window.__focusgramOpenProfile) { window.__focusgramOpenProfile(); } else { window.location.href='/'; } })();"
+        val js = """javascript:(function(){
+            try {
+                if (window.__focusgramOpenProfile) {
+                    window.__focusgramOpenProfile();
+                    return;
+                }
+                var profileLink = document.querySelector('a[role="link"]:has(img[alt*="profile" i])') ||
+                                  document.querySelector('a[role="link"]:has(img[alt*="\'s profile picture" i])') ||
+                                  document.querySelector('a[href*="/profile/"]') ||
+                                  document.querySelector('[data-focusgram-hidden-bottom-bar] a:last-child') ||
+                                  document.querySelector('[data-fg-hide] a:last-child') ||
+                                  document.querySelector('nav a[href^="/"]:last-child') ||
+                                  document.querySelector('div[role="navigation"] a[href^="/"]:last-child');
+                if (profileLink) {
+                    var href = profileLink.getAttribute('href');
+                    if (href && href !== '/accounts/edit/' && href !== '/accounts/edit' && href !== '/' && href.length > 2) {
+                        profileLink.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+                        profileLink.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+                        profileLink.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                        profileLink.click();
+                        return;
+                    }
+                }
+                var username = (window._sharedData && window._sharedData.config && window._sharedData.config.viewer && window._sharedData.config.viewer.username) ||
+                               (window.__initialData && window.__initialData.data && window.__initialData.data.viewer && window.__initialData.data.viewer.username) ||
+                               window.__viewerUsername;
+                if (username) {
+                    window.location.assign('https://www.instagram.com/' + username + '/');
+                    return;
+                }
+                window.location.assign('https://www.instagram.com/');
+            } catch(e) {
+                window.location.assign('https://www.instagram.com/');
+            }
+        })();"""
         session.loadUri(js)
     }
 
@@ -173,15 +275,17 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
     fun injectBottomBarTrimmer() {
         val js = """javascript:(function() {
             try {
-                document.querySelectorAll('a[href="/"], a[href="/?variant=home"], svg[aria-label="Home"], a[href*="/explore/"], a[href*="/direct/inbox"]').forEach(function(target) {
+                if (window.location.pathname.startsWith('/direct')) return;
+                document.querySelectorAll('a[href="/"], a[href="/?variant=home"], svg[aria-label="Home"], a[href*="/explore/"]').forEach(function(target) {
                     var el = target.closest('a') || target;
                     while (el && el !== document.body && el !== document.documentElement) {
-                        if (el.getAttribute('role') === 'dialog' || el.tagName === 'ARTICLE' || el.tagName === 'FORM') break;
+                        if (el.getAttribute('role') === 'dialog' || el.tagName === 'ARTICLE' || el.tagName === 'FORM' || el.tagName === 'MAIN') break;
                         var cs = window.getComputedStyle(el);
                         var rect = el.getBoundingClientRect();
                         var isFixedOrSticky = cs.position === 'fixed' || cs.position === 'sticky';
-                        var isDockedAtBottom = (cs.bottom && parseInt(cs.bottom, 10) <= 2) ||
-                                               (rect.height > 28 && rect.height < 120 && rect.bottom >= (window.innerHeight - 8) && rect.top >= (window.innerHeight - 120));
+                        var isDockedAtBottom = (rect.height > 28 && rect.height <= 75) &&
+                                               (rect.bottom >= (window.innerHeight - 8)) &&
+                                               (rect.top >= (window.innerHeight - 85));
                         if (isFixedOrSticky && isDockedAtBottom) {
                             el.setAttribute('data-fg-hide', '1');
                             el.setAttribute('data-focusgram-hidden-bottom-bar', 'true');
@@ -201,6 +305,42 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
 
     fun reload() {
         session.reload()
+    }
+
+    /**
+     * Refreshes the Home feed and scrolls smoothly to the top.
+     */
+    fun refreshHome() {
+        val js = """javascript:(function(){
+            try {
+                window.scrollTo(0, 0);
+                var main = document.querySelector('main') || document.querySelector('[role="main"]');
+                if (main) main.scrollTop = 0;
+                var home = document.querySelector('a[href="/"], a[href="/?variant=home"]');
+                if (home) { home.click(); }
+                window.location.reload();
+            } catch(e) {
+                window.location.reload();
+            }
+        })();"""
+        session.loadUri(js)
+    }
+
+    /**
+     * Refreshes the Reels feed.
+     */
+    fun refreshReels() {
+        val js = """javascript:(function(){
+            try {
+                window.scrollTo(0, 0);
+                var reels = document.querySelector('a[href*="/reels/"], a[href*="/reel/"]');
+                if (reels) { reels.click(); }
+                window.location.reload();
+            } catch(e) {
+                window.location.reload();
+            }
+        })();"""
+        session.loadUri(js)
     }
 
     fun goBack(): Boolean {
@@ -232,6 +372,24 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
     fun updateNavigationState(canBack: Boolean, canForward: Boolean) {
         _canGoBack.value = canBack
         _canGoForward.value = canForward
+    }
+
+    fun pauseMedia() {
+        try {
+            session.setActive(false)
+            val pauseJs = "javascript:(function(){ try { document.querySelectorAll('video, audio').forEach(function(m){ m.pause(); }); } catch(_) {} })();"
+            session.loadUri(pauseJs)
+        } catch (e: Exception) {
+            Log.w(TAG, "Error pausing media: ${e.message}")
+        }
+    }
+
+    fun resumeMedia() {
+        try {
+            session.setActive(true)
+        } catch (e: Exception) {
+            Log.w(TAG, "Error resuming media: ${e.message}")
+        }
     }
 
     fun close() {

@@ -70,7 +70,7 @@
                             thumbnailUrl = data.image.url;
                         }
                     }
-                    if (!caption && data.caption) {
+                    if (!title && data.caption) {
                         title = data.caption;
                     }
                 } catch (_) {}
@@ -82,6 +82,22 @@
             const twitterImage = document.querySelector('meta[name="twitter:image"]');
             if (twitterImage && twitterImage.content) {
                 thumbnailUrl = twitterImage.content.trim();
+            }
+        }
+
+        // 5. Fallback to video element poster and DOM author
+        if (!thumbnailUrl) {
+            const videoEl = document.querySelector('video[poster]') || document.querySelector('video');
+            if (videoEl && videoEl.getAttribute('poster')) {
+                thumbnailUrl = videoEl.getAttribute('poster');
+            }
+        }
+        if (!author) {
+            const authorEl = document.querySelector('a[role="link"][tabindex="0"] span') ||
+                             document.querySelector('header a') ||
+                             document.querySelector('div[role="dialog"] header a');
+            if (authorEl && authorEl.textContent) {
+                author = authorEl.textContent.trim();
             }
         }
 
