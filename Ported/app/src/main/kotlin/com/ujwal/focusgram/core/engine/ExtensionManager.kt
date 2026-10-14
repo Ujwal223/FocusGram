@@ -32,6 +32,8 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
     var onModalOrChatActive: ((Boolean) -> Unit)? = null
     var onThemeChanged: ((String) -> Unit)? = null
     var onReelViewed: ((url: String, title: String, author: String, thumbnail: String) -> Unit)? = null
+    var onReelMeta: ((url: String, title: String, author: String) -> Unit)? = null
+    var onDownloadRequested: ((url: String, filename: String) -> Unit)? = null
 
     /**
      * Installs and activates built-in content blocking and FocusGram controller from APK assets.
@@ -45,6 +47,11 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                 .await()
 
             if (extension != null) {
+                try {
+                    runtime.webExtensionController
+                        .enable(extension, org.mozilla.geckoview.WebExtensionController.EnableSource.USER)
+                        .await()
+                } catch (_: Exception) {}
                 contentBlockerExtension = extension
                 _isContentBlockerActive.value = true
                 setupMessageDelegate(extension)
@@ -136,17 +143,46 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                 Log.d(TAG, "Received themeChanged from Instagram web: $theme")
                 mainHandler.post { onThemeChanged?.invoke(theme) }
             }
-            "reelViewed" -> {
+            "reelViewed", "reelWatched" -> {
                 val reelObj = json.optJSONObject("reel")
-                val url = reelObj?.optString("url")?.takeIf { it.isNotBlank() } ?: json.optString("url", "")
-                val title = reelObj?.optString("title")?.takeIf { it.isNotBlank() } ?: json.optString("title", "Instagram Reel")
-                val author = reelObj?.optString("author")?.takeIf { it.isNotBlank() } ?: json.optString("author", "Instagram Creator")
+                var code = json.optString("code", "").trim()
+                if (code.isBlank() && reelObj != null) {
+                    code = reelObj.optString("code", "").trim()
+                }
+                var url = reelObj?.optString("url")?.takeIf { it.isNotBlank() } ?: json.optString("url", "")
+                val rawCaption = reelObj?.optString("caption")?.takeIf { it.isNotBlank() } ?: json.optString("caption", "")
+                val rawTitle = reelObj?.optString("title")?.takeIf { it.isNotBlank() } ?: json.optString("title", "")
+                val title = when {
+                    rawCaption.isNotBlank() -> rawCaption
+                    rawTitle.isNotBlank() && !rawTitle.equals("Instagram Reel", ignoreCase = true) -> rawTitle
+                    else -> ""
+                }
+                val rawAuthor = reelObj?.optString("author")?.takeIf { it.isNotBlank() } ?: json.optString("author", "")
+                val author = if (rawAuthor.equals("Instagram Creator", ignoreCase = true)) "" else rawAuthor
                 val thumbnail = reelObj?.optString("thumbnailUrl")?.takeIf { it.isNotBlank() } ?: json.optString("thumbnailUrl", "")
+
+                if (url.isBlank() && code.isNotBlank()) {
+                    url = if (code.startsWith("reel_")) "https://www.instagram.com/${code.removePrefix("reel_")}/" else "https://www.instagram.com/reel/$code/"
+                }
+
                 if (url.isNotBlank()) {
-                    Log.d(TAG, "Received reelViewed: url=$url, title=$title, author=$author")
+                    val isMeta = json.optString("type") == "meta"
+                    Log.d(TAG, "Received reelWatched: code=$code, url=$url, author=$author, title=$title, isMeta=$isMeta")
                     mainHandler.post {
-                        onReelViewed?.invoke(url, title, author, thumbnail)
+                        if (isMeta) {
+                            onReelMeta?.invoke(url, title, author)
+                        } else {
+                            onReelViewed?.invoke(url, title, author, thumbnail)
+                        }
                     }
+                }
+            }
+            "downloadMedia" -> {
+                val mediaUrl = json.optString("url")
+                val filename = json.optString("filename")
+                Log.d(TAG, "Received downloadMedia from web: url=$mediaUrl, filename=$filename")
+                mainHandler.post {
+                    onDownloadRequested?.invoke(mediaUrl, filename)
                 }
             }
             "getSettings" -> {
@@ -182,6 +218,7 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                 put("noAutoplay", settings.noAutoplay)
                 put("grayscale", settings.grayscaleEnabled)
                 put("minimalMode", settings.minimalModeEnabled)
+                put("videoDownloadEnabled", settings.videoDownloadEnabled)
                 put("ghostModeEnabled", settings.ghostModeEnabled)
                 put("ghostHideStorySeen", settings.ghostHideStorySeen)
                 put("ghostHideDirectSeen", settings.ghostHideDirectSeen)
@@ -289,27 +326,28 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
     }
 
     suspend fun setContentBlockerEnabled(enabled: Boolean) {
-        val extension = contentBlockerExtension ?: return
-        try {
-            if (enabled) {
-                runtime.webExtensionController
-                    .enable(extension, org.mozilla.geckoview.WebExtensionController.EnableSource.USER)
-                    .await()
-                _isContentBlockerActive.value = true
-                Log.i(TAG, "Content ad-blocker enabled")
-            } else {
-                runtime.webExtensionController
-                    .disable(extension, org.mozilla.geckoview.WebExtensionController.EnableSource.USER)
-                    .await()
-                _isContentBlockerActive.value = false
-                Log.i(TAG, "Content ad-blocker disabled")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to toggle content ad-blocker state: ${e.message}", e)
-        }
+        _isContentBlockerActive.value = enabled
+        cachedSettings = cachedSettings.copy(noAds = enabled)
+        broadcastSettings(cachedSettings)
+        Log.i(TAG, "Content ad-blocker dynamic state updated: noAds=$enabled")
     }
 
     suspend fun setUBlockEnabled(enabled: Boolean) = setContentBlockerEnabled(enabled)
+
+    /**
+     * Sends request to in-page content script to extract and report active Reel video URL for downloading.
+     */
+    fun triggerReelDownload() {
+        try {
+            val msg = JSONObject().apply {
+                put("action", "requestReelDownload")
+            }
+            activePort?.postMessage(msg)
+            Log.d(TAG, "Sent requestReelDownload to WebExtension port")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send requestReelDownload to port: ${e.message}", e)
+        }
+    }
 
     companion object {
         private const val TAG = "ExtensionManager"

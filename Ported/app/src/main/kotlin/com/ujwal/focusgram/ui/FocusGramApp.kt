@@ -23,8 +23,11 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.ujwal.focusgram.MainActivity
 import com.ujwal.focusgram.R
+import com.ujwal.focusgram.core.utils.MediaDownloadHelper
 import com.ujwal.focusgram.feature.screentime.ScreenTimeService
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
@@ -64,6 +67,7 @@ import kotlinx.coroutines.withContext
 import com.ujwal.focusgram.core.database.FocusGramDatabase
 import com.ujwal.focusgram.core.datastore.SettingsRepository
 import com.ujwal.focusgram.core.engine.FocusGramNavigationDelegate
+import com.ujwal.focusgram.core.engine.FocusGramPermissionDelegate
 import com.ujwal.focusgram.core.engine.FocusGramPromptDelegate
 import com.ujwal.focusgram.core.engine.GeckoRuntimeManager
 import com.ujwal.focusgram.core.engine.GeckoSessionManager
@@ -131,6 +135,8 @@ fun FocusGramApp() {
     val geckoManager = remember { GeckoRuntimeManager.getInstance(context) }
     val runtime = geckoManager.runtime
     val extensionManager = geckoManager.extensionManager
+    val reelHistory = remember { geckoManager.reelHistory }
+    val reelsWatchedSessionCount by reelHistory.sessionCount.collectAsState()
     val userScriptManager = remember { UserScriptManager(context) }
     val sessionManager = remember {
         GeckoSessionManager(runtime).apply {
@@ -179,27 +185,49 @@ fun FocusGramApp() {
     var adExtensionsUsed by remember { mutableIntStateOf(0) }
     var isSessionExhausted by remember { mutableStateOf(false) }
 
+    // Evaluates whether any barrier, lock, breath pause, effort friction, cooldown, or intention picker is active
+    val isGateActive = shouldShowLock ||
+            ((isDailyLimitExhausted || isSessionExhausted) && destination != AppDestination.ADSTERRA_REWARDED) ||
+            (remainingCooldownSeconds > 0 && !hasPassedCooldownGate) ||
+            (settings.showBreathGate && settings.breathGateSeconds > 0 && !hasPassedBreathGate) ||
+            (settings.effortFrictionEnabled && settings.wordChallengeCount > 0 && !hasPassedEffortFriction) ||
+            !hasPassedSessionPicker
+
     // System File Chooser / Gallery Launchers for Post & Story uploads
     var pendingFilePickerCallback by remember { mutableStateOf<((List<Uri>) -> Unit)?>(null) }
 
-    val multiFilePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments()
-    ) { uris: List<Uri> ->
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val uris = mutableListOf<Uri>()
+        val data = result.data
+        if (result.resultCode == android.app.Activity.RESULT_OK && data != null) {
+            val clipData = data.clipData
+            if (clipData != null) {
+                for (i in 0 until clipData.itemCount) {
+                    clipData.getItemAt(i).uri?.let { uris.add(it) }
+                }
+            } else {
+                data.data?.let { uris.add(it) }
+            }
+        }
         pendingFilePickerCallback?.invoke(uris)
         pendingFilePickerCallback = null
     }
 
-    val singleFilePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        pendingFilePickerCallback?.invoke(if (uri != null) listOf(uri) else emptyList())
-        pendingFilePickerCallback = null
+    // Android Runtime Permissions Launcher (Camera, Audio, Storage)
+    var pendingPermissionCallback by remember { mutableStateOf<((Boolean) -> Unit)?>(null) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val allGranted = results.values.all { it }
+        pendingPermissionCallback?.invoke(allGranted)
+        pendingPermissionCallback = null
     }
 
     val filePickerHandler = remember {
         object : FocusGramPromptDelegate.FilePickerHandler {
-            var launchMulti: ((Array<String>) -> Unit)? = null
-            var launchSingle: ((Array<String>) -> Unit)? = null
+            var launchChooser: ((Array<String>, Boolean) -> Unit)? = null
 
             override fun onPickFiles(
                 mimeTypes: Array<String>,
@@ -207,13 +235,8 @@ fun FocusGramApp() {
                 onResult: (List<Uri>) -> Unit
             ) {
                 pendingFilePickerCallback = onResult
-                val safeMimes = if (mimeTypes.isEmpty()) arrayOf("*/*") else mimeTypes
                 try {
-                    if (allowMultiple) {
-                        launchMulti?.invoke(safeMimes) ?: onResult(emptyList())
-                    } else {
-                        launchSingle?.invoke(safeMimes) ?: onResult(emptyList())
-                    }
+                    launchChooser?.invoke(mimeTypes, allowMultiple) ?: onResult(emptyList())
                 } catch (e: Exception) {
                     Log.e("FocusGramApp", "Error launching file picker: ${e.message}", e)
                     onResult(emptyList())
@@ -221,8 +244,55 @@ fun FocusGramApp() {
             }
         }
     }
-    filePickerHandler.launchMulti = { mimes -> multiFilePickerLauncher.launch(mimes) }
-    filePickerHandler.launchSingle = { mimes -> singleFilePickerLauncher.launch(mimes) }
+
+    filePickerHandler.launchChooser = { mimes, allowMultiple ->
+        val mimeMap = android.webkit.MimeTypeMap.getSingleton()
+        val cleanMimes = mimes
+            .flatMap { it.split(",") }
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .mapNotNull { token ->
+                if (token.startsWith(".")) {
+                    mimeMap.getMimeTypeFromExtension(token.removePrefix("."))
+                } else if (token.contains("/")) {
+                    token
+                } else {
+                    null
+                }
+            }
+            .distinct()
+            .toTypedArray()
+
+        val hasImages = cleanMimes.any { it.startsWith("image/") } || cleanMimes.isEmpty()
+        val hasVideos = cleanMimes.any { it.startsWith("video/") }
+
+        val intent = android.content.Intent(android.content.Intent.ACTION_GET_CONTENT).apply {
+            addCategory(android.content.Intent.CATEGORY_OPENABLE)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            if (allowMultiple) {
+                putExtra(android.content.Intent.EXTRA_ALLOW_MULTIPLE, true)
+            }
+            if (hasImages && !hasVideos) {
+                type = "image/*"
+                if (cleanMimes.isNotEmpty() && !cleanMimes.contains("image/*")) {
+                    putExtra(android.content.Intent.EXTRA_MIME_TYPES, cleanMimes)
+                }
+            } else if (hasVideos && !hasImages) {
+                type = "video/*"
+                if (cleanMimes.isNotEmpty() && !cleanMimes.contains("video/*")) {
+                    putExtra(android.content.Intent.EXTRA_MIME_TYPES, cleanMimes)
+                }
+            } else {
+                type = "*/*"
+                val fallbackTypes = if (cleanMimes.isNotEmpty()) cleanMimes else arrayOf("image/*", "video/*")
+                putExtra(android.content.Intent.EXTRA_MIME_TYPES, fallbackTypes)
+            }
+        }
+        val chooser = android.content.Intent.createChooser(intent, "Select Media").apply {
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        filePickerLauncher.launch(chooser)
+    }
 
     // Pre-warm Rewarded Ad container and cache in background (isolated from GeckoView)
     LaunchedEffect(Unit) {
@@ -316,9 +386,9 @@ fun FocusGramApp() {
         }
     }
 
-    // Media pausing: pause media when leaving webview, resume when returning
-    LaunchedEffect(destination) {
-        if (destination != AppDestination.MAIN_WEBVIEW) {
+    // Media pausing: pause media when leaving webview or when barriers/gates are active, resume when returning
+    LaunchedEffect(destination, isGateActive) {
+        if (destination != AppDestination.MAIN_WEBVIEW || isGateActive) {
             sessionManager.pauseMedia()
         } else {
             sessionManager.resumeMedia()
@@ -339,7 +409,7 @@ fun FocusGramApp() {
                 }
             } else if (event == Lifecycle.Event.ON_START) {
                 isAppInForeground = true
-                if (destination == AppDestination.MAIN_WEBVIEW) {
+                if (destination == AppDestination.MAIN_WEBVIEW && !isGateActive) {
                     sessionManager.resumeMedia()
                 }
             }
@@ -378,9 +448,47 @@ fun FocusGramApp() {
             sessionManager.updateTheme(theme)
         }
         extensionManager.onReelViewed = { url, title, author, thumb ->
+            val code = if (url.contains("/reel/")) {
+                url.substringAfter("/reel/").substringBefore("/").substringBefore("?")
+            } else if (url.contains("/reels/")) {
+                url.substringAfter("/reels/").substringBefore("/").substringBefore("?")
+            } else {
+                url.trimEnd('/').substringAfterLast('/')
+            }
+            val cleanCode = code.trim().removePrefix("/").removeSuffix("/")
+            val ignoredCodes = setOf("reels", "reel", "videos", "audio", "clips", "home", "explore", "direct", "stories")
+            if (cleanCode.length >= 5 && cleanCode.lowercase() !in ignoredCodes) {
+                reelHistory.onWatched(cleanCode, author, title)
+            }
             scope.launch {
                 reelsRepository.addReel(url, title, thumb)
             }
+        }
+        extensionManager.onReelMeta = { url, title, author ->
+            val code = if (url.contains("/reel/")) {
+                url.substringAfter("/reel/").substringBefore("/").substringBefore("?")
+            } else if (url.contains("/reels/")) {
+                url.substringAfter("/reels/").substringBefore("/").substringBefore("?")
+            } else {
+                url.trimEnd('/').substringAfterLast('/')
+            }
+            val cleanCode = code.trim().removePrefix("/").removeSuffix("/")
+            val ignoredCodes = setOf("reels", "reel", "videos", "audio", "clips", "home", "explore", "direct", "stories")
+            if (cleanCode.length >= 5 && cleanCode.lowercase() !in ignoredCodes) {
+                if (title.isNotBlank() || author.isNotBlank()) {
+                    reelHistory.onMeta(cleanCode, author, title)
+                }
+            }
+        }
+        extensionManager.onDownloadRequested = { url, filename ->
+            MediaDownloadHelper.download(context, url, filename)
+        }
+    }
+
+    LaunchedEffect(reelHistory, database) {
+        val todayStr = dateFormat.format(java.util.Date())
+        reelHistory.todayCount.collect { count ->
+            database.screenTimeDao().syncReelsWatched(todayStr, count)
         }
     }
 
@@ -404,6 +512,14 @@ fun FocusGramApp() {
         sessionManager.session.promptDelegate = FocusGramPromptDelegate(
             context = context,
             filePickerHandler = filePickerHandler
+        )
+
+        sessionManager.session.permissionDelegate = FocusGramPermissionDelegate(
+            context = context,
+            onAndroidPermissionRequest = { perms, callback ->
+                pendingPermissionCallback = callback
+                permissionLauncher.launch(perms)
+            }
         )
 
         val initialUrl = when {
@@ -446,87 +562,22 @@ fun FocusGramApp() {
         previousReloadSettings = settings
     }
 
-    // 1. App Lock Enforcement Gate
-    if (shouldShowLock) {
-        AppLockScreen(
-            encryptedStorage = encryptedStorage,
-            onUnlockSuccess = { isAppUnlocked = true },
-            isBiometricAllowed = settings.biometricEnabled
-        )
-        return
+    // When any barrier, gate, lock, or intention picker is active, pressing back exits the app cleanly
+    BackHandler(enabled = isGateActive && destination != AppDestination.ADSTERRA_REWARDED) {
+        activity?.finish()
     }
 
-    // 2. Time limit reached (Daily limit exhausted or Session exhausted)
-    if ((isDailyLimitExhausted || isSessionExhausted) && destination != AppDestination.ADSTERRA_REWARDED) {
-        val elapsedMins = max(sessionDurationMinutes, (totalElapsedSeconds + 59) / 60)
-        val extensionsLeft = if (isDailyLimitExhausted) {
-            if (settings.dailyLimitAdClaimedDate == today) 0 else 1
-        } else {
-            (3 - adExtensionsUsed).coerceAtLeast(0)
-        }
-        SessionExhaustedScreen(
-            elapsedMinutes = elapsedMins,
-            extensionsRemaining = extensionsLeft,
-            onExit = { activity?.finish() },
-            onWatchAdToExtend = {
-                if (extensionsLeft > 0) {
-                    destination = AppDestination.ADSTERRA_REWARDED
-                }
+    // Predictive back gesture: when at the root destination and cannot go back in WebView,
+    // disabling BackHandler allows Android's predictive back-to-home animation to trigger cleanly.
+    val canHandleBack = !isGateActive && (
+            destination != AppDestination.MAIN_WEBVIEW ||
+            sessionManager.canGoBack.value ||
+            sessionManager.currentUrl.value.lowercase().let {
+                it.contains("/direct") || (!it.endsWith("instagram.com/") && !it.endsWith("instagram.com"))
             }
-        )
-        return
-    }
+    )
 
-    // 3. Cooldown Interval Gate between sessions
-    if (remainingCooldownSeconds > 0 && !hasPassedCooldownGate) {
-        CooldownGateScreen(
-            remainingSecondsInitial = remainingCooldownSeconds,
-            onCooldownExpired = { hasPassedCooldownGate = true },
-            onExit = { activity?.finish() }
-        )
-        return
-    }
-
-    // 4. Mindfulness Breath Gate
-    if (settings.showBreathGate && settings.breathGateSeconds > 0 && !hasPassedBreathGate) {
-        BreathGateScreen(
-            durationSeconds = settings.breathGateSeconds,
-            onFinish = { hasPassedBreathGate = true }
-        )
-        return
-    }
-
-    // 5. Effort Friction Challenge
-    if (settings.effortFrictionEnabled && settings.wordChallengeCount > 0 && !hasPassedEffortFriction) {
-        EffortFrictionGate(
-            sessionType = "Instagram",
-            remainingCreditMinutes = settings.instaMinutes,
-            onProceed = { hasPassedEffortFriction = true },
-            onWatchAd = {
-                destination = AppDestination.ADSTERRA_REWARDED
-            },
-            onCancel = { activity?.finish() }
-        )
-        return
-    }
-
-    // 6. Cold-start Conscious Session Picker (Set your intention)
-    if (!hasPassedSessionPicker) {
-        AppSessionPicker(
-            onSessionSelected = { minutes ->
-                sessionDurationMinutes = minutes
-                sessionRemainingSeconds = minutes * 60
-                totalElapsedSeconds = 0
-                adExtensionsUsed = 0
-                isSessionExhausted = false
-                hasPassedSessionPicker = true
-            }
-        )
-        return
-    }
-
-    // Back button handling: going back from subpages ALWAYS takes to Settings main screen
-    BackHandler(enabled = true) {
+    BackHandler(enabled = canHandleBack) {
         when {
             destination == AppDestination.APP_LOCK_SETUP -> {
                 destination = AppDestination.APP_LOCK_SETTINGS
@@ -558,12 +609,10 @@ fun FocusGramApp() {
             }
             else -> {
                 val currentUrlStr = sessionManager.currentUrl.value.lowercase()
-                if (currentUrlStr.contains("/direct") || !currentUrlStr.endsWith("instagram.com/")) {
+                if (currentUrlStr.contains("/direct") || (!currentUrlStr.endsWith("instagram.com/") && !currentUrlStr.endsWith("instagram.com"))) {
                     isWebInputFocused = false
                     isModalActive = false
                     sessionManager.goBack()
-                } else {
-                    activity?.finish()
                 }
             }
         }
@@ -610,20 +659,30 @@ fun FocusGramApp() {
                     )
             )
 
-            // Instagram Reels Native Top Header matching inspiration
+            // Instagram Reels Native Top Header with watched counter and media download
             ReelsTopBar(
-                isVisible = destination == AppDestination.MAIN_WEBVIEW &&
+                isVisible = !isGateActive &&
+                        destination == AppDestination.MAIN_WEBVIEW &&
                         islandMode == IslandMode.FLOATING &&
                         !isModalActive &&
                         !isWebInputFocused,
+                watchedCount = reelsWatchedSessionCount,
+                isDownloadEnabled = settings.videoDownloadEnabled,
                 onReelsClick = {
                     sessionManager.refreshReels()
+                },
+                onDownloadClick = {
+                    extensionManager.triggerReelDownload()
+                    sessionManager.userScriptManager?.evaluate(
+                        sessionManager.session,
+                        "window.dispatchEvent(new CustomEvent('focusgram:download-reel'));"
+                    )
                 },
                 modifier = Modifier.align(Alignment.TopCenter)
             )
 
             // Ambient background behind the floating nav bar on Reels (seamless gradient, no harsh border line)
-            if (destination == AppDestination.MAIN_WEBVIEW && islandMode == IslandMode.FLOATING && !isKeyboardOrInputActive) {
+            if (!isGateActive && destination == AppDestination.MAIN_WEBVIEW && islandMode == IslandMode.FLOATING && !isKeyboardOrInputActive) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -651,7 +710,7 @@ fun FocusGramApp() {
             }
 
             // Native Bottom Navigation Bar (OLED floating island)
-            if (destination == AppDestination.MAIN_WEBVIEW) {
+            if (!isGateActive && destination == AppDestination.MAIN_WEBVIEW) {
                 val instagramTheme by sessionManager.instagramTheme.collectAsState()
                 NativeBottomNavBar(
                     currentUrl = currentUrl,
@@ -684,7 +743,7 @@ fun FocusGramApp() {
 
             // Sub-screen Animated Overlay (Settings, Reels History, App Lock, etc.)
             AnimatedVisibility(
-                visible = destination != AppDestination.MAIN_WEBVIEW,
+                visible = !isGateActive && destination != AppDestination.MAIN_WEBVIEW,
                 enter = slideInHorizontally(animationSpec = tween(280)) { it } + fadeIn(animationSpec = tween(250)),
                 exit = slideOutHorizontally(animationSpec = tween(280)) { it } + fadeOut(animationSpec = tween(220))
             ) {
@@ -721,13 +780,14 @@ fun FocusGramApp() {
                                     destination = AppDestination.MAIN_WEBVIEW
                                     sessionManager.navigateTo(url)
                                 },
-                                screenTimeDao = database.screenTimeDao()
+                                screenTimeDao = database.screenTimeDao(),
+                                reelHistory = reelHistory
                             )
                         }
 
                         AppDestination.REELS_HISTORY -> {
                             ReelsHistoryScreen(
-                                repository = reelsRepository,
+                                reelHistory = reelHistory,
                                 onBack = { destination = AppDestination.SETTINGS },
                                 onOpenReel = { url ->
                                     destination = AppDestination.MAIN_WEBVIEW
@@ -751,7 +811,8 @@ fun FocusGramApp() {
                             ScreenTimeScreen(
                                 screenTimeDao = database.screenTimeDao(),
                                 dailyLimitMinutes = settings.dailyLimitMinutes,
-                                onBack = { destination = AppDestination.SETTINGS }
+                                onBack = { destination = AppDestination.SETTINGS },
+                                reelHistory = reelHistory
                             )
                         }
 
@@ -819,6 +880,77 @@ fun FocusGramApp() {
                                 }
                             )
                         }
+                    }
+                }
+            }
+
+            // Full-screen Gate & Mindful Session Picker Overlays
+            // Rendered on top of GeckoView so Instagram preloads seamlessly in the background.
+            if (isGateActive) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(PureBlack)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {}
+                ) {
+                    if (shouldShowLock) {
+                        AppLockScreen(
+                            encryptedStorage = encryptedStorage,
+                            onUnlockSuccess = { isAppUnlocked = true },
+                            isBiometricAllowed = settings.biometricEnabled
+                        )
+                    } else if ((isDailyLimitExhausted || isSessionExhausted) && destination != AppDestination.ADSTERRA_REWARDED) {
+                        val elapsedMins = max(sessionDurationMinutes, (totalElapsedSeconds + 59) / 60)
+                        val extensionsLeft = if (isDailyLimitExhausted) {
+                            if (settings.dailyLimitAdClaimedDate == today) 0 else 1
+                        } else {
+                            (3 - adExtensionsUsed).coerceAtLeast(0)
+                        }
+                        SessionExhaustedScreen(
+                            elapsedMinutes = elapsedMins,
+                            extensionsRemaining = extensionsLeft,
+                            onExit = { activity?.finish() },
+                            onWatchAdToExtend = {
+                                if (extensionsLeft > 0) {
+                                    destination = AppDestination.ADSTERRA_REWARDED
+                                }
+                            }
+                        )
+                    } else if (remainingCooldownSeconds > 0 && !hasPassedCooldownGate) {
+                        CooldownGateScreen(
+                            remainingSecondsInitial = remainingCooldownSeconds,
+                            onCooldownExpired = { hasPassedCooldownGate = true },
+                            onExit = { activity?.finish() }
+                        )
+                    } else if (settings.showBreathGate && settings.breathGateSeconds > 0 && !hasPassedBreathGate) {
+                        BreathGateScreen(
+                            durationSeconds = settings.breathGateSeconds,
+                            onFinish = { hasPassedBreathGate = true }
+                        )
+                    } else if (settings.effortFrictionEnabled && settings.wordChallengeCount > 0 && !hasPassedEffortFriction) {
+                        EffortFrictionGate(
+                            sessionType = "Instagram",
+                            remainingCreditMinutes = settings.instaMinutes,
+                            onProceed = { hasPassedEffortFriction = true },
+                            onWatchAd = {
+                                destination = AppDestination.ADSTERRA_REWARDED
+                            },
+                            onCancel = { activity?.finish() }
+                        )
+                    } else if (!hasPassedSessionPicker) {
+                        AppSessionPicker(
+                            onSessionSelected = { minutes ->
+                                sessionDurationMinutes = minutes
+                                sessionRemainingSeconds = minutes * 60
+                                totalElapsedSeconds = 0
+                                adExtensionsUsed = 0
+                                isSessionExhausted = false
+                                hasPassedSessionPicker = true
+                            }
+                        )
                     }
                 }
             }

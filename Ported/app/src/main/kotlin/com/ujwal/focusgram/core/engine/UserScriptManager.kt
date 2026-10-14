@@ -49,7 +49,8 @@ class UserScriptManager(private val context: Context) {
                     hideShopTab: ${settings.hideShopTab},
                     blockAutoplay: ${settings.noAutoplay},
                     grayscale: ${settings.grayscaleEnabled},
-                    minimalMode: ${settings.minimalModeEnabled}
+                    minimalMode: ${settings.minimalModeEnabled},
+                    videoDownloadEnabled: ${settings.videoDownloadEnabled}
                 };
                 window.__FOCUSGRAM_GHOST_CONFIG__ = {
                     enabled: ${settings.ghostModeEnabled},
@@ -68,6 +69,13 @@ class UserScriptManager(private val context: Context) {
                 }
                 if (window.__fgSetGrayscale) {
                     window.__fgSetGrayscale(${settings.grayscaleEnabled});
+                }
+                if (window.__fgSetFilterConfig) {
+                    window.__fgSetFilterConfig({
+                        blockAds: ${settings.noAds},
+                        blockSponsored: ${settings.noAds},
+                        blockSuggested: ${settings.hideSuggestedPosts}
+                    });
                 }
                 document.documentElement.setAttribute('data-fg-block-dm-reels', '${settings.blockDmReelsSwiping}');
                 window.postMessage({
@@ -108,6 +116,7 @@ class UserScriptManager(private val context: Context) {
 
     fun injectAll(session: GeckoSession, settings: FocusSettings) {
         val bundle = StringBuilder()
+        bundle.append(loadScript("fetch_interceptor.js")).append("\n")
         bundle.append(loadScript("content_hider.js")).append("\n")
         bundle.append(loadScript("autoplay_blocker.js")).append("\n")
         bundle.append(loadScript("grayscale.js")).append("\n")

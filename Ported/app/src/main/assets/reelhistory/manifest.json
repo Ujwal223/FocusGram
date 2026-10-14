@@ -1,0 +1,13 @@
+{
+  "manifest_version": 2,
+  "name": "FocusGram Reel History",
+  "version": "1.0",
+  "browser_specific_settings": { "gecko": { "id": "reelhistory@focusgram.app" } },
+  "permissions": ["nativeMessaging", "*://*.instagram.com/*"],
+  "background": { "scripts": ["bg.js"] },
+  "content_scripts": [{
+    "matches": ["*://*.instagram.com/*"],
+    "js": ["reels.js"],
+    "run_at": "document_start"
+  }]
+}

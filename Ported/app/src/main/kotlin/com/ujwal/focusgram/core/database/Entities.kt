@@ -13,6 +13,7 @@ data class ScreenTimeRecord(
     val date: String, // Format: YYYY-MM-DD
     val seconds: Int,
     val reelsSeconds: Int = 0,
+    val reelsWatched: Int = 0,
     val lastUpdated: Long = System.currentTimeMillis()
 )
 

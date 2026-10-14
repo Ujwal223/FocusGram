@@ -48,7 +48,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.ujwal.focusgram.core.database.ReelsHistoryItem
 import com.ujwal.focusgram.core.ui.components.FocusGramCard
 import com.ujwal.focusgram.core.ui.components.FocusGramTopBar
 import com.ujwal.focusgram.core.ui.theme.AlertRed
@@ -60,7 +59,6 @@ import com.ujwal.focusgram.core.ui.theme.PureBlack
 import com.ujwal.focusgram.core.ui.theme.TextMuted
 import com.ujwal.focusgram.core.ui.theme.TextPrimary
 import com.ujwal.focusgram.core.ui.theme.TextSecondary
-import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -72,7 +70,7 @@ import java.util.Locale
  */
 @Composable
 fun ReelsHistoryScreen(
-    repository: ReelsHistoryRepository,
+    reelHistory: ReelHistory,
     onBack: () -> Unit,
     onOpenReel: (String) -> Unit,
     modifier: Modifier = Modifier
@@ -82,13 +80,20 @@ fun ReelsHistoryScreen(
     }
 
     var searchQuery by remember { mutableStateOf("") }
-    val scope = rememberCoroutineScope()
     var showClearDialog by remember { mutableStateOf(false) }
 
-    val reels by if (searchQuery.isBlank()) {
-        repository.allReels.collectAsState(initial = emptyList())
-    } else {
-        repository.searchReels(searchQuery).collectAsState(initial = emptyList())
+    val allReels by reelHistory.items.collectAsState()
+    val reels = remember(allReels, searchQuery) {
+        if (searchQuery.isBlank()) {
+            allReels
+        } else {
+            val q = searchQuery.trim().lowercase()
+            allReels.filter {
+                it.author.lowercase().contains(q) ||
+                it.caption.lowercase().contains(q) ||
+                it.code.lowercase().contains(q)
+            }
+        }
     }
 
     Column(
@@ -101,7 +106,7 @@ fun ReelsHistoryScreen(
             title = "Reels History",
             onBack = onBack,
             actions = {
-                if (reels.isNotEmpty()) {
+                if (allReels.isNotEmpty()) {
                     IconButton(onClick = { showClearDialog = true }) {
                         Icon(
                             imageVector = Icons.Default.Delete,
@@ -113,32 +118,12 @@ fun ReelsHistoryScreen(
             }
         )
 
-        // Privacy indicator banner
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Default.Lock,
-                contentDescription = null,
-                tint = TextMuted,
-                modifier = Modifier.size(14.dp)
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = "${reels.size} reels stored locally on-device only",
-                style = MaterialTheme.typography.bodySmall,
-                color = TextMuted
-            )
-        }
 
         // Local search filter field
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            placeholder = { Text("Search by title or URL...", color = TextMuted) },
+            placeholder = { Text("Search by author or caption...", color = TextMuted) },
             leadingIcon = {
                 Icon(Icons.Default.Search, contentDescription = null, tint = TextMuted)
             },
@@ -186,7 +171,7 @@ fun ReelsHistoryScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Watched reels will automatically record metadata here.",
+                        text = "Watched reels will automatically record author and caption here.",
                         style = MaterialTheme.typography.bodySmall,
                         color = TextMuted
                     )
@@ -199,11 +184,11 @@ fun ReelsHistoryScreen(
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(reels, key = { it.id }) { item ->
+                items(reels, key = { it.code }) { item ->
                     ReelHistoryCard(
                         item = item,
                         onClick = { onOpenReel(item.url) },
-                        onDelete = { scope.launch { repository.deleteReel(item.id) } }
+                        onDelete = { reelHistory.delete(item.code) }
                     )
                 }
             }
@@ -216,7 +201,7 @@ fun ReelsHistoryScreen(
             title = { Text("Clear Reels History?", color = TextPrimary) },
             text = {
                 Text(
-                    "This removes all locally recorded reel visit history from SQLite.",
+                    "This removes all locally recorded reel visit history.",
                     color = TextSecondary
                 )
             },
@@ -224,7 +209,7 @@ fun ReelsHistoryScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        scope.launch { repository.clearHistory() }
+                        reelHistory.clear()
                         showClearDialog = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = AlertRed)
@@ -243,7 +228,7 @@ fun ReelsHistoryScreen(
 
 @Composable
 private fun ReelHistoryCard(
-    item: ReelsHistoryItem,
+    item: ReelEntry,
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -276,19 +261,31 @@ private fun ReelHistoryCard(
             Spacer(modifier = Modifier.width(14.dp))
 
             Column(modifier = Modifier.weight(1f)) {
+                if (item.author.isNotBlank()) {
+                    Text(
+                        text = "@${item.author}",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = InstagramBlue,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                }
                 Text(
-                    text = item.title,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                    text = if (item.caption.isNotBlank()) item.caption else "Reel /${item.code}",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Normal),
                     color = TextPrimary,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = formatRelativeTime(item.visitedAt),
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                    color = TextMuted
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = formatRelativeTime(item.lastSeen),
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                        color = TextMuted
+                    )
+                }
             }
 
             IconButton(onClick = onDelete) {

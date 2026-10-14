@@ -29,3 +29,7 @@ key.properties
 Thumbs.db
 *.log
 *.hprof
+
+# Others
+Ghostify/
+Instagram-Downloader/

@@ -1,7 +1,9 @@
 package com.ujwal.focusgram.core.ui.components
 
 import android.content.Context
+import android.media.AudioAttributes
 import android.os.Build
+import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -91,22 +93,7 @@ fun CupertinoWheelPicker(
         snapshotFlow { currentCenteredIndex }
             .collect { index ->
                 if (index in items.indices) {
-                    try {
-                        val performed = view.performHapticFeedback(
-                            HapticFeedbackConstants.CLOCK_TICK,
-                            HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING
-                        )
-                        if (!performed) {
-                            val vibrator = getVibrator(view.context)
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                vibrator?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
-                            } else {
-                                @Suppress("DEPRECATION")
-                                vibrator?.vibrate(10L)
-                            }
-                        }
-                    } catch (_: Exception) {}
-
+                    performWheelHaptic(view.context, view)
                     onItemSelected(index)
                 }
             }
@@ -273,22 +260,7 @@ fun <T> CupertinoOptionWheelPicker(
         snapshotFlow { currentCenteredIndex }
             .collect { index ->
                 if (index in options.indices) {
-                    try {
-                        val performed = view.performHapticFeedback(
-                            HapticFeedbackConstants.CLOCK_TICK,
-                            HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING
-                        )
-                        if (!performed) {
-                            val vibrator = getVibrator(view.context)
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                vibrator?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
-                            } else {
-                                @Suppress("DEPRECATION")
-                                vibrator?.vibrate(10L)
-                            }
-                        }
-                    } catch (_: Exception) {}
-
+                    performWheelHaptic(view.context, view)
                     onOptionSelected(index, options[index])
                 }
             }
@@ -407,4 +379,45 @@ private fun getVibrator(context: Context): Vibrator? {
     } else {
         context.getSystemService(Vibrator::class.java)
     }
+}
+
+/**
+ * Perform crisp haptic tick even when user has system "touch feedback" disabled.
+ * Uses both View ignore flags, and falls back to physical Vibrator with USAGE_ALARM.
+ */
+private fun performWheelHaptic(context: Context, view: android.view.View) {
+    try {
+        // 1. Try View haptics with ignore flags
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING
+        } else {
+            @Suppress("DEPRECATION")
+            HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING or HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
+        }
+        val performed = view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK, flags)
+        if (performed) return
+
+        // 2. Hardware Vibrator fallback with USAGE_ALARM to bypass system touch vibration disablement
+        val vibrator = getVibrator(context) ?: return
+        if (!vibrator.hasVibrator()) return
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val attributes = VibrationAttributes.Builder()
+                .setUsage(VibrationAttributes.USAGE_ALARM)
+                .build()
+            val effect = VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK)
+            vibrator.vibrate(effect, attributes)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val audioAttributes = AudioAttributes.Builder()
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .build()
+            val effect = VibrationEffect.createOneShot(12L, VibrationEffect.DEFAULT_AMPLITUDE)
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(effect, audioAttributes)
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(10L)
+        }
+    } catch (_: Exception) {}
 }

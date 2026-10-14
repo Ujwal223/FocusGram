@@ -2,6 +2,7 @@ package com.ujwal.focusgram.feature.settings
 
 import android.content.Intent
 import android.net.Uri
+import com.ujwal.focusgram.R
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -92,6 +93,7 @@ import com.ujwal.focusgram.core.ui.components.IOSSettingsRow
 import com.ujwal.focusgram.core.ui.components.IOSTeal
 import com.ujwal.focusgram.core.ui.components.IOSTextPrimary
 import com.ujwal.focusgram.core.ui.components.IOSTextSecondary
+import com.ujwal.focusgram.feature.history.ReelHistory
 import com.ujwal.focusgram.feature.session.AppSessionPicker
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
@@ -126,6 +128,7 @@ fun SettingsScreen(
     onWatchAd: () -> Unit = {},
     onNavigateUrl: (String) -> Unit = {},
     screenTimeDao: ScreenTimeDao? = null,
+    reelHistory: ReelHistory? = null,
     modifier: Modifier = Modifier
 ) {
     val settings by repository.settingsFlow.collectAsState(initial = FocusSettings())
@@ -325,7 +328,8 @@ fun SettingsScreen(
                     onWatchAd = onWatchAd,
                     onShowLegal = { showLegalDialog = true },
                     onShowDeveloper = { showDeveloperDialog = true },
-                    screenTimeDao = screenTimeDao
+                    screenTimeDao = screenTimeDao,
+                    reelHistory = reelHistory
                 )
             }
             SettingsSubpage.FOCUS -> {
@@ -378,26 +382,18 @@ private fun MainSettingsContent(
     onWatchAd: () -> Unit,
     onShowLegal: () -> Unit,
     onShowDeveloper: () -> Unit,
-    screenTimeDao: ScreenTimeDao? = null
+    screenTimeDao: ScreenTimeDao? = null,
+    reelHistory: ReelHistory? = null
 ) {
     val context = LocalContext.current
     val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US) }
     val todayStr = remember { dateFormat.format(Date()) }
     val todayRecord by (screenTimeDao?.getForDate(todayStr) ?: flowOf(null)).collectAsState(initial = null)
+    val todayWatchedFromHistory by (reelHistory?.todayCount ?: flowOf(0)).collectAsState(initial = 0)
 
-    var liveOffset by remember { mutableIntStateOf(0) }
-    LaunchedEffect(todayRecord) {
-        liveOffset = 0
-    }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(1000L)
-            liveOffset++
-        }
-    }
-
-    val todaySeconds = (todayRecord?.seconds ?: (settings.instaMinutes * 60)) + liveOffset
+    val todaySeconds = todayRecord?.seconds ?: (settings.instaMinutes * 60)
     val todayReelsSeconds = todayRecord?.reelsSeconds ?: (settings.reelsMinutes * 60)
+    val todayReelsWatched = if (reelHistory != null) todayWatchedFromHistory else (todayRecord?.reelsWatched ?: 0)
 
     val appTimeText = when {
         todaySeconds < 60 -> "${todaySeconds}s"
@@ -539,7 +535,7 @@ private fun MainSettingsContent(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 12.dp),
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.SpaceAround,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -551,6 +547,11 @@ private fun MainSettingsContent(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(text = reelsTimeText, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         Text(text = "Reels Time", color = Color(0xFF8E8E93), fontSize = 11.sp)
+                    }
+                    Box(modifier = Modifier.width(1.dp).height(24.dp).background(Color(0xFF2C2C2E)))
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(text = "$todayReelsWatched", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text(text = "Reels Watched", color = Color(0xFF8E8E93), fontSize = 11.sp)
                     }
                 }
             }
@@ -1607,9 +1608,8 @@ private fun LicensesSubpage() {
                 IOSSettingsRow(
                     title = "Mozilla GeckoView",
                     subtitle = "Mozilla Public License 2.0 · Independent privacy-focused Android browser engine",
-                    icon = Icons.Default.Security,
-                    iconUrl = "https://avatars.githubusercontent.com/u/131524?s=120",
-                    iconBgColor = IOSOrange,
+                    iconRes = R.drawable.ic_credit_geckoview,
+                    iconBgColor = Color(0xFF008787),
                     onClick = {
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://mozilla.github.io/geckoview/"))
                         context.startActivity(intent)
@@ -1618,9 +1618,8 @@ private fun LicensesSubpage() {
                 IOSSettingsRow(
                     title = "uBlock Origin",
                     subtitle = "GPLv3 · High-performance content filtering and declarative rule evaluation",
-                    icon = Icons.Default.Block,
-                    iconUrl = "https://avatars.githubusercontent.com/u/585534?s=120",
-                    iconBgColor = IOSRed,
+                    iconRes = R.drawable.ic_credit_ublock,
+                    iconBgColor = Color(0xFF800000),
                     onClick = {
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/gorhill/uBlock"))
                         context.startActivity(intent)
@@ -1630,7 +1629,7 @@ private fun LicensesSubpage() {
                     title = "Ghostify",
                     subtitle = "MIT License · Groundbreaking research & telemetry suppression architecture",
                     icon = Icons.Default.VisibilityOff,
-                    iconUrl = "https://avatars.githubusercontent.com/u/131580970?s=120",
+                    iconUrl = "https://lh3.googleusercontent.com/or_aQHbJ4j41UjtaQ9rsNZk93tPH9Xw_YASD3l-27SW3A_z8Qu1va8JOEcRKyDCRpcVdo1MncJta70iMqSBTmypRbtQ=s60",
                     iconBgColor = IOSPurple,
                     onClick = {
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Hendrizzzz/Ghostify"))
@@ -1638,19 +1637,27 @@ private fun LicensesSubpage() {
                     }
                 )
                 IOSSettingsRow(
+                    title = "Iconify",
+                    subtitle = "Apache 2.0 · Universal icon framework powering bottom nav and system icons",
+                    iconRes = R.drawable.ic_credit_iconify,
+                    iconBgColor = Color(0xFF026C9C),
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://icon-sets.iconify.design/"))
+                        context.startActivity(intent)
+                    }
+                )
+                IOSSettingsRow(
                     title = "Android Jetpack & Compose",
                     subtitle = "Apache 2.0 · Declarative UI framework, Navigation, and Lifecycle libraries",
-                    icon = Icons.Default.Settings,
-                    iconUrl = "https://avatars.githubusercontent.com/u/32689599?s=120",
-                    iconBgColor = IOSGreen,
+                    iconRes = R.drawable.ic_credit_jetpack_compose,
+                    iconBgColor = Color(0xFF1C1C1E),
                     onClick = {}
                 )
                 IOSSettingsRow(
                     title = "Room Database & SQLite",
                     subtitle = "Apache 2.0 · On-device SQLite persistence and screen time tracking",
-                    icon = Icons.Default.Timer,
-                    iconUrl = "https://avatars.githubusercontent.com/u/1715421?s=120",
-                    iconBgColor = IOSTeal,
+                    iconRes = R.drawable.ic_credit_sqlite,
+                    iconBgColor = Color(0xFFE8F4FC),
                     onClick = {}
                 )
                 IOSSettingsRow(

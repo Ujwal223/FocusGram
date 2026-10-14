@@ -249,16 +249,53 @@
             `;
         }
 
+        /* Instagram Reels Layout & Overlay Lift (Always active, regardless of ad blocker) */
+        css += `
+            :root {
+                --fg-reel-bottom-offset: 16px;
+                --fg-reel-scrubber-offset: 2px;
+            }
+
+            [data-fg-reel-scroller],
+            div[style*="position: fixed"][style*="overflow-y: scroll"],
+            div[style*="position: fixed"][style*="overflow-y: auto"],
+            div[style*="position: fixed"][style*="overflow: scroll"] {
+                bottom: 0px !important;
+                height: 100% !important;
+                max-height: none !important;
+            }
+
+            [data-fg-reel-overlay] {
+                bottom: var(--fg-reel-bottom-offset, 88px) !important;
+                margin-bottom: 0px !important;
+                z-index: 25 !important;
+                pointer-events: auto !important;
+            }
+
+            [data-fg-reel-actions] {
+                bottom: var(--fg-reel-bottom-offset, 88px) !important;
+                z-index: 25 !important;
+                pointer-events: auto !important;
+            }
+
+            [data-fg-reel-scrubber] {
+                bottom: var(--fg-reel-scrubber-offset, 76px) !important;
+                z-index: 26 !important;
+            }
+        `;
+
         if (config.noAds !== false) {
             css += `
                 article:has(a[href*="/ad_"]),
                 article:has(a[href*="/ads/"]),
-                article:has(a[href*="/about/ads"]),
                 article:has(a[href*="ads.instagram.com"]),
+                article:has([aria-label="Ad" i]),
+                article:has([aria-label*="Sponsored" i]),
                 article[data-fg-ad-filtered="true"] {
-                    height: 1px !important;
-                    min-height: 1px !important;
-                    max-height: 1px !important;
+                    display: none !important;
+                    height: 0px !important;
+                    min-height: 0px !important;
+                    max-height: 0px !important;
                     overflow: hidden !important;
                     opacity: 0 !important;
                     pointer-events: none !important;
@@ -266,9 +303,14 @@
                     padding: 0 !important;
                     border: none !important;
                 }
+                div[data-fg-reel-ad="1"] {
+                    visibility: hidden !important;
+                    pointer-events: none !important;
+                }
                 div[data-ad-preview],
                 div[data-testid="post_ad"],
-                div[data-testid="suggested-users"] {
+                div[data-testid="suggested-users"],
+                div[aria-label="Ad" i]:not(main):not([role="feed"]) {
                     display: none !important;
                 }
             `;
@@ -291,22 +333,35 @@
         try {
             // Filter Sponsored Ads
             if (config.noAds !== false) {
-                const SPONSORED_KW = ['sponsored', 'gesponsert', 'sponsorisé', 'publicidad', 'patrocinado', 'sponsorizzato', 'paid partnership'];
-                const AD_CTA = ['learn more', 'shop now', 'install now', 'sign up', 'apply now', 'book now', 'download', 'order now', 'get offer', 'subscribe', 'contact us'];
+                const SPONSORED_KW = ['sponsored', 'gesponsert', 'sponsorisé', 'sponsorise', 'publicidad', 'patrocinado', 'sponsorizzato', 'sponsrad', 'paid partnership', 'werbung', 'anuncio', 'werbeanzeige'];
+                const AD_CTA = ['shop now', 'install now', 'sign up', 'apply now', 'book now', 'order now', 'get offer'];
                 // Strictly target individual article elements to avoid hiding feed wrappers
                 document.querySelectorAll('article').forEach((article) => {
                     if (article.dataset.fgAdFiltered) return;
                     let isAd = false;
-                    const spans = article.querySelectorAll('header span, header a, div[role="button"] span, a[role="button"]');
-                    for (let i = 0; i < spans.length; i++) {
-                        const t = (spans[i].textContent || '').trim().toLowerCase();
-                        if (SPONSORED_KW.some(kw => t === kw || t.startsWith(kw)) || AD_CTA.some(cta => t === cta)) {
+                    const headerElements = article.querySelectorAll('header span, header [aria-label*="Sponsored" i], header [aria-label="Ad" i]');
+                    for (let i = 0; i < headerElements.length; i++) {
+                        if (headerElements[i].children.length > 2) continue;
+                        const t = (headerElements[i].textContent || '').trim().toLowerCase();
+                        if (!t || t.length > 30) continue;
+                        const clean = t.replace(/[^a-z]/g, '');
+                        if (clean === 'ad' || SPONSORED_KW.some(kw => t === kw || clean === kw)) {
                             isAd = true;
                             break;
                         }
                     }
-                    if (!isAd && article.querySelector('a[href*="/ad_"], a[href*="/ads/"], a[href*="/about/ads"], a[href*="ads.instagram.com"]')) {
+                    if (!isAd && article.querySelector('a[href*="/ad_"], a[href*="/ads/"], a[href*="ads.instagram.com"]')) {
                         isAd = true;
+                    }
+                    if (!isAd) {
+                        const ctaButtons = article.querySelectorAll('div[role="button"]:not([data-fg-x-act]):not([data-fg-download-btn]):not(.fg-x-act-btn), a[role="button"]:not([data-fg-x-act]):not([data-fg-download-btn]):not(.fg-x-act-btn), button');
+                        for (let b = 0; b < ctaButtons.length; b++) {
+                            const bText = (ctaButtons[b].textContent || '').trim().toLowerCase();
+                            if (AD_CTA.some(cta => bText === cta)) {
+                                isAd = true;
+                                break;
+                            }
+                        }
                     }
                     if (isAd) {
                         article.style.setProperty('height', '1px', 'important');
@@ -322,37 +377,46 @@
                     }
                 });
 
-                // Filter Reels video ads on reels and feed
+                // Filter Reels video ads on reels surface without ever breaking layout
                 document.querySelectorAll('video').forEach((video) => {
-                    let container = video.closest('article') || video.closest('section') || video.closest('[role="region"]') || video.parentElement;
-                    while (container && container !== document.body && container !== document.documentElement) {
-                        if (container.tagName === 'ARTICLE' || container.tagName === 'SECTION' || container.parentElement?.tagName === 'MAIN') break;
-                        const r = container.getBoundingClientRect();
-                        if (r.height > window.innerHeight * 0.45) break;
-                        container = container.parentElement;
+                    const card = video.closest('[data-fg-reel-card="1"]') || video.closest('article');
+                    if (!card || card.dataset.fgAdFiltered || card.dataset.fgReelAd) return;
+
+                    let isSponsored = !!card.querySelector('a[href*="/ad_"], a[href*="/ads/"], a[href*="ads.instagram.com"], a[href*="/about/ads"]') ||
+                                      !!card.querySelector('[aria-label*="Sponsored" i], [aria-label="Ad" i], [data-ad-preview]');
+
+                    if (!isSponsored) {
+                        const badges = card.querySelectorAll('span, div[role="button"], button');
+                        for (let s = 0; s < badges.length; s++) {
+                            const el = badges[s];
+                            if (el.children.length > 2) continue;
+                            const raw = (el.textContent || '').trim();
+                            if (!raw || raw.length > 15) continue;
+                            if (/^[\u{1F300}-\u{1F9FF}\s]*ad$/iu.test(raw) || /^sponsored$/i.test(raw) || /^paid\s+partnership$/i.test(raw)) {
+                                if (!el.closest('span[dir="auto"]')) {
+                                    isSponsored = true;
+                                    break;
+                                }
+                            }
+                        }
                     }
-                    if (!container || container.dataset.fgAdFiltered) return;
 
-                    const t = (container.textContent || '').trim().toLowerCase();
-                    const isSponsored = SPONSORED_KW.some(kw => t.includes(kw)) ||
-                                        !!container.querySelector('a[href*="/ad_"], a[href*="/ads/"], a[href*="/about/ads"], a[href*="ads.instagram.com"]') ||
-                                        !!container.querySelector('[aria-label*="Sponsored" i], [aria-label*="sponsored" i], [data-ad-preview]');
-
-                    const hasAdCTA = !!container.querySelector('div[role="button"], a[role="button"]') &&
-                                     AD_CTA.some(cta => t.includes(cta));
-
-                    if (isSponsored || hasAdCTA) {
+                    if (isSponsored) {
                         video.muted = true;
                         try { video.pause(); } catch (_) {}
-                        container.style.setProperty('display', 'none', 'important');
-                        container.style.setProperty('height', '0px', 'important');
-                        container.style.setProperty('opacity', '0', 'important');
-                        container.style.setProperty('pointer-events', 'none', 'important');
-                        container.dataset.fgAdFiltered = 'true';
+                        card.setAttribute('data-fg-reel-ad', '1');
+                        card.dataset.fgAdFiltered = 'true';
+                        card.style.setProperty('visibility', 'hidden', 'important');
+                        card.style.setProperty('pointer-events', 'none', 'important');
 
-                        const r = container.getBoundingClientRect();
+                        const r = card.getBoundingClientRect();
                         if (r.top >= -100 && r.top <= window.innerHeight * 0.8) {
-                            window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, which: 40, bubbles: true }));
+                            const scroller = card.closest('[data-fg-reel-scroller]') || document.querySelector('[data-fg-reel-scroller="1"]');
+                            if (scroller && scroller !== window) {
+                                try { scroller.scrollBy({ top: scroller.clientHeight || window.innerHeight, behavior: 'instant' }); } catch (_) {}
+                            } else {
+                                try { window.scrollBy({ top: window.innerHeight, behavior: 'instant' }); } catch (_) {}
+                            }
                         }
                     }
                 });
@@ -363,7 +427,7 @@
                 // Strictly target individual article elements or specific suggested-users widgets
                 document.querySelectorAll('article').forEach((article) => {
                     if (article.dataset.fgSuggestedHidden) return;
-                    const headers = article.querySelectorAll('header span, header h2, header h3, h2, h3, h4, span');
+                    const headers = article.querySelectorAll('header span, header h2, header h3, h2, h3, h4');
                     for (let i = 0; i < headers.length; i++) {
                         const text = (headers[i].textContent || '').trim().toLowerCase();
                         if (text === 'suggested for you' || text === 'suggested posts' || text === 'suggested post' || text === 'suggestions for you') {
@@ -435,6 +499,9 @@
                 });
             }
 
+            // Always tag and lift Reels bottom metadata & action buttons above the floating nav bar
+            tagReelsOverlay();
+
             // Minimal Mode in-page SPA redirect guard
             if (config.minimalMode) {
                 const curPath = (window.location.pathname || '').toLowerCase();
@@ -443,6 +510,110 @@
                 }
             }
         } catch (_) {}
+    }
+
+    function tagReelsOverlay() {
+        const path = (window.location.pathname || '').toLowerCase();
+        if (!path.startsWith('/reels') && !path.startsWith('/reel')) return;
+        const vh = window.innerHeight;
+        if (!vh) return;
+
+        const firstVideo = document.querySelector('video');
+        if (firstVideo) {
+            let el = firstVideo.parentElement;
+            while (el && el !== document.body && el !== document.documentElement) {
+                const cs = window.getComputedStyle(el);
+                if (cs.position === 'fixed' || cs.overflowY === 'scroll' || cs.overflowY === 'auto') {
+                    if (!el.hasAttribute('data-fg-reel-scroller')) {
+                        el.setAttribute('data-fg-reel-scroller', '1');
+                    }
+                    el.style.setProperty('bottom', '0px', 'important');
+                    el.style.setProperty('height', '100%', 'important');
+                    el.style.setProperty('max-height', 'none', 'important');
+                    break;
+                }
+                el = el.parentElement;
+            }
+        }
+
+        document.querySelectorAll('video').forEach(v => {
+            let card = v.closest('article') || v.closest('section') || v.closest('[role="region"]') || v.parentElement;
+            while (card && card !== document.body && card !== document.documentElement) {
+                if (card.tagName === 'ARTICLE' || card.tagName === 'SECTION') break;
+                if (card.getBoundingClientRect().height > vh * 0.5) break;
+                card = card.parentElement;
+            }
+            if (!card || card.tagName === 'MAIN' || card.id === 'react-root' || card.querySelectorAll('video').length > 1) return;
+
+            let overlay = null;
+            const audioLink = card.querySelector('a[href*="/audio/"]');
+            if (audioLink) {
+                let p = audioLink.parentElement;
+                while (p && p !== card && p !== document.body) {
+                    const hasAuthorOrCaption = p.querySelector('a[role="link"]:not([href*="/audio/"])') || p.querySelector('span[dir="auto"]');
+                    if (hasAuthorOrCaption) {
+                        overlay = p;
+                        let candidate = p;
+                        while (candidate && candidate.parentElement && candidate.parentElement !== card) {
+                            const cs = window.getComputedStyle(candidate);
+                            if (cs.position === 'absolute' || cs.position === 'fixed') {
+                                overlay = candidate;
+                                break;
+                            }
+                            candidate = candidate.parentElement;
+                        }
+                        break;
+                    }
+                    p = p.parentElement;
+                }
+                if (!overlay) overlay = audioLink.closest('div[style*="bottom"]') || audioLink.parentElement;
+            }
+
+            if (!overlay) {
+                const captions = card.querySelectorAll('span[dir="auto"], div[dir="auto"]');
+                for (let i = 0; i < captions.length; i++) {
+                    const c = captions[i];
+                    if (c.textContent && c.textContent.trim().length > 0) {
+                        let p = c.closest('div');
+                        while (p && p !== card && p !== document.body) {
+                            const cs = window.getComputedStyle(p);
+                            if (cs.position === 'absolute' || cs.position === 'fixed' || p.parentElement === card) {
+                                overlay = p;
+                                break;
+                            }
+                            p = p.parentElement;
+                        }
+                        if (overlay) break;
+                    }
+                }
+            }
+
+            if (overlay && overlay !== card) {
+                overlay.setAttribute('data-fg-reel-overlay', '1');
+                overlay.style.setProperty('bottom', 'var(--fg-reel-bottom-offset, 16px)', 'important');
+                overlay.style.removeProperty('padding-bottom');
+                overlay.style.setProperty('margin-bottom', '0px', 'important');
+                overlay.style.setProperty('z-index', '25', 'important');
+                overlay.style.setProperty('pointer-events', 'auto', 'important');
+            }
+
+            const likeIcon = card.querySelector('svg[aria-label="Like"], svg[aria-label="Unlike"], svg[aria-label="Liked"]');
+            if (likeIcon) {
+                let actionRail = likeIcon.closest('div[role="button"]') || likeIcon.parentElement;
+                while (actionRail && actionRail !== card && actionRail !== document.body) {
+                    const cs = window.getComputedStyle(actionRail);
+                    if (cs.position === 'absolute' || cs.position === 'fixed' || (actionRail.parentElement === card)) break;
+                    if (actionRail.parentElement && (actionRail.parentElement.querySelector('a[href*="/audio/"]') || actionRail.parentElement.querySelector('video'))) break;
+                    actionRail = actionRail.parentElement;
+                }
+                if (actionRail && actionRail !== card) {
+                    actionRail.setAttribute('data-fg-reel-actions', '1');
+                    actionRail.style.setProperty('bottom', 'var(--fg-reel-bottom-offset, 16px)', 'important');
+                    actionRail.style.setProperty('z-index', '25', 'important');
+                    actionRail.style.setProperty('pointer-events', 'auto', 'important');
+                }
+            }
+        });
     }
 
     // --- Feed Path Monitoring & Unblur Interaction Engine ---

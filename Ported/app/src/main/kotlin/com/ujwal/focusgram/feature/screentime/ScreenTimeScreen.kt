@@ -1,5 +1,6 @@
 package com.ujwal.focusgram.feature.screentime
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -39,6 +40,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flowOf
+import com.ujwal.focusgram.feature.history.ReelHistory
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,6 +49,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ujwal.focusgram.core.database.ScreenTimeDao
@@ -62,20 +66,29 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DateRangePicker
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDateRangePickerState
+import androidx.compose.runtime.mutableStateOf
 import kotlin.math.max
 
-import androidx.activity.compose.BackHandler
+enum class DailyBreakdownRange(val label: String) {
+    PAST_7_DAYS("7 Days"),
+    PAST_14_DAYS("14 Days"),
+    PAST_30_DAYS("30 Days"),
+    CUSTOM("Custom")
+}
 
-/**
- * ScreenTimeScreen
- * Visualizes user digital wellness trends, daily screen time, and session limit adherence.
- * Designed with authentic iOS Screen Time aesthetics and on-device Room SQLite records.
- */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScreenTimeScreen(
     screenTimeDao: ScreenTimeDao,
     dailyLimitMinutes: Int = 60,
     onBack: () -> Unit,
+    reelHistory: ReelHistory? = null,
     modifier: Modifier = Modifier
 ) {
     BackHandler {
@@ -87,35 +100,31 @@ fun ScreenTimeScreen(
     val dayLabelFormat = remember { SimpleDateFormat("EEE", Locale.US) }
     val todayStr = remember { dateFormat.format(Date()) }
 
-    var liveOffset by remember { mutableIntStateOf(0) }
-    LaunchedEffect(records) {
-        liveOffset = 0
-    }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(1000L)
-            liveOffset++
-        }
-    }
-
     val todayRecord = records.firstOrNull { it.date == todayStr }
-    val todaySeconds = (todayRecord?.seconds ?: 0) + liveOffset
+    val todayWatchedFromHistory by (reelHistory?.todayCount ?: flowOf(0)).collectAsState(initial = 0)
+    val todaySeconds = todayRecord?.seconds ?: 0
     val todayReelsSeconds = todayRecord?.reelsSeconds ?: 0
     val todayMinutes = todaySeconds / 60
     val todayReelsMinutes = todayReelsSeconds / 60
+    val todayReelsWatched = if (reelHistory != null) todayWatchedFromHistory else (todayRecord?.reelsWatched ?: 0)
     val limitFraction = (todayMinutes.toFloat() / max(1, dailyLimitMinutes)).coerceIn(0f, 1f)
+
+    var selectedRange by remember { mutableStateOf(DailyBreakdownRange.PAST_7_DAYS) }
+    var customStartDateMillis by remember { mutableStateOf<Long?>(null) }
+    var customEndDateMillis by remember { mutableStateOf<Long?>(null) }
+    var showCustomPicker by remember { mutableStateOf(false) }
 
     val todayUsageText = when {
         todaySeconds < 60 -> "${todaySeconds}s"
-        todaySeconds % 60 == 0 -> "$todayMinutes min"
-        else -> "$todayMinutes min ${todaySeconds % 60}s"
+        todaySeconds % 60 == 0 -> "${todayMinutes}m"
+        else -> "${todayMinutes}m ${todaySeconds % 60}s"
     }
 
     val todayReelsText = when {
-        todayReelsSeconds == 0 -> "0 min"
+        todayReelsSeconds == 0 -> "0m"
         todayReelsSeconds < 60 -> "${todayReelsSeconds}s"
-        todayReelsSeconds % 60 == 0 -> "$todayReelsMinutes min"
-        else -> "$todayReelsMinutes min ${todayReelsSeconds % 60}s"
+        todayReelsSeconds % 60 == 0 -> "${todayReelsMinutes}m"
+        else -> "${todayReelsMinutes}m ${todayReelsSeconds % 60}s"
     }
 
     // Compute past 7 days breakdown for bar chart
@@ -138,6 +147,110 @@ fun ScreenTimeScreen(
 
     val weeklyTotalMinutes = last7Days.sumOf { it.second }
     val weeklyDailyAverage = weeklyTotalMinutes / 7
+
+    val displayedRecords = remember(records, selectedRange, customStartDateMillis, customEndDateMillis) {
+        when (selectedRange) {
+            DailyBreakdownRange.PAST_7_DAYS -> {
+                val cutoffCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -6) }
+                val cutoffStr = dateFormat.format(cutoffCal.time)
+                records.filter { it.date >= cutoffStr && it.date <= todayStr }.sortedByDescending { it.date }
+            }
+            DailyBreakdownRange.PAST_14_DAYS -> {
+                val cutoffCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -13) }
+                val cutoffStr = dateFormat.format(cutoffCal.time)
+                records.filter { it.date >= cutoffStr && it.date <= todayStr }.sortedByDescending { it.date }
+            }
+            DailyBreakdownRange.PAST_30_DAYS -> {
+                val cutoffCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -29) }
+                val cutoffStr = dateFormat.format(cutoffCal.time)
+                records.filter { it.date >= cutoffStr && it.date <= todayStr }.sortedByDescending { it.date }
+            }
+            DailyBreakdownRange.CUSTOM -> {
+                val startStr = customStartDateMillis?.let { dateFormat.format(Date(it)) } ?: "0000-00-00"
+                val endStr = customEndDateMillis?.let { dateFormat.format(Date(it)) } ?: "9999-99-99"
+                records.filter { it.date in startStr..endStr }.sortedByDescending { it.date }
+            }
+        }
+    }
+
+    val distinctYears = remember(displayedRecords) {
+        displayedRecords.mapNotNull { it.date.split("-").getOrNull(0) }.distinct()
+    }
+    val distinctMonths = remember(displayedRecords) {
+        displayedRecords.mapNotNull { 
+            val parts = it.date.split("-")
+            if (parts.size >= 2) "${parts[0]}-${parts[1]}" else null
+        }.distinct()
+    }
+    val hasMultipleYears = distinctYears.size > 1
+    val hasMultipleMonths = distinctMonths.size > 1
+
+    val yesterdayStr = remember {
+        val yCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
+        dateFormat.format(yCal.time)
+    }
+    val sevenDaysAgoStr = remember {
+        val sCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -6) }
+        dateFormat.format(sCal.time)
+    }
+
+    val fullDayFormat = remember { SimpleDateFormat("EEEE", Locale.US) }
+    val monthDayFormat = remember { SimpleDateFormat("MMM d", Locale.US) }
+    val monthDayYearFormat = remember { SimpleDateFormat("MMM d, yyyy", Locale.US) }
+
+    fun formatRecordDate(dateStr: String): String {
+        if (dateStr == todayStr) return "Today"
+        if (dateStr == yesterdayStr) return "Yesterday"
+        val parsed = try { dateFormat.parse(dateStr) } catch (_: Exception) { null } ?: return dateStr
+
+        // Within past 7 days: show day of the week
+        if (dateStr >= sevenDaysAgoStr && dateStr <= todayStr) {
+            return fullDayFormat.format(parsed)
+        }
+
+        // Only show month & year if it includes multiple months and years
+        return when {
+            hasMultipleYears -> monthDayYearFormat.format(parsed)
+            hasMultipleMonths -> monthDayFormat.format(parsed)
+            else -> fullDayFormat.format(parsed)
+        }
+    }
+
+    if (showCustomPicker) {
+        val pickerState = rememberDateRangePickerState()
+        DatePickerDialog(
+            onDismissRequest = { showCustomPicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val start = pickerState.selectedStartDateMillis
+                        val end = pickerState.selectedEndDateMillis ?: start
+                        if (start != null) {
+                            customStartDateMillis = start
+                            customEndDateMillis = end
+                            selectedRange = DailyBreakdownRange.CUSTOM
+                        }
+                        showCustomPicker = false
+                    }
+                ) {
+                    Text("Apply", color = IOSBlue)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomPicker = false }) {
+                    Text("Cancel", color = IOSTextSecondary)
+                }
+            }
+        ) {
+            DateRangePicker(
+                state = pickerState,
+                title = { Text("Select Date Range", modifier = Modifier.padding(16.dp), color = IOSTextPrimary) },
+                headline = { },
+                showModeToggle = false,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
 
     Column(
         modifier = modifier
@@ -183,10 +296,13 @@ fun ScreenTimeScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(40.dp)
+                                        .size(32.dp)
                                         .clip(CircleShape)
                                         .background(IOSTeal.copy(alpha = 0.15f)),
                                     contentAlignment = Alignment.Center
@@ -195,30 +311,36 @@ fun ScreenTimeScreen(
                                         imageVector = Icons.Default.HourglassTop,
                                         contentDescription = null,
                                         tint = IOSTeal,
-                                        modifier = Modifier.size(22.dp)
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
-                                Spacer(modifier = Modifier.width(10.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Column {
                                     Text(
-                                        text = "Today's Usage",
+                                        text = "Usage",
                                         color = IOSTextSecondary,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1
                                     )
                                     Text(
                                         text = todayUsageText,
                                         color = IOSTextPrimary,
-                                        fontSize = 20.sp,
-                                        fontWeight = FontWeight.Bold
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
 
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                modifier = Modifier.weight(1.05f),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(40.dp)
+                                        .size(32.dp)
                                         .clip(CircleShape)
                                         .background(IOSPurple.copy(alpha = 0.15f)),
                                     contentAlignment = Alignment.Center
@@ -227,22 +349,63 @@ fun ScreenTimeScreen(
                                         imageVector = Icons.Default.PlayArrow,
                                         contentDescription = null,
                                         tint = IOSPurple,
-                                        modifier = Modifier.size(22.dp)
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
-                                Spacer(modifier = Modifier.width(10.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Column {
                                     Text(
                                         text = "Reels Time",
                                         color = IOSTextSecondary,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1
                                     )
                                     Text(
                                         text = todayReelsText,
                                         color = IOSTextPrimary,
-                                        fontSize = 20.sp,
-                                        fontWeight = FontWeight.Bold
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.weight(0.95f),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(CircleShape)
+                                        .background(IOSOrange.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Insights,
+                                        contentDescription = null,
+                                        tint = IOSOrange,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Column {
+                                    Text(
+                                        text = "Watched",
+                                        color = IOSTextSecondary,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = "$todayReelsWatched",
+                                        color = IOSTextPrimary,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
@@ -396,29 +559,62 @@ fun ScreenTimeScreen(
                 }
             }
 
-            // Recent Daily Log
+            // Recent Daily Log with customizable ranges
             item {
-                Text(
-                    text = "DAILY BREAKDOWN",
-                    color = IOSTextSecondary,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(start = 4.dp, top = 4.dp)
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 4.dp, end = 4.dp, top = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "DAILY BREAKDOWN",
+                        color = IOSTextSecondary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        DailyBreakdownRange.values().forEach { range ->
+                            val isSelected = selectedRange == range
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isSelected) IOSBlue else Color(0xFF2C2C2E))
+                                    .clickable {
+                                        if (range == DailyBreakdownRange.CUSTOM) {
+                                            showCustomPicker = true
+                                        } else {
+                                            selectedRange = range
+                                        }
+                                    }
+                                    .padding(horizontal = 7.dp, vertical = 3.dp)
+                            ) {
+                                Text(
+                                    text = range.label,
+                                    color = if (isSelected) Color.White else IOSTextSecondary,
+                                    fontSize = 10.sp,
+                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                                )
+                            }
+                        }
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(6.dp))
 
                 IOSGroupedCard {
                     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                        if (records.isEmpty()) {
+                        if (displayedRecords.isEmpty()) {
                             Text(
-                                text = "No screen time recorded yet today.",
+                                text = "No screen time recorded for this period.",
                                 color = IOSTextSecondary,
                                 fontSize = 14.sp,
                                 modifier = Modifier.padding(vertical = 12.dp)
                             )
                         } else {
-                            records.take(7).forEachIndexed { idx, record ->
+                            displayedRecords.forEachIndexed { idx, record ->
                                 val mins = record.seconds / 60
                                 val reelsM = record.reelsSeconds / 60
                                 val reelsS = record.reelsSeconds % 60
@@ -432,14 +628,22 @@ fun ScreenTimeScreen(
                                 ) {
                                     Column {
                                         Text(
-                                            text = if (record.date == todayStr) "Today" else record.date,
+                                            text = formatRecordDate(record.date),
                                             color = IOSTextPrimary,
                                             fontSize = 15.sp
                                         )
+                                        val subtitleParts = mutableListOf<String>()
                                         if (record.reelsSeconds > 0) {
                                             val reelsLabel = if (record.reelsSeconds < 60) "${reelsS}s reels" else "${reelsM}m reels"
+                                            subtitleParts.add(reelsLabel)
+                                        }
+                                        val watchedCount = if (record.date == todayStr && reelHistory != null) todayReelsWatched else record.reelsWatched
+                                        if (watchedCount > 0) {
+                                            subtitleParts.add("$watchedCount watched")
+                                        }
+                                        if (subtitleParts.isNotEmpty()) {
                                             Text(
-                                                text = reelsLabel,
+                                                text = subtitleParts.joinToString(" • "),
                                                 color = IOSPurple,
                                                 fontSize = 12.sp,
                                                 fontWeight = FontWeight.Medium
@@ -453,7 +657,7 @@ fun ScreenTimeScreen(
                                         fontWeight = FontWeight.Medium
                                     )
                                 }
-                                if (idx < records.take(7).lastIndex) {
+                                if (idx < displayedRecords.lastIndex) {
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()

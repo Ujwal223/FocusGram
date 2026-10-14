@@ -33,6 +33,30 @@ interface ScreenTimeDao {
         }
     }
 
+    @Query("UPDATE screen_time_records SET reelsWatched = reelsWatched + :delta, lastUpdated = :timestamp WHERE date = :date")
+    suspend fun incrementReelsWatched(date: String, delta: Int = 1, timestamp: Long = System.currentTimeMillis())
+
+    @Query("UPDATE screen_time_records SET reelsWatched = :count, lastUpdated = :timestamp WHERE date = :date")
+    suspend fun setReelsWatched(date: String, count: Int, timestamp: Long = System.currentTimeMillis())
+
+    suspend fun recordReelWatched(date: String) {
+        val existing = getForDateSync(date)
+        if (existing == null) {
+            insertOrUpdate(ScreenTimeRecord(date = date, seconds = 0, reelsSeconds = 0, reelsWatched = 1))
+        } else {
+            incrementReelsWatched(date = date, delta = 1)
+        }
+    }
+
+    suspend fun syncReelsWatched(date: String, count: Int) {
+        val existing = getForDateSync(date)
+        if (existing == null) {
+            insertOrUpdate(ScreenTimeRecord(date = date, seconds = 0, reelsSeconds = 0, reelsWatched = count))
+        } else {
+            setReelsWatched(date = date, count = count)
+        }
+    }
+
     @Query("DELETE FROM screen_time_records WHERE date < :cutoffDate")
     suspend fun pruneOlderThan(cutoffDate: String)
 }

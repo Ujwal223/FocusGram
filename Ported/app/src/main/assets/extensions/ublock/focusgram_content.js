@@ -55,6 +55,7 @@
         hideFollowerCounts: false,
         hideSuggestedPosts: false,
         hideShopTab: false,
+        videoDownloadEnabled: true,
         ghostModeEnabled: false,
         ghostHideStorySeen: true,
         ghostHideDirectSeen: true,
@@ -76,6 +77,196 @@
                 hideDirectSeen: true,
                 hideTyping: true
             };
+
+            window.__fgFilterConfig = {
+                blockAds: true,
+                blockSponsored: true,
+                blockSuggested: false,
+                blockVideos: false
+            };
+
+            window.addEventListener('message', function(e) {
+                if (!e || !e.data) return;
+                if (e.data.type === 'GHOSTIFY_SETTINGS_UPDATE' && e.data.settings) {
+                    Object.assign(window.__focusgramGhostSettings, e.data.settings);
+                }
+                if (e.data.type === 'FOCUSGRAM_FILTER_UPDATE' && e.data.config) {
+                    Object.assign(window.__fgFilterConfig, e.data.config);
+                }
+            });
+
+            const AD_KEYWORDS = [
+                'sponsored', 'gesponsert', 'sponsorisé', 'sponsorise', 'publicidad',
+                'patrocinado', 'sponsorizzato', 'sponsrad', 'paid partnership', 'werbung',
+                'anuncio', 'werbeanzeige', 'publicité', 'ad_id', 'ad_tracking', 'sponsor_tags'
+            ];
+
+            function textHasAdSignal(value) {
+                if (!value) return false;
+                const s = String(value).toLowerCase();
+                return AD_KEYWORDS.some(kw => s.includes(kw));
+            }
+
+            function isAdNode(node) {
+                if (!node || typeof node !== 'object') return false;
+                const typename = String(node.__typename || '');
+                const adText = JSON.stringify({
+                    organic_tracking_token: node.organic_tracking_token,
+                    sponsor_tags: node.sponsor_tags,
+                    social_context: node.social_context,
+                    title: node.title,
+                    header: node.header,
+                    label: node.label,
+                    overlay_text: node.overlay_text
+                });
+
+                return !!(
+                    node.is_ad ||
+                    node.is_paid_partnership ||
+                    (node.sponsor_tags && node.sponsor_tags.length > 0) ||
+                    node.ad_tracking_token ||
+                    node.ad_action_link ||
+                    node.ad_id ||
+                    node.ad_impression_token ||
+                    node.ad_metadata ||
+                    node.commerciality_status === 'commercial' ||
+                    (node.product_type && node.product_type === 'ad') ||
+                    (node.ad_header_style && node.ad_header_style !== 'none') ||
+                    typename === 'GraphAdStory' ||
+                    typename.includes('Ad') ||
+                    textHasAdSignal(adText)
+                );
+            }
+
+            function isSponsoredNode(node) {
+                if (!node || typeof node !== 'object') return false;
+                return !!(
+                    node.is_paid_partnership ||
+                    (node.sponsor_tags && node.sponsor_tags.length > 0) ||
+                    (node.ad_action_link && node.ad_action_link.href) ||
+                    (node.ad_header_style && node.ad_header_style !== 'none') ||
+                    textHasAdSignal(JSON.stringify(node.social_context || node.header || node.label || ''))
+                );
+            }
+
+            function isSuggestedNode(node) {
+                if (!node || typeof node !== 'object') return false;
+                const typename = String(node.__typename || '');
+                const reason = JSON.stringify({
+                    reason: node.suggested_reason,
+                    social_context: node.social_context,
+                    title: node.title,
+                    header: node.header,
+                    label: node.label
+                }).toLowerCase();
+
+                return !!(
+                    node.is_suggested ||
+                    node.is_suggested_for_you ||
+                    node.is_recommendation ||
+                    node.suggested_users ||
+                    node.suggested_media ||
+                    node.suggested_content ||
+                    node.recommendation_source ||
+                    typename.includes('Suggested') ||
+                    typename.includes('Recommendation') ||
+                    reason.includes('suggested') ||
+                    reason.includes('recommend')
+                );
+            }
+
+            function shouldFilterNode(node) {
+                const config = window.__fgFilterConfig;
+                if (!config || !node || typeof node !== 'object') return false;
+                if (config.blockAds !== false && isAdNode(node)) return true;
+                if (config.blockSponsored !== false && isSponsoredNode(node) && !isAdNode(node)) return true;
+                if (config.blockSuggested && isSuggestedNode(node)) return true;
+                return false;
+            }
+
+            function unwrapNode(item) {
+                if (!item || typeof item !== 'object') return item;
+                return item.media || item.node || item.post || item;
+            }
+
+            function filterList(list) {
+                if (!Array.isArray(list)) return list;
+                return list.filter(item => {
+                    if (!item) return false;
+                    const target = unwrapNode(item);
+                    return !shouldFilterNode(target);
+                });
+            }
+
+            function harvestReelFromObj(node) {
+                if (!node || typeof node !== 'object') return;
+                const code = node.code || node.shortcode;
+                if (typeof code === 'string' && code.length >= 4 && !['reels', 'reel', 'audio', 'videos', 'clips'].includes(code.toLowerCase())) {
+                    const author = node.user?.username || node.owner?.username || '';
+                    let caption = '';
+                    if (typeof node.caption === 'string') {
+                        caption = node.caption;
+                    } else if (node.caption && typeof node.caption.text === 'string') {
+                        caption = node.caption.text;
+                    } else if (node.edge_media_to_caption?.edges?.[0]?.node?.text) {
+                        caption = node.edge_media_to_caption.edges[0].node.text;
+                    }
+                    if (author || caption) {
+                        const metaStr = JSON.stringify({ code, author, caption });
+                        try {
+                            let cacheEl = document.getElementById('fg-meta-cache');
+                            if (!cacheEl) {
+                                cacheEl = document.createElement('div');
+                                cacheEl.id = 'fg-meta-cache';
+                                cacheEl.style.display = 'none';
+                                (document.body || document.documentElement).appendChild(cacheEl);
+                            }
+                            cacheEl.setAttribute('data-reel-' + code, metaStr);
+                        } catch (_) {}
+                        try {
+                            document.dispatchEvent(new CustomEvent('focusgram:reel-meta', {
+                                detail: metaStr
+                            }));
+                        } catch (_) {}
+                    }
+                }
+            }
+
+            function walkAndFilter(obj, visited = new Set()) {
+                if (!obj || typeof obj !== 'object' || visited.has(obj)) return;
+                visited.add(obj);
+
+                harvestReelFromObj(obj);
+
+                if (Array.isArray(obj)) {
+                    for (let i = 0; i < obj.length; i++) {
+                        walkAndFilter(obj[i], visited);
+                    }
+                    return;
+                }
+
+                if (obj.edges && Array.isArray(obj.edges)) {
+                    obj.edges = filterList(obj.edges);
+                }
+                if (obj.items && Array.isArray(obj.items)) {
+                    obj.items = filterList(obj.items);
+                }
+                if (obj.feed_items && Array.isArray(obj.feed_items)) {
+                    obj.feed_items = filterList(obj.feed_items);
+                }
+                if (obj.tray && Array.isArray(obj.tray)) {
+                    obj.tray = filterList(obj.tray);
+                }
+
+                for (const key in obj) {
+                    if (Object.prototype.hasOwnProperty.call(obj, key) && key !== '__typename') {
+                        const val = obj[key];
+                        if (val && typeof val === 'object') {
+                            walkAndFilter(val, visited);
+                        }
+                    }
+                }
+            }
 
             const STORY_PATTERNS = [
                 'storiesupdateseenmutation',
@@ -278,7 +469,28 @@
                     });
                 }
 
-                return originalFetch.apply(this, arguments);
+                const response = await originalFetch.apply(this, arguments);
+
+                // Main-World GraphQL, Clips, & Feed Ad Filtering & Reel Meta Harvesting
+                if (url.includes('/graphql') || url.includes('/api/v1/feed') || url.includes('/api/v1/clips/') || url.includes('/clips/')) {
+                    try {
+                        const contentType = response.headers.get('content-type') || '';
+                        if (contentType.includes('application/json')) {
+                            const cloned = response.clone();
+                            const data = await cloned.json();
+                            walkAndFilter(data);
+                            if (window.__fgFilterConfig && window.__fgFilterConfig.blockAds !== false) {
+                                return new Response(JSON.stringify(data), {
+                                    status: response.status,
+                                    statusText: response.statusText,
+                                    headers: response.headers
+                                });
+                            }
+                        }
+                    } catch (_) {}
+                }
+
+                return response;
             };
 
             // --- Hook navigator.sendBeacon ---
@@ -484,6 +696,15 @@
                 igStory: isGhostActive && !!currentSettings.ghostHideStorySeen
             }
         }, "*");
+        window.postMessage({
+            type: "FOCUSGRAM_FILTER_UPDATE",
+            source: "FOCUSGRAM_EXTENSION",
+            config: {
+                blockAds: currentSettings.noAds !== false,
+                blockSponsored: currentSettings.noAds !== false,
+                blockSuggested: !!currentSettings.hideSuggestedPosts
+            }
+        }, "*");
     }
 
     window.addEventListener("message", (event) => {
@@ -552,7 +773,7 @@
                 --fg-reel-scrubber-offset: 2px;
             }
 
-            /* Reels fixed scroller: Remove Instagram's 45px bottom navigation reservation */
+            /* Reels fixed scroller: Ultra-smooth momentum scrolling & snapping */
             [data-fg-reel-scroller],
             div[style*="position: fixed"][style*="overflow-y: scroll"],
             div[style*="position: fixed"][style*="overflow-y: auto"],
@@ -560,6 +781,13 @@
                 bottom: 0px !important;
                 height: 100% !important;
                 max-height: none !important;
+                scroll-snap-type: y mandatory !important;
+                scroll-snap-stop: normal !important;
+                overscroll-behavior-y: contain !important;
+                -webkit-overflow-scrolling: touch !important;
+                touch-action: pan-y !important;
+                will-change: scroll-position !important;
+                contain: strict !important;
             }
 
             /* Container full-bleed lock for Reels */
@@ -577,7 +805,7 @@
                 background-color: #000000 !important;
             }
 
-            /* Each Reel Card & Video Container */
+            /* Each Reel Card & Video Container: GPU accelerated layer & layout isolation */
             [data-fg-reel-card],
             [data-fg-reel],
             html[data-fg-island="FLOATING"] main section,
@@ -590,6 +818,11 @@
                 position: relative !important;
                 box-sizing: border-box !important;
                 background-color: #000000 !important;
+                scroll-snap-align: start !important;
+                scroll-snap-stop: normal !important;
+                contain: layout paint !important;
+                will-change: transform !important;
+                transform: translateZ(0) !important;
             }
 
             /* Video scaling: seamless edge-to-edge presentation */
@@ -962,7 +1195,370 @@
 
 
 
-    // --- 3. REELS LAYOUT SCROLLER & OVERLAY POSITIONING (100% INSPIRATION MATCH) ---
+    // --- 3. REELS INTERACTION-BASED COUNTER & HISTORY TRACKER ---
+    let lastTrackedReelCode = null;
+    let lastTrackedCaption = '';
+    let lastTrackedAuthor = '';
+    const harvestedReels = new Map();
+
+    function handleReelMetaEvent(raw) {
+        try {
+            const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            if (data && data.code) {
+                const existing = harvestedReels.get(data.code) || {};
+                const updated = {
+                    author: data.author || existing.author || '',
+                    caption: data.caption || existing.caption || ''
+                };
+                harvestedReels.set(data.code, updated);
+
+                if (lastTrackedReelCode === data.code) {
+                    let changed = false;
+                    if (!lastTrackedAuthor && updated.author) {
+                        lastTrackedAuthor = updated.author;
+                        changed = true;
+                    }
+                    if (!lastTrackedCaption && updated.caption) {
+                        lastTrackedCaption = updated.caption;
+                        changed = true;
+                    }
+                    if (changed) {
+                        postToNative({
+                            action: 'reelWatched',
+                            type: 'meta',
+                            code: data.code,
+                            url: 'https://www.instagram.com/reel/' + data.code + '/',
+                            title: lastTrackedCaption || (lastTrackedAuthor ? ('Reel by @' + lastTrackedAuthor) : ''),
+                            caption: lastTrackedCaption,
+                            author: lastTrackedAuthor,
+                            thumbnail: ''
+                        });
+                    }
+                }
+            }
+        } catch (_) {}
+    }
+
+    document.addEventListener('focusgram:reel-meta', (e) => handleReelMetaEvent(e.detail), true);
+    window.addEventListener('focusgram:reel-meta', (e) => handleReelMetaEvent(e.detail), true);
+
+    function findReelCardForVideo(v) {
+        if (!v) return null;
+        const article = v.closest('article, section, [role="region"], [data-fg-reel-card]');
+        if (article && article.querySelectorAll('video').length <= 1) {
+            return article;
+        }
+
+        let p = v.parentElement;
+        let best = null;
+        while (p && p !== document.body && p !== document.documentElement && p.tagName !== 'MAIN') {
+            if (p.querySelectorAll('video').length > 1) {
+                break;
+            }
+            if (p.querySelector('a[href*="/audio/"]') || p.querySelector('header') || p.querySelector('a[role="link"]:not([href*="/audio/"])')) {
+                best = p;
+            }
+            p = p.parentElement;
+        }
+        return best || article || v.parentElement;
+    }
+
+    function checkAndTrackActiveReel() {
+        const path = window.location.pathname || '';
+        // Only run when user is on Reels or viewing a Reel
+        if (!path.startsWith('/reels') && !path.startsWith('/reel')) {
+            return;
+        }
+
+        let code = null;
+
+        // 1. Direct URL check: /reel/<code> or /reels/<code>
+        const urlMatch = path.match(/\/(?:reel|reels)\/([A-Za-z0-9_-]{4,})/);
+        if (urlMatch && !['reels', 'reel', 'audio', 'videos', 'clips', 'explore', 'home', 'direct', 'stories'].includes(urlMatch[1].toLowerCase())) {
+            code = urlMatch[1];
+        }
+
+        const vh = window.innerHeight || 800;
+        let activeCard = null;
+
+        // 2. Identify the active reel card
+        // Priority A: If code is known from URL, find card containing a link with that code
+        if (code) {
+            const codeLink = document.querySelector(`a[href*="/reel/${code}/"], a[href*="/reels/${code}/"], a[href*="/p/${code}/"]`);
+            if (codeLink) {
+                activeCard = findReelCardForVideo(codeLink);
+            }
+        }
+
+        // Priority B: Find video actively playing in viewport
+        const videos = Array.from(document.querySelectorAll('video'));
+        if (!activeCard) {
+            for (const v of videos) {
+                const rect = v.getBoundingClientRect();
+                if (rect.bottom > 50 && rect.top < vh - 50 && !v.paused) {
+                    activeCard = findReelCardForVideo(v);
+                    break;
+                }
+            }
+        }
+
+        // Priority C: Center-most visible video in viewport
+        if (!activeCard) {
+            let minDistance = Infinity;
+            for (const v of videos) {
+                const rect = v.getBoundingClientRect();
+                if (rect.bottom > 0 && rect.top < vh && rect.height > 100) {
+                    const centerY = rect.top + rect.height / 2;
+                    const dist = Math.abs(centerY - vh / 2);
+                    if (dist < minDistance) {
+                        minDistance = dist;
+                        activeCard = findReelCardForVideo(v);
+                    }
+                }
+            }
+        }
+
+        if (!activeCard && videos.length > 0) {
+            activeCard = findReelCardForVideo(videos[0]);
+        }
+
+        // Extract code from activeCard if not in URL
+        if (!code && activeCard) {
+            const reelLinks = Array.from(activeCard.querySelectorAll('a[href*="/reel/"], a[href*="/reels/"], a[href*="/p/"]'));
+            for (const l of reelLinks) {
+                const href = l.getAttribute('href') || '';
+                if (href.includes('/audio/')) continue;
+                const m = href.match(/\/(?:reel|reels|p)\/([A-Za-z0-9_-]{4,})/);
+                if (m && !['reels', 'reel', 'audio', 'videos', 'clips', 'explore', 'home', 'direct', 'stories'].includes(m[1].toLowerCase())) {
+                    code = m[1];
+                    break;
+                }
+            }
+        }
+
+        // If no valid reel shortcode found, DO NOT track
+        if (!code || code === 'reels' || code === 'reel' || code === 'audio') return;
+
+        // If this reel card is marked as an ad, DO NOT count or log it
+        if (activeCard) {
+            if (activeCard.hasAttribute('data-fg-reel-ad') || activeCard.getAttribute('data-fg-ad') === '1') {
+                return;
+            }
+            const adPill = activeCard.querySelector('[aria-label="Ad"], a[href*="/ads/"], a[href*="/ad_"]');
+            if (adPill) return;
+        }
+
+        let author = '';
+        let caption = '';
+
+        // Source 1: Check memory cache from previous events
+        if (code && harvestedReels.has(code)) {
+            const h = harvestedReels.get(code);
+            if (h.author) author = h.author;
+            if (h.caption) caption = h.caption.slice(0, 300);
+        }
+
+        // Source 2: Check hidden DOM cache element (#fg-meta-cache)
+        if (code && (!author || !caption)) {
+            const cacheEl = document.getElementById('fg-meta-cache');
+            if (cacheEl && cacheEl.hasAttribute('data-reel-' + code)) {
+                try {
+                    const cached = JSON.parse(cacheEl.getAttribute('data-reel-' + code));
+                    if (!author && cached.author) author = cached.author;
+                    if (!caption && cached.caption) caption = cached.caption.slice(0, 300);
+                } catch (_) {}
+            }
+        }
+
+        // Source 3: Check meta tags (OG description & meta description)
+        if (!caption || !author) {
+            const metaDesc = document.querySelector('meta[property="og:description"], meta[name="description"]');
+            if (metaDesc && metaDesc.content) {
+                const m = metaDesc.content.match(/-\s*([A-Za-z0-9._]+)\s+on\s+[^:]+:\s*["“](.*?)["”]/s);
+                if (m) {
+                    if (!author && m[1]) author = m[1].trim();
+                    if (!caption && m[2]) caption = m[2].trim().slice(0, 300);
+                }
+            }
+        }
+
+        // Source 4: Check document.title ("Author on Instagram: \"Caption\"")
+        if (!caption || !author) {
+            if (document.title) {
+                const m = document.title.match(/^([^:]+?)\s+on\s+Instagram:\s*["“](.*?)["”]/s);
+                if (m) {
+                    if (!author && m[1]) author = m[1].trim();
+                    if (!caption && m[2]) caption = m[2].trim().slice(0, 300);
+                }
+            }
+        }
+
+        // Source 5: Extract Author from activeCard DOM
+        if (!author && activeCard) {
+            const avatarLink = activeCard.querySelector('header a:has(img), a[href^="/"]:has(img[alt*="profile" i]), a[href^="/"]:has(img)');
+            if (avatarLink) {
+                const href = (avatarLink.getAttribute('href') || '').replace(/^\/+|\/+$/g, '').split('/')[0];
+                if (href && !['home', 'explore', 'reels', 'reel', 'direct', 'stories', 'accounts', 'legal', 'about', 'audio'].includes(href.toLowerCase())) {
+                    author = href;
+                }
+            }
+            if (!author) {
+                const headerLink = activeCard.querySelector('header a[href^="/"], [role="region"] header a[href^="/"]');
+                if (headerLink) {
+                    const href = (headerLink.getAttribute('href') || '').replace(/^\/+|\/+$/g, '').split('/')[0];
+                    if (href && !['home', 'explore', 'reels', 'reel', 'direct', 'stories', 'accounts', 'legal', 'about', 'audio'].includes(href.toLowerCase())) {
+                        author = href;
+                    }
+                    if (!author) {
+                        const text = (headerLink.textContent || '').trim().replace(/^@/, '');
+                        if (text && !['home', 'explore', 'reels', 'direct', 'instagram'].includes(text.toLowerCase())) {
+                            author = text;
+                        }
+                    }
+                }
+            }
+            if (!author) {
+                const links = Array.from(activeCard.querySelectorAll('a[href^="/"]:not([href*="/audio/"]):not([href*="/reel/"]):not([href*="/reels/"]):not([href*="/explore/"]):not([href*="/tags/"])'));
+                for (const a of links) {
+                    if (a.closest('a[href*="/audio/"]')) continue;
+                    const rawHref = (a.getAttribute('href') || '').replace(/^\/+|\/+$/g, '').split('/')[0];
+                    const lower = rawHref.toLowerCase();
+                    if (rawHref && !['home', 'explore', 'reels', 'reel', 'direct', 'stories', 'p', 'accounts', 'legal', 'about', 'audio'].includes(lower)) {
+                        author = rawHref;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Source 6: Extract Caption from activeCard DOM
+        if (!caption && activeCard) {
+            const candidates = Array.from(activeCard.querySelectorAll('h1, h2, span[dir="auto"], div[dir="auto"], p, span'));
+            for (const el of candidates) {
+                if (el.closest('a[href*="/audio/"]')) continue;
+
+                let txt = (el.textContent || '').trim();
+                if (!txt || txt.length < 2) continue;
+
+                // Strip author username if prepended at start of caption
+                if (author) {
+                    const cleanAuthor = author.toLowerCase().replace(/^@/, '');
+                    if (txt.toLowerCase().startsWith(cleanAuthor)) {
+                        txt = txt.slice(cleanAuthor.length).trim().replace(/^[:\-–—\s]+/, '').trim();
+                    } else if (txt.toLowerCase().startsWith('@' + cleanAuthor)) {
+                        txt = txt.slice(cleanAuthor.length + 1).trim().replace(/^[:\-–—\s]+/, '').trim();
+                    }
+                }
+
+                const lower = txt.toLowerCase();
+                if (txt.length < 2) continue;
+
+                // Ignore if text is purely the author name
+                if (author && (lower === author.toLowerCase() || lower === '@' + author.toLowerCase())) continue;
+
+                // Ignore action buttons, counts, and UI badges
+                if (/^(?:follow|following|requested|watch\s+more|view\s+profile|sign\s+up|install\s+now|learn\s+more|shop\s+now|more|\.\.\.\s*more)$/i.test(lower)) continue;
+                if (lower === 'original audio' || lower.includes('· original audio')) continue;
+                if (/^\d+[\d,.]*[KkMm]?$/.test(txt)) continue;
+                if (lower.startsWith('liked by ') || lower.startsWith('verified')) continue;
+                if (/^(?:ad|sponsored|paid\s+partnership)$/i.test(lower)) continue;
+                if (/^(?:like|comment|comments|share|save|remix|send|audio|music|tagged|explore|reels|reel)$/i.test(lower)) continue;
+
+                caption = txt.slice(0, 300);
+                break;
+            }
+        }
+
+        // Cache whatever we resolved
+        if (code && (author || caption)) {
+            const existing = harvestedReels.get(code) || {};
+            harvestedReels.set(code, {
+                author: author || existing.author || '',
+                caption: caption || existing.caption || ''
+            });
+        }
+
+        const reelUrl = 'https://www.instagram.com/reel/' + code + '/';
+
+        // If code hasn't changed, check if metadata became available later
+        if (code === lastTrackedReelCode) {
+            if ((!lastTrackedCaption && caption) || (!lastTrackedAuthor && author)) {
+                if (caption) lastTrackedCaption = caption;
+                if (author) lastTrackedAuthor = author;
+                postToNative({
+                    action: 'reelWatched',
+                    type: 'meta',
+                    code: code,
+                    url: reelUrl,
+                    title: lastTrackedCaption || (lastTrackedAuthor ? ('Reel by @' + lastTrackedAuthor) : ''),
+                    caption: lastTrackedCaption,
+                    author: lastTrackedAuthor,
+                    thumbnail: ''
+                });
+            }
+            return;
+        }
+
+        // CODE CHANGED! Update last tracked state
+        lastTrackedReelCode = code;
+        lastTrackedCaption = caption;
+        lastTrackedAuthor = author;
+
+        postToNative({
+            action: 'reelWatched',
+            code: code,
+            url: reelUrl,
+            title: caption || (author ? ('Reel by @' + author) : ''),
+            caption: caption,
+            author: author || '',
+            thumbnail: ''
+        });
+    }
+
+    // Attach interaction listeners for Reels tracking without thrashing scroll frames
+    let checkReelDebounceTimer = null;
+    function debouncedCheckAndTrackActiveReel() {
+        if (checkReelDebounceTimer) clearTimeout(checkReelDebounceTimer);
+        checkReelDebounceTimer = setTimeout(checkAndTrackActiveReel, 120);
+    }
+
+    window.addEventListener('scroll', debouncedCheckAndTrackActiveReel, { passive: true });
+    window.addEventListener('scrollend', checkAndTrackActiveReel, { passive: true });
+    window.addEventListener('touchend', () => setTimeout(checkAndTrackActiveReel, 100), { passive: true });
+    window.addEventListener('wheel', debouncedCheckAndTrackActiveReel, { passive: true });
+    window.addEventListener('keydown', (e) => {
+        if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Space'].includes(e.key)) {
+            setTimeout(checkAndTrackActiveReel, 120);
+        }
+    });
+    window.addEventListener('popstate', checkAndTrackActiveReel);
+    window.addEventListener('hashchange', checkAndTrackActiveReel);
+    window.addEventListener('focusgram:urlchange', checkAndTrackActiveReel);
+
+    // Periodic ticker (every 400ms) to ensure reel transitions are never missed
+    setInterval(checkAndTrackActiveReel, 400);
+
+    // Ensure clicking 'Post' or 'Story' in the Create dropdown opens file/media picker
+    document.addEventListener('click', (e) => {
+        const target = e.target;
+        if (!target) return;
+
+        const postOrStoryBtn = target.closest('button, div[role="button"], a[role="button"], li, div[role="menuitem"]');
+        if (postOrStoryBtn) {
+            const text = (postOrStoryBtn.textContent || '').trim().toLowerCase();
+            if (text === 'post' || text === 'story' || text.startsWith('post\n') || text.startsWith('story\n')) {
+                const fileInput = postOrStoryBtn.querySelector('input[type="file"]') ||
+                                  postOrStoryBtn.parentElement?.querySelector('input[type="file"]') ||
+                                  document.querySelector('form input[type="file"]') ||
+                                  document.querySelector('input[type="file"]');
+                if (fileInput && fileInput !== target) {
+                    fileInput.click();
+                }
+            }
+        }
+    }, true);
+
+    // --- 3b. REELS LAYOUT SCROLLER & OVERLAY POSITIONING (100% INSPIRATION MATCH) ---
     function fixReels() {
         const path = window.location.pathname.toLowerCase();
         if (!path.startsWith('/reels') && !path.startsWith('/reel')) return;
@@ -998,49 +1594,51 @@
             v.style.setProperty('height', '100%', 'important');
 
             // Find closest reel card container
-            let card = v.closest('article') || v.closest('section') || v.closest('[role="region"]') || v.parentElement;
-            while (card && card !== document.body && card !== document.documentElement) {
-                if (card.tagName === 'ARTICLE' || card.tagName === 'SECTION' || card.parentElement?.tagName === 'MAIN') {
-                    break;
-                }
-                const r = card.getBoundingClientRect();
-                if (r.height > vh * 0.5) {
-                    break;
-                }
-                card = card.parentElement;
+            let card = findReelCardForVideo(v);
+            if (!card) return;
+            // Prevent selecting root page or scroller containers holding multiple reels
+            if (card.tagName === 'MAIN' || card.id === 'react-root' || card.querySelectorAll('video').length > 1) {
+                return;
             }
 
-            if (!card) return;
+            if (!card.hasAttribute('data-fg-reel-card')) {
+                card.setAttribute('data-fg-reel-card', '1');
+            }
 
             // Check if this reel is an ad / sponsored
             if (currentSettings.noAds !== false) {
-                const cardText = (card.textContent || '').toLowerCase();
-                const isSponsored = cardText.includes('sponsored') ||
-                                    cardText.includes('paid partnership') ||
-                                    cardText.includes('gesponsert') ||
-                                    cardText.includes('sponsorisé') ||
-                                    cardText.includes('publicidad') ||
-                                    cardText.includes('patrocinado') ||
-                                    cardText.includes('sponsorizzato') ||
-                                    !!card.querySelector('a[href*="/ads/"], a[href*="/ad_"], a[href*="/about/ads"], a[href*="ads.instagram.com"]') ||
-                                    !!card.querySelector('[aria-label*="Sponsored" i], [aria-label*="sponsored" i], [data-ad-preview]');
+                let isSponsored = !!card.querySelector('[aria-label*="Sponsored" i], [aria-label="Ad" i], [aria-label*="advertisement" i], [data-ad-preview], a[href*="/ads/"], a[href*="/ad_"], a[href*="/about/ads"], a[href*="ads.instagram.com"]');
 
-                const hasAdCTA = !!card.querySelector('div[role="button"], a[role="button"]') &&
-                    ['learn more', 'shop now', 'install now', 'sign up', 'apply now', 'book now', 'download', 'order now', 'get offer', 'subscribe', 'contact us']
-                    .some(cta => cardText.includes(cta));
+                if (!isSponsored) {
+                    const badges = card.querySelectorAll('span, div[role="button"], button');
+                    for (let s = 0; s < badges.length; s++) {
+                        const el = badges[s];
+                        if (el.children.length > 2) continue;
+                        const raw = (el.textContent || '').trim();
+                        if (!raw || raw.length > 15) continue;
+                        if (/^[\u{1F300}-\u{1F9FF}\s]*ad$/iu.test(raw) || /^sponsored$/i.test(raw) || /^paid\s+partnership$/i.test(raw)) {
+                            if (!el.closest('span[dir="auto"]')) {
+                                isSponsored = true;
+                                break;
+                            }
+                        }
+                    }
+                }
 
-                if (isSponsored || hasAdCTA) {
+                if (isSponsored) {
                     card.setAttribute('data-fg-reel-ad', '1');
-                    card.style.setProperty('display', 'none', 'important');
-                    card.style.setProperty('height', '0px', 'important');
-                    card.style.setProperty('opacity', '0', 'important');
+                    card.style.setProperty('visibility', 'hidden', 'important');
                     card.style.setProperty('pointer-events', 'none', 'important');
                     v.muted = true;
                     try { v.pause(); } catch (_) {}
-
-                    const rect = card.getBoundingClientRect();
-                    if (rect.top >= -100 && rect.top <= window.innerHeight * 0.8) {
-                        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, which: 40, bubbles: true }));
+                    const vr = v.getBoundingClientRect();
+                    if (vr.top >= -vh * 0.4 && vr.bottom <= vh * 1.4) {
+                        const scroller = card.closest('[data-fg-reel-scroller]') || document.querySelector('[data-fg-reel-scroller="1"]');
+                        if (scroller && scroller !== window) {
+                            try { scroller.scrollBy({ top: scroller.clientHeight || vh, behavior: 'instant' }); } catch (_) {}
+                        } else {
+                            try { window.scrollBy({ top: vh, behavior: 'instant' }); } catch (_) {}
+                        }
                     }
                     return;
                 }
@@ -1150,10 +1748,13 @@
     window.addEventListener('popstate', fixReels);
     window.addEventListener('focusgram:urlchange', fixReels);
 
-    // Capture scroll events anywhere in document
+    // Capture scroll events anywhere in document without blocking smooth 60/120fps compositor
+    let fixReelsScrollTimer = null;
     document.addEventListener('scroll', () => {
-        fixReels();
+        if (fixReelsScrollTimer) clearTimeout(fixReelsScrollTimer);
+        fixReelsScrollTimer = setTimeout(fixReels, 150);
     }, { passive: true, capture: true });
+    window.addEventListener('scrollend', fixReels, { passive: true });
 
     let reelTimeThrottle = null;
     document.addEventListener('timeupdate', () => {
@@ -1444,8 +2045,8 @@
                 action: 'reelViewed',
                 type: 'reelViewed',
                 url: url,
-                title: title || 'Instagram Reel',
-                author: author || 'Instagram Creator',
+                title: title || '',
+                author: author || '',
                 thumbnailUrl: thumbnailUrl || ''
             });
             console.log('[FocusGram] In-page extracted reel metadata:', url);
@@ -1727,30 +2328,455 @@
         } catch (_) {}
     }
 
+    const FG_ACT_ATTR = 'data-fg-x-act';
+    const FG_ACT_CLASS = 'fg-x-act-btn';
+
+    function requestMediaFromPage(code) {
+        return new Promise((resolve) => {
+            if (!code) return resolve(null);
+            const reqId = 'req_' + Math.random().toString(36).substring(2, 9);
+            const timer = setTimeout(() => {
+                window.removeEventListener('fg-response-media-' + reqId, onResponse);
+                resolve(null);
+            }, 1800);
+
+            function onResponse(e) {
+                clearTimeout(timer);
+                window.removeEventListener('fg-response-media-' + reqId, onResponse);
+                resolve(e && e.detail ? e.detail : null);
+            }
+
+            window.addEventListener('fg-response-media-' + reqId, onResponse);
+            window.dispatchEvent(new CustomEvent('fg-request-media', {
+                detail: { code: code, reqId: reqId }
+            }));
+        });
+    }
+
+    function extractVideoUrlFromFiber(rawNode) {
+        if (!rawNode) return null;
+        try {
+            const node = rawNode.wrappedJSObject || rawNode;
+            const key = Object.keys(node).find(k => k.startsWith('__reactFiber') || k.startsWith('__reactProps'));
+            if (!key) return null;
+            let fiber = node[key];
+            for (let i = 0; i < 40 && fiber; i++) {
+                const props = fiber.memoizedProps || fiber.pendingProps;
+                if (props) {
+                    if (props.videoUrl && typeof props.videoUrl === 'string' && props.videoUrl.startsWith('http')) {
+                        return props.videoUrl;
+                    }
+                    if (props.src && typeof props.src === 'string' && props.src.startsWith('http') && !props.src.startsWith('blob:')) {
+                        return props.src;
+                    }
+                    if (props.video_versions && Array.isArray(props.video_versions) && props.video_versions[0]?.url) {
+                        return props.video_versions[0].url;
+                    }
+                    if (props.media && props.media.video_versions && props.media.video_versions[0]?.url) {
+                        return props.media.video_versions[0].url;
+                    }
+                    if (props.item && props.item.video_versions && props.item.video_versions[0]?.url) {
+                        return props.item.video_versions[0].url;
+                    }
+                    if (props.clip && props.clip.video_versions && props.clip.video_versions[0]?.url) {
+                        return props.clip.video_versions[0].url;
+                    }
+                    if (props.post && props.post.video_versions && props.post.video_versions[0]?.url) {
+                        return props.post.video_versions[0].url;
+                    }
+                }
+                fiber = fiber.return;
+            }
+        } catch (_) {}
+        return null;
+    }
+
+    function extractBestDomUrl(container) {
+        if (!container) return null;
+        // 1. Video check
+        const video = container.querySelector('video') || (container.tagName === 'VIDEO' ? container : null);
+        if (video) {
+            const fiberVideoUrl = extractVideoUrlFromFiber(video) ||
+                                  extractVideoUrlFromFiber(video.parentElement) ||
+                                  extractVideoUrlFromFiber(video.parentElement?.parentElement);
+            if (fiberVideoUrl) {
+                return { url: fiberVideoUrl, isVideo: true };
+            }
+
+            const vSrc = video.src || video.currentSrc || '';
+            if (vSrc && (vSrc.startsWith('http://') || vSrc.startsWith('https://')) && !vSrc.startsWith('blob:')) {
+                return { url: vSrc, isVideo: true };
+            }
+            const source = video.querySelector('source');
+            if (source && source.src && (source.src.startsWith('http://') || source.src.startsWith('https://')) && !source.src.startsWith('blob:')) {
+                return { url: source.src, isVideo: true };
+            }
+            if (video.poster && (video.poster.startsWith('http://') || video.poster.startsWith('https://'))) {
+                return { url: video.poster, isVideo: false };
+            }
+        }
+
+        const fiberContainerUrl = extractVideoUrlFromFiber(container);
+        if (fiberContainerUrl) {
+            return { url: fiberContainerUrl, isVideo: true };
+        }
+
+        // 2. Image check (best candidate from srcset or src)
+        const imgs = Array.from(container.querySelectorAll('img')).filter(img => {
+            const r = img.getBoundingClientRect();
+            return r.width > 120 && r.height > 120;
+        });
+        const mainImg = imgs[0];
+        if (mainImg) {
+            if (mainImg.srcset) {
+                const parts = mainImg.srcset.split(',').map(s => s.trim().split(/\s+/));
+                const best = parts[parts.length - 1]?.[0];
+                if (best && (best.startsWith('http://') || best.startsWith('https://'))) {
+                    return { url: best, isVideo: false };
+                }
+            }
+            const iSrc = mainImg.currentSrc || mainImg.src;
+            if (iSrc && (iSrc.startsWith('http://') || iSrc.startsWith('https://'))) {
+                return { url: iSrc, isVideo: false };
+            }
+        }
+
+        // 3. Meta og:video & og:image
+        const ogVideo = document.querySelector('meta[property="og:video"], meta[property="og:video:secure_url"]');
+        if (ogVideo && ogVideo.content && (ogVideo.content.startsWith('http://') || ogVideo.content.startsWith('https://'))) {
+            return { url: ogVideo.content, isVideo: true };
+        }
+        const ogImage = document.querySelector('meta[property="og:image"]');
+        if (ogImage && ogImage.content && (ogImage.content.startsWith('http://') || ogImage.content.startsWith('https://'))) {
+            return { url: ogImage.content, isVideo: false };
+        }
+        // 4. Any image inside container
+        const anyImg = container.querySelector('img[src*="cdninstagram"], img[src*="fbcdn"], img');
+        if (anyImg) {
+            const src = anyImg.currentSrc || anyImg.src;
+            if (src && (src.startsWith('http://') || src.startsWith('https://'))) {
+                return { url: src, isVideo: false };
+            }
+        }
+
+        return null;
+    }
+
+    async function handleMediaDownload(postContainer, shortcode, activeVideo) {
+        try {
+            // First attempt: fetch from in-page API harvest cache or GraphQL
+            let media = null;
+            if (shortcode) {
+                media = await requestMediaFromPage(shortcode);
+            }
+
+            if (media && media.videoUrl && (media.videoUrl.startsWith('http://') || media.videoUrl.startsWith('https://'))) {
+                postToNative({
+                    action: 'downloadMedia',
+                    url: media.videoUrl,
+                    filename: 'instagram_' + (shortcode || Date.now()) + '.mp4'
+                });
+                return;
+            }
+
+            if (media && media.imageUrl && (media.imageUrl.startsWith('http://') || media.imageUrl.startsWith('https://'))) {
+                postToNative({
+                    action: 'downloadMedia',
+                    url: media.imageUrl,
+                    filename: 'instagram_' + (shortcode || Date.now()) + '.jpg'
+                });
+                return;
+            }
+
+            // Second attempt: extract from DOM
+            const domMedia = extractBestDomUrl(activeVideo || postContainer);
+            if (domMedia && domMedia.url) {
+                const ext = domMedia.isVideo ? '.mp4' : '.jpg';
+                postToNative({
+                    action: 'downloadMedia',
+                    url: domMedia.url,
+                    filename: 'instagram_' + (shortcode || Date.now()) + ext
+                });
+                return;
+            }
+
+            // Third attempt: Resource Performance Timings for active streaming video
+            try {
+                const perfEntries = performance.getEntriesByType('resource');
+                for (let i = perfEntries.length - 1; i >= 0 && i >= perfEntries.length - 40; i--) {
+                    const entry = perfEntries[i];
+                    const name = entry.name || '';
+                    if ((name.includes('cdninstagram.com') || name.includes('fbcdn.net')) && 
+                        (name.includes('.mp4') || name.includes('bytestart') || name.includes('/v/t') || entry.initiatorType === 'video' || entry.initiatorType === 'fetch')) {
+                        if (name.startsWith('http://') || name.startsWith('https://')) {
+                            const cleanUrl = name.replace(/[?&]bytestart=\d+/, '').replace(/[?&]byteend=\d+/, '');
+                            postToNative({
+                                action: 'downloadMedia',
+                                url: cleanUrl,
+                                filename: 'instagram_' + (shortcode || Date.now()) + '.mp4'
+                            });
+                            return;
+                        }
+                    }
+                }
+            } catch (_) {}
+
+            // Failed to resolve
+            postToNative({
+                action: 'downloadMedia',
+                url: '',
+                error: 'Could not extract video stream URL for this Reel'
+            });
+        } catch (e) {
+            postToNative({
+                action: 'downloadMedia',
+                url: '',
+                error: 'Download error: ' + (e.message || e)
+            });
+        }
+    }
+
+    function syncDownloadButtons() {
+        if (!currentSettings.videoDownloadEnabled) {
+            document.querySelectorAll('.' + FG_ACT_CLASS + ', .fg-feed-download-btn').forEach(btn => btn.remove());
+            return;
+        }
+
+        const candidates = new Set();
+
+        // 1. Polygon bookmark ribbon shape in action bar (points contain 20 21 or 21)
+        document.querySelectorAll('polygon').forEach(poly => {
+            const pts = poly.getAttribute('points') || '';
+            if (pts.includes('21') || pts.includes('13.44') || pts.includes('13.4') || pts.includes('20 21')) {
+                const btn = poly.closest('div[role="button"], button') || poly.closest('svg')?.parentElement;
+                if (btn) candidates.add(btn);
+            }
+        });
+
+        // 2. Multilingual save/bookmark aria-labels
+        document.querySelectorAll('svg, [role="button"], button').forEach(el => {
+            const label = (el.getAttribute('aria-label') || '').toLowerCase();
+            if (label.includes('save') || label.includes('guardar') || label.includes('salvar') || 
+                label.includes('speichern') || label.includes('enregistrer') || label.includes('bookmark') ||
+                label.includes('sauvegarder') || label.includes('remove') || label.includes('eliminar')) {
+                const btn = el.closest('div[role="button"], button') || (el.getAttribute('role') === 'button' ? el : el.parentElement);
+                if (btn) candidates.add(btn);
+            }
+        });
+
+        // 3. Structural action bar fallback (bookmark button is right-aligned in post action row)
+        document.querySelectorAll('article, div[role="presentation"]').forEach(post => {
+            const svgs = Array.from(post.querySelectorAll('svg'));
+            for (const svg of svgs) {
+                const btn = svg.closest('div[role="button"], button');
+                if (!btn) continue;
+                const row = btn.closest('section') || btn.closest('div[style*="flex-direction: row"]') || btn.parentElement?.parentElement;
+                if (row && row.children.length >= 2 && !row.querySelector('[' + FG_ACT_ATTR + '="1"]')) {
+                    const rightCol = row.children[row.children.length - 1];
+                    const saveBtn = rightCol.querySelector('div[role="button"], button') || rightCol;
+                    if (saveBtn) {
+                        candidates.add(saveBtn);
+                        break;
+                    }
+                }
+            }
+        });
+
+        candidates.forEach(btnContainer => {
+            if (!btnContainer || !btnContainer.parentElement) return;
+            const parent = btnContainer.parentElement;
+
+            if (parent.querySelector('[' + FG_ACT_ATTR + '="1"]')) return;
+
+            let postContainer = btnContainer.closest('article') || btnContainer.closest('section');
+            if (!postContainer) {
+                let curr = btnContainer;
+                for (let i = 0; i < 8 && curr && curr !== document.body && curr.tagName !== 'MAIN'; i++) {
+                    if (curr.querySelector && (curr.querySelector('video') || curr.querySelector('img[src*="cdninstagram"], img[src*="fbcdn"]'))) {
+                        postContainer = curr;
+                        break;
+                    }
+                    curr = curr.parentElement;
+                }
+            }
+            if (!postContainer) postContainer = parent.parentElement?.parentElement;
+            if (!postContainer) return;
+
+            // Extract post shortcode if available
+            const link = postContainer.querySelector('a[href*="/p/"], a[href*="/reel/"], a[href*="/reels/"]');
+            const href = link ? (link.getAttribute('href') || '') : window.location.pathname;
+            const codeMatch = href.match(/\/(?:p|reel|reels)\/([A-Za-z0-9_-]+)/);
+            const shortcode = codeMatch ? codeMatch[1] : '';
+
+            const dlBtn = document.createElement('div');
+            dlBtn.className = FG_ACT_CLASS;
+            dlBtn.setAttribute(FG_ACT_ATTR, '1');
+            dlBtn.setAttribute('data-fg-download-btn', '1');
+            dlBtn.setAttribute('tabindex', '0');
+            dlBtn.setAttribute('aria-label', 'Save Media');
+            dlBtn.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:6px;margin-right:6px;color:currentColor;opacity:0.9;vertical-align:middle;';
+            dlBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block;pointer-events:none;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+
+            dlBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleMediaDownload(postContainer, shortcode);
+            }, true);
+
+            parent.insertBefore(dlBtn, btnContainer);
+        });
+
+        // 4. Ensure every article in feed has a download button injected in its action bar
+        document.querySelectorAll('article').forEach(article => {
+            if (article.querySelector('[' + FG_ACT_ATTR + '="1"]')) return;
+            const likeBtn = article.querySelector('svg[aria-label*="Like" i], svg[aria-label*="Unlike" i], svg[aria-label*="Gefällt" i], svg[aria-label*="J’aime" i], svg[aria-label*="Curtir" i]')?.closest('div[role="button"], button');
+            if (!likeBtn) return;
+            const actionRow = likeBtn.closest('section') || likeBtn.parentElement?.parentElement;
+            if (!actionRow) return;
+
+            let saveBtn = actionRow.querySelector('svg[aria-label*="Save" i], svg[aria-label*="Bookmark" i], svg[aria-label*="Guardar" i]')?.closest('div[role="button"], button');
+            let target = saveBtn;
+            let container = saveBtn ? saveBtn.parentElement : (actionRow.children.length > 1 ? actionRow.children[actionRow.children.length - 1] : actionRow);
+
+            if (!container || container.querySelector('[' + FG_ACT_ATTR + '="1"]')) return;
+
+            const link = article.querySelector('a[href*="/p/"], a[href*="/reel/"], a[href*="/reels/"]');
+            const href = link ? (link.getAttribute('href') || '') : '';
+            const codeMatch = href.match(/\/(?:p|reel|reels)\/([A-Za-z0-9_-]+)/);
+            const shortcode = codeMatch ? codeMatch[1] : '';
+
+            const dlBtn = document.createElement('div');
+            dlBtn.className = FG_ACT_CLASS;
+            dlBtn.setAttribute(FG_ACT_ATTR, '1');
+            dlBtn.setAttribute('data-fg-download-btn', '1');
+            dlBtn.setAttribute('tabindex', '0');
+            dlBtn.setAttribute('role', 'button');
+            dlBtn.setAttribute('aria-label', 'Save Media');
+            dlBtn.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:6px;margin-right:6px;color:currentColor;opacity:0.9;vertical-align:middle;';
+            dlBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block;pointer-events:none;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+
+            dlBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleMediaDownload(article, shortcode);
+            }, true);
+
+            if (target && target.parentElement === container) {
+                container.insertBefore(dlBtn, target);
+            } else {
+                container.appendChild(dlBtn);
+            }
+        });
+    }
+
+    function filterFeedAds() {
+        if (currentSettings.noAds === false) return;
+        const SPONSORED_KW = [
+            'sponsored', 'gesponsert', 'sponsorisé', 'publicidad', 
+            'patrocinado', 'sponsorizzato', 'paid partnership', 'werbung', 'anuncio', 'werbeanzeige'
+        ];
+        const STRICT_AD_CTAS = [
+            'shop now', 'install now', 'sign up', 'apply now', 'book now', 'order now', 'get offer'
+        ];
+
+        document.querySelectorAll('article').forEach(article => {
+            if (article.dataset.fgAdFiltered) return;
+            let isAd = !!article.querySelector('[data-ad-preview], a[href*="/ads/"], a[href*="/ad_"], a[href*="ads.instagram.com"]');
+
+            if (!isAd) {
+                const headerElements = article.querySelectorAll('header span, header [aria-label*="Sponsored" i], header [aria-label="Ad" i]');
+                for (let i = 0; i < headerElements.length; i++) {
+                    const el = headerElements[i];
+                    if (el.children.length > 2) continue;
+                    const txt = (el.textContent || '').trim().toLowerCase();
+                    if (!txt || txt.length > 30) continue;
+                    const clean = txt.replace(/[^a-z]/g, '');
+                    if (clean === 'ad' || SPONSORED_KW.some(kw => txt === kw || clean === kw)) {
+                        isAd = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!isAd) {
+                const buttons = article.querySelectorAll('div[role="button"]:not([' + FG_ACT_ATTR + ']):not([data-fg-download-btn]), a[role="button"]:not([' + FG_ACT_ATTR + ']):not([data-fg-download-btn]), button');
+                for (let k = 0; k < buttons.length; k++) {
+                    const btnTxt = (buttons[k].textContent || '').trim().toLowerCase();
+                    if (STRICT_AD_CTAS.some(cta => btnTxt === cta)) {
+                        isAd = true;
+                        break;
+                    }
+                }
+            }
+
+            if (isAd) {
+                article.dataset.fgAdFiltered = 'true';
+                article.style.setProperty('display', 'none', 'important');
+                article.style.setProperty('height', '0px', 'important');
+                article.style.setProperty('min-height', '0px', 'important');
+                article.style.setProperty('max-height', '0px', 'important');
+                article.style.setProperty('overflow', 'hidden', 'important');
+                article.style.setProperty('opacity', '0', 'important');
+                article.style.setProperty('pointer-events', 'none', 'important');
+            }
+        });
+    }
+
+    async function downloadActiveReel() {
+        try {
+            const vh = window.innerHeight;
+            const videos = Array.from(document.querySelectorAll('video'));
+            // Active video is the one currently visible and playing, or closest to center
+            let activeVideo = null;
+            let minCenterDist = Infinity;
+            for (const v of videos) {
+                const r = v.getBoundingClientRect();
+                if (r.height > 100 && r.bottom > 0 && r.top < vh) {
+                    const dist = Math.abs((r.top + r.height / 2) - vh / 2);
+                    if (!v.paused) {
+                        activeVideo = v;
+                        break;
+                    }
+                    if (dist < minCenterDist) {
+                        minCenterDist = dist;
+                        activeVideo = v;
+                    }
+                }
+            }
+            if (!activeVideo && videos.length > 0) activeVideo = videos[0];
+
+            const card = activeVideo ? (activeVideo.closest('[data-fg-reel-card]') || activeVideo.closest('article') || activeVideo.parentElement) : document;
+
+            let code = null;
+            if (card) {
+                const reelLink = card.querySelector('a[href*="/reel/"], a[href*="/p/"], a[href*="/reels/"]');
+                if (reelLink && reelLink.href) {
+                    const m = reelLink.href.match(/\/(?:reel|reels|p)\/([A-Za-z0-9_-]{4,})/);
+                    if (m && m[1] !== 'reels' && m[1] !== 'reel') code = m[1];
+                }
+            }
+            if (!code) {
+                const m = window.location.pathname.match(/\/(?:reel|reels|p)\/([A-Za-z0-9_-]{4,})/);
+                if (m && m[1] !== 'reels' && m[1] !== 'reel') code = m[1];
+            }
+
+            await handleMediaDownload(card, code, activeVideo);
+        } catch (e) {
+            console.error('[FocusGram] downloadActiveReel error:', e);
+            postToNative({ action: 'downloadMedia', url: '', error: 'Download error: ' + (e.message || e) });
+        }
+    }
+
     // 250ms periodic heartbeat guarantees zero missed state changes during React renders
     setInterval(() => {
         checkStateAndNotify();
         hideNav();
         updateShareSheetState();
         fixReels();
+        filterFeedAds();
         cleanUpDynamicContent();
+        syncDownloadButtons();
     }, 250);
-
-    // --- CREATE (+) DROPDOWN "POST" & "STORY" HANDLER ---
-    document.addEventListener('click', (e) => {
-        try {
-            const target = e.target;
-            if (!target) return;
-            const text = (target.textContent || '').trim();
-            if (text === 'Post' || text === 'Story') {
-                const container = target.closest('form') || target.closest('[role="dialog"]') || target.closest('[role="menu"]') || document;
-                const fileInput = container.querySelector('input[type="file"]');
-                if (fileInput && fileInput !== target) {
-                    fileInput.click();
-                }
-            }
-        } catch (_) {}
-    }, true);
 
     // --- 4. INPUT FOCUS / TYPING BRIDGE ---
     function setupInputFocusListeners() {
@@ -1869,6 +2895,9 @@
                               document.querySelector('svg[aria-label="New Post"]')?.closest('a, button, div[role="button"]');
             if (createBtn) createBtn.click();
             return;
+        } else if (msg.action === 'requestReelDownload') {
+            downloadActiveReel();
+            return;
         }
     }
 
@@ -1891,6 +2920,7 @@
                 hideFollowerCounts: config.hideFollowerCounts !== undefined ? config.hideFollowerCounts : currentSettings.hideFollowerCounts,
                 hideSuggestedPosts: config.hideSuggestedPosts !== undefined ? config.hideSuggestedPosts : currentSettings.hideSuggestedPosts,
                 hideShopTab: config.hideShopTab !== undefined ? config.hideShopTab : currentSettings.hideShopTab,
+                videoDownloadEnabled: config.videoDownloadEnabled !== undefined ? config.videoDownloadEnabled : currentSettings.videoDownloadEnabled,
                 grayscale: config.grayscale !== undefined ? config.grayscale : currentSettings.grayscale,
                 minimalMode: config.minimalMode !== undefined ? config.minimalMode : currentSettings.minimalMode,
                 ghostModeEnabled: ghost.enabled !== undefined ? ghost.enabled : currentSettings.ghostModeEnabled,
@@ -2100,7 +3130,13 @@
         } catch (_) {}
     }
 
-    window.addEventListener('scroll', checkAndTriggerInfiniteScroll, { passive: true });
+    let infiniteScrollTimer = null;
+    window.addEventListener('scroll', () => {
+        if (infiniteScrollTimer) clearTimeout(infiniteScrollTimer);
+        infiniteScrollTimer = setTimeout(checkAndTriggerInfiniteScroll, 180);
+    }, { passive: true });
+    window.addEventListener('scrollend', checkAndTriggerInfiniteScroll, { passive: true });
+    window.addEventListener('focusgram:download-reel', downloadActiveReel);
 
 })();
 

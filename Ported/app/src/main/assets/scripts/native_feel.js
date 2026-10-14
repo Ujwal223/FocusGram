@@ -45,8 +45,8 @@
             user-select: text !important;
         }
 
-        /* 4. Enforce hardware-accelerated momentum touch scrolling */
-        * {
+        /* 4. Enforce hardware-accelerated momentum touch scrolling on scrollable containers */
+        html, body, [data-fg-reel-scroller], div[style*="overflow"], main {
             -webkit-overflow-scrolling: touch !important;
         }
 
