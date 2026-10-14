@@ -25,7 +25,8 @@ let cachedSettings = {
     ghostHideStorySeen: true,
     ghostHideDirectSeen: true,
     ghostHideTypingIndicator: true,
-    unblurMode: 'tap'
+    unblurMode: 'tap',
+    videoDownloadEnabled: true
 };
 
 const BLOCKED_URL_PATTERNS = [
@@ -33,9 +34,15 @@ const BLOCKED_URL_PATTERNS = [
     "*://*.instagram.com/ajax/bz*",
     "*://graph.instagram.com/*",
     "*://*.instagram.com/api/v1/ads/*",
+    "*://*.instagram.com/api/v1/ad_*",
     "*://*.instagram.com/api/v1/feed/saved/ads*",
+    "*://*.instagram.com/api/v1/feed/reels_tray/ads*",
     "*://*.instagram.com/api/v1/stories/tray/ads*",
+    "*://*.instagram.com/api/v1/stories/ads*",
     "*://*.instagram.com/api/v1/feed/timeline/ads*",
+    "*://*.instagram.com/api/v1/clips/home/ads*",
+    "*://*.instagram.com/api/v1/clips/ads*",
+    "*://*.instagram.com/api/v1/clips/stream/ads*",
     "*://*.facebook.com/tr/*",
     "*://*.facebook.com/tr?*",
     "*://*.facebook.net/*",
@@ -45,14 +52,7 @@ const BLOCKED_URL_PATTERNS = [
     "*://*.googleadservices.com/*",
     "*://*.googlesyndication.com/*",
     "*://*.adservice.google.*/*",
-    "*://*.cdninstagram.com/v/t51.2885-15/e35/*_ad*",
-    "*://*.instagram.com/api/v1/clips/home/ads*",
-    "*://*.instagram.com/api/v1/clips/ads*",
-    "*://*.instagram.com/api/v1/clips/stream/ads*",
-    "*://*.instagram.com/api/v1/ads/*",
-    "*://*.instagram.com/api/v1/feed/saved/ads*",
-    "*://*.instagram.com/api/v1/stories/tray/ads*",
-    "*://*.instagram.com/api/v1/feed/timeline/ads*"
+    "*://*.cdninstagram.com/v/t51.2885-15/e35/*_ad*"
 ];
 
 const GHOST_BLOCKED_URL_PATTERNS = [
@@ -168,15 +168,17 @@ if (typeof browser !== 'undefined' && browser.runtime && browser.runtime.onMessa
 
         if (nativePort) {
             try {
-                if (message.type === 'ReelMetadata' || message.action === 'reelViewed') {
+                if (message.type === 'ReelMetadata' || message.action === 'reelViewed' || message.action === 'reelWatched') {
                     const payload = message.payload || message.data || message.reel || message;
                     nativePort.postMessage({
                         action: 'reelViewed',
-                        type: 'reelViewed',
-                        url: payload.url || '',
-                        title: payload.title || 'Instagram Reel',
-                        author: payload.author || 'Instagram Creator',
-                        thumbnailUrl: payload.thumbnailUrl || ''
+                        type: message.type || 'reelViewed',
+                        code: payload.code || message.code || '',
+                        url: payload.url || message.url || '',
+                        title: payload.caption || payload.title || message.caption || message.title || '',
+                        caption: payload.caption || message.caption || '',
+                        author: payload.author || message.author || '',
+                        thumbnailUrl: payload.thumbnailUrl || message.thumbnailUrl || ''
                     });
                 } else {
                     nativePort.postMessage(message);

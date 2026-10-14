@@ -74,7 +74,7 @@ class SettingsRepository(private val context: Context) {
             isFirstRun = prefs[KEY_IS_FIRST_RUN] ?: false,
 
             startupPage = prefs[KEY_STARTUP_PAGE] ?: "home",
-            videoDownloadEnabled = prefs[KEY_VIDEO_DOWNLOAD_ENABLED] ?: false,
+            videoDownloadEnabled = prefs[KEY_VIDEO_DOWNLOAD_ENABLED] ?: true,
             sanitizeLinks = prefs[KEY_SANITIZE_LINKS] ?: true,
             notifySessionEnd = prefs[KEY_NOTIFY_SESSION_END] ?: false,
             notifyPersistent = prefs[KEY_NOTIFY_PERSISTENT] ?: false,

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -210,6 +211,7 @@ fun IOSSettingsRow(
     subtitle: String? = null,
     icon: ImageVector? = null,
     iconUrl: String? = null,
+    iconRes: Int? = null,
     iconBgColor: Color = IOSBlue,
     checked: Boolean? = null,
     onCheckedChange: ((Boolean) -> Unit)? = null,
@@ -232,10 +234,26 @@ fun IOSSettingsRow(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (iconUrl != null && icon != null) {
+            if (iconRes != null) {
+                Box(
+                    modifier = Modifier
+                        .size(30.dp)
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(iconBgColor),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        painter = androidx.compose.ui.res.painterResource(id = iconRes),
+                        contentDescription = null,
+                        tint = Color.Unspecified,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(14.dp))
+            } else if (iconUrl != null) {
                 DynamicNetworkIcon(
                     imageUrl = iconUrl,
-                    fallbackIcon = icon,
+                    fallbackIcon = icon ?: Icons.Default.Info,
                     iconBgColor = iconBgColor
                 )
                 Spacer(modifier = Modifier.width(14.dp))

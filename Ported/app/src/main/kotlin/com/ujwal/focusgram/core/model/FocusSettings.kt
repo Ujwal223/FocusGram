@@ -58,7 +58,7 @@ data class FocusSettings(
 
     // Extras & Notifications
     val startupPage: String = "home",
-    val videoDownloadEnabled: Boolean = false,
+    val videoDownloadEnabled: Boolean = true,
     val sanitizeLinks: Boolean = true,
     val notifySessionEnd: Boolean = false,
     val notifyPersistent: Boolean = false,

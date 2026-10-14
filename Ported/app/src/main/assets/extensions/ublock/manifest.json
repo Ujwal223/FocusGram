@@ -27,23 +27,15 @@
         "*://*.instagram.com/*"
       ],
       "js": [
-        "ghost.js"
-      ],
-      "run_at": "document_start",
-      "world": "MAIN",
-      "all_frames": true
-    },
-    {
-      "matches": [
-        "*://*.instagram.com/*"
-      ],
-      "js": [
         "content.js",
         "focusgram_content.js"
       ],
       "run_at": "document_start",
       "all_frames": true
     }
+  ],
+  "web_accessible_resources": [
+    "ghost.js"
   ],
   "browser_specific_settings": {
     "gecko": {

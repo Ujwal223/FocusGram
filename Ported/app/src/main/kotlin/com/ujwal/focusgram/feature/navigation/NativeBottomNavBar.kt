@@ -148,20 +148,20 @@ fun NativeBottomNavBar(
     }
     val islandBackground by animateColorAsState(
         targetValue = if (islandMode == IslandMode.FLOATING) {
-            if (isLight) Color(0xF2FFFFFF) else Color(0xD9101012)
+            if (isLight) Color(0x9CFFFFFF) else Color(0x8B101014)
         } else {
-            if (isLight) Color(0xF5FFFFFF) else Color(0xF2141416)
+            if (isLight) Color(0x9EFFFFFF) else Color(0x9B141418)
         },
         animationSpec = tween(300),
         label = "islandBackground"
     )
     val borderColor by animateColorAsState(
-        targetValue = if (isLight) Color(0x1F000000) else Color(0x33FFFFFF),
+        targetValue = if (isLight) Color(0x2B000000) else Color(0x4DFFFFFF),
         animationSpec = tween(300),
         label = "borderColor"
     )
     val selectedTabBackground by animateColorAsState(
-        targetValue = if (isLight) Color(0xFFE5E5EA) else Color(0xFF2C2C30),
+        targetValue = if (isLight) Color(0x1F000000) else Color(0x33FFFFFF),
         animationSpec = tween(300),
         label = "selectedTabBackground"
     )

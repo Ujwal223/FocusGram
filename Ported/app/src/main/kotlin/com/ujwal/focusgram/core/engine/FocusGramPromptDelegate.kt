@@ -2,6 +2,8 @@ package com.ujwal.focusgram.core.engine
 
 import android.content.Context
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.Autocomplete
@@ -41,17 +43,26 @@ class FocusGramPromptDelegate(
 
         val result = GeckoResult<GeckoSession.PromptDelegate.PromptResponse>()
 
-        handler.onPickFiles(mimeTypes, isMultiple) { uris ->
+        // CRITICAL: GeckoView calls onFilePrompt on a background thread.
+        // ActivityResultLauncher.launch() MUST be called on the main Looper thread.
+        Handler(Looper.getMainLooper()).post {
             try {
-                if (uris.isEmpty()) {
-                    result.complete(prompt.dismiss())
-                } else if (isMultiple) {
-                    result.complete(prompt.confirm(context, uris.toTypedArray()))
-                } else {
-                    result.complete(prompt.confirm(context, uris.first()))
+                handler.onPickFiles(mimeTypes, isMultiple) { uris ->
+                    try {
+                        if (uris.isEmpty()) {
+                            result.complete(prompt.dismiss())
+                        } else if (isMultiple) {
+                            result.complete(prompt.confirm(context, uris.toTypedArray()))
+                        } else {
+                            result.complete(prompt.confirm(context, uris.first()))
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error confirming file prompt: ${e.message}", e)
+                        result.complete(prompt.dismiss())
+                    }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error confirming file prompt: ${e.message}", e)
+                Log.e(TAG, "Error initiating file picker on UI thread: ${e.message}", e)
                 result.complete(prompt.dismiss())
             }
         }

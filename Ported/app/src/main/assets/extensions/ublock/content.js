@@ -17,19 +17,27 @@
         div[data-testid="post_ad"],
         div[aria-label*="Sponsored" i]:not(main):not([role="feed"]),
         div[aria-label*="sponsored" i]:not(main):not([role="feed"]),
+        div[aria-label="Ad" i]:not(main):not([role="feed"]),
+        article:has([aria-label="Ad" i]),
+        article:has([aria-label*="Sponsored" i]),
         article:has(a[href*="/ads/"]),
-        article:has(a[href*="/about/ads"]),
+        article:has(a[href*="/ad_"]),
         article:has(a[href*="ads.instagram.com"]),
         article[data-ad-filtered="true"] {
-            height: 1px !important;
-            min-height: 1px !important;
-            max-height: 1px !important;
+            display: none !important;
+            height: 0px !important;
+            min-height: 0px !important;
+            max-height: 0px !important;
             overflow: hidden !important;
             opacity: 0 !important;
             pointer-events: none !important;
             margin: 0 !important;
             padding: 0 !important;
             border: none !important;
+        }
+        div[data-fg-reel-ad="1"] {
+            visibility: hidden !important;
+            pointer-events: none !important;
         }
         a[href*="/ads/"],
         a[href*="ads.instagram.com"] {
@@ -59,12 +67,12 @@
     const SPONSORED_KEYWORDS = [
         'sponsored', 'gesponsert', 'sponsorisé', 'sponsorise',
         'publicidad', 'patrocinado', 'sponsorizzato', 'sponsrad',
-        'paid partnership'
+        'paid partnership', 'werbung', 'anuncio', 'werbeanzeige', 'publicité'
     ];
 
-    const AD_CTA_KEYWORDS = [
-        'learn more', 'shop now', 'install now', 'sign up', 'apply now',
-        'book now', 'download', 'order now', 'get offer', 'subscribe'
+    const STRICT_AD_CTAS = [
+        'shop now', 'install now', 'sign up', 'apply now',
+        'book now', 'order now', 'get offer'
     ];
 
     function filterDynamicSponsoredPosts() {
@@ -77,31 +85,34 @@
 
             let isAd = false;
 
-            // Check header text (Sponsored, Paid partnership)
-            const spans = article.querySelectorAll('header span, header a, span[dir="auto"], [role="button"] span');
-            for (let j = 0; j < spans.length; j++) {
-                const text = (spans[j].textContent || '').trim().toLowerCase();
-                if (SPONSORED_KEYWORDS.some(kw => text === kw || text.startsWith(kw) || text.includes(kw))) {
+            // Check post header only (Sponsored, Paid partnership)
+            const headerElements = article.querySelectorAll('header span, header [aria-label*="Sponsored" i], header [aria-label="Ad" i]');
+            for (let j = 0; j < headerElements.length; j++) {
+                if (headerElements[j].children.length > 2) continue;
+                const text = (headerElements[j].textContent || '').trim().toLowerCase();
+                if (!text || text.length > 30) continue;
+                const clean = text.replace(/[^a-z]/g, '');
+                if (clean === 'ad' || SPONSORED_KEYWORDS.some(kw => text === kw || clean === kw)) {
                     isAd = true;
                     break;
                 }
             }
 
-            // Check CTA button text
+            // Check CTA button text specifically on buttons (excluding FocusGram download buttons)
             if (!isAd) {
-                const buttons = article.querySelectorAll('div[role="button"], a[role="button"]');
+                const buttons = article.querySelectorAll('div[role="button"]:not([data-fg-x-act]):not([data-fg-download-btn]):not(.fg-x-act-btn), a[role="button"]:not([data-fg-x-act]):not([data-fg-download-btn]):not(.fg-x-act-btn), button');
                 for (let k = 0; k < buttons.length; k++) {
                     const btnText = (buttons[k].textContent || '').trim().toLowerCase();
-                    if (AD_CTA_KEYWORDS.some(cta => btnText === cta)) {
+                    if (STRICT_AD_CTAS.some(cta => btnText === cta)) {
                         isAd = true;
                         break;
                     }
                 }
             }
 
-            // Check ad-specific links (strictly /ads/, /ad_, ads.instagram.com, /about/ads)
+            // Check ad-specific links (strictly /ads/, /ad_, ads.instagram.com)
             if (!isAd) {
-                if (article.querySelector('a[href*="/ads/"], a[href*="/ad_"], a[href*="/about/ads"], a[href*="ads.instagram.com"]')) {
+                if (article.querySelector('a[href*="/ads/"], a[href*="/ad_"], a[href*="ads.instagram.com"]')) {
                     isAd = true;
                 }
             }
@@ -120,42 +131,49 @@
             }
         }
 
-        // Filter Reels video ads on reels and feed surfaces
+        // Filter Reels video ads on reels surface without ever breaking layout
         const videos = document.querySelectorAll('video');
         for (let i = 0; i < videos.length; i++) {
             const video = videos[i];
-            let container = video.closest('article') || video.closest('section') || video.closest('[role="region"]') || video.parentElement;
-            while (container && container !== document.body && container !== document.documentElement) {
-                if (container.tagName === 'ARTICLE' || container.tagName === 'SECTION' || container.parentElement?.tagName === 'MAIN') break;
-                const r = container.getBoundingClientRect();
-                if (r.height > window.innerHeight * 0.45) break;
-                container = container.parentElement;
+            const card = video.closest('[data-fg-reel-card="1"]') || video.closest('article');
+            if (!card || card.dataset.adFiltered || card.dataset.fgReelAd) continue;
+
+            let isSponsored = !!card.querySelector('a[href*="/ads/"], a[href*="/ad_"], a[href*="ads.instagram.com"], a[href*="/about/ads"]') ||
+                              !!card.querySelector('[aria-label*="Sponsored" i], [aria-label="Ad" i], [data-ad-preview]');
+
+            if (!isSponsored) {
+                const badges = card.querySelectorAll('span, div[role="button"], button');
+                for (let s = 0; s < badges.length; s++) {
+                    const el = badges[s];
+                    if (el.children.length > 2) continue;
+                    const raw = (el.textContent || '').trim();
+                    if (!raw || raw.length > 15) continue;
+                    if (/^[\u{1F300}-\u{1F9FF}\s]*ad$/iu.test(raw) || /^sponsored$/i.test(raw) || /^paid\s+partnership$/i.test(raw)) {
+                        if (!el.closest('span[dir="auto"]')) {
+                            isSponsored = true;
+                            break;
+                        }
+                    }
+                }
             }
-            if (!container || container.dataset.adFiltered) continue;
 
-            const text = (container.textContent || '').trim().toLowerCase();
-            const isSponsored = SPONSORED_KEYWORDS.some(kw => text.includes(kw)) ||
-                                !!container.querySelector('a[href*="/ads/"], a[href*="/ad_"], a[href*="/about/ads"], a[href*="ads.instagram.com"]') ||
-                                !!container.querySelector('[aria-label*="Sponsored" i], [aria-label*="sponsored" i], [data-ad-preview]');
-
-            const hasAdCTA = !!container.querySelector('div[role="button"], a[role="button"]') &&
-                             AD_CTA_KEYWORDS.some(cta => text.includes(cta));
-
-            if (isSponsored || hasAdCTA) {
+            if (isSponsored) {
                 video.muted = true;
                 try { video.pause(); } catch (_) {}
-                container.style.setProperty('display', 'none', 'important');
-                container.style.setProperty('height', '0px', 'important');
-                container.style.setProperty('opacity', '0', 'important');
-                container.style.setProperty('pointer-events', 'none', 'important');
-                container.dataset.adFiltered = 'true';
+                card.setAttribute('data-fg-reel-ad', '1');
+                card.dataset.adFiltered = 'true';
+                card.style.setProperty('visibility', 'hidden', 'important');
+                card.style.setProperty('pointer-events', 'none', 'important');
 
                 // Skip ad reel automatically if currently visible
-                const r = container.getBoundingClientRect();
+                const r = card.getBoundingClientRect();
                 if (r.top >= -100 && r.top <= window.innerHeight * 0.8) {
-                    const evt = new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, which: 40, bubbles: true });
-                    window.dispatchEvent(evt);
-                    document.dispatchEvent(evt);
+                    const scroller = card.closest('[data-fg-reel-scroller]') || document.querySelector('[data-fg-reel-scroller="1"]');
+                    if (scroller && scroller !== window) {
+                        try { scroller.scrollBy({ top: scroller.clientHeight || window.innerHeight, behavior: 'instant' }); } catch (_) {}
+                    } else {
+                        try { window.scrollBy({ top: window.innerHeight, behavior: 'instant' }); } catch (_) {}
+                    }
                 }
             }
         }
@@ -167,6 +185,12 @@
             filterDynamicSponsoredPosts();
         }
     });
+
+    setInterval(() => {
+        if (adBlockingEnabled) {
+            filterDynamicSponsoredPosts();
+        }
+    }, 300);
 
     function init() {
         updateCosmeticFilters();

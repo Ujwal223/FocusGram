@@ -20,6 +20,7 @@ class GeckoRuntimeManager private constructor(context: Context) {
 
     val runtime: GeckoRuntime
     val extensionManager: ExtensionManager
+    val reelHistory: com.ujwal.focusgram.feature.history.ReelHistory
 
     init {
         val appContext = context.applicationContext
@@ -45,12 +46,23 @@ class GeckoRuntimeManager private constructor(context: Context) {
         Log.i(TAG, "Initializing Mozilla GeckoRuntime with strict privacy & WebExtension runtime...")
         runtime = GeckoRuntime.create(appContext, runtimeSettings)
         extensionManager = ExtensionManager(runtime)
+        reelHistory = com.ujwal.focusgram.feature.history.ReelHistory(java.io.File(appContext.filesDir, "reel_history.json"))
 
         runtime.webExtensionController
             .ensureBuiltIn("resource://android/assets/reellock/", "reellock@focusgram.app")
             .accept(
                 { Log.d(TAG, "✓ Reel lock WebExtension installed") },
                 { e -> Log.e(TAG, "Reel lock WebExtension installation failed", e) }
+            )
+
+        runtime.webExtensionController
+            .ensureBuiltIn("resource://android/assets/reelhistory/", "reelhistory@focusgram.app")
+            .accept(
+                { ext ->
+                    ext?.setMessageDelegate(com.ujwal.focusgram.feature.history.ReelMessageDelegate(reelHistory), "reelhistory")
+                    Log.d(TAG, "✓ Reel history WebExtension installed and delegate registered")
+                },
+                { e -> Log.e(TAG, "Reel history WebExtension installation failed", e) }
             )
     }
 

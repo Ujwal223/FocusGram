@@ -25,16 +25,29 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
+import com.ujwal.focusgram.R
+
 /**
  * ReelsTopBar
- * Minimal Instagram Reels top header matching modern Instagram:
- * - "Reels" (Bold white header)
+ * Minimal Instagram Reels top header:
+ * - "Reels" (Bold white header on left)
+ * - Session watched counter (pill in middle)
+ * - Download icon button (on right, opposite side of Reels)
  * - Subtle vertical scrim gradient for legibility over video frames.
  */
 @Composable
 fun ReelsTopBar(
     isVisible: Boolean,
+    watchedCount: Int = 0,
+    isDownloadEnabled: Boolean = false,
     onReelsClick: () -> Unit,
+    onDownloadClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     AnimatedVisibility(
@@ -61,7 +74,7 @@ fun ReelsTopBar(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Start
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
                     text = "Reels",
@@ -74,6 +87,45 @@ fun ReelsTopBar(
                         onClick = onReelsClick
                     )
                 )
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0x40000000))
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "$watchedCount watched",
+                        color = Color(0xEEFFFFFF),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                if (isDownloadEnabled) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color(0x26FFFFFF))
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = onDownloadClick
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_download_fill),
+                            contentDescription = "Download Reel",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                } else {
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.size(36.dp))
+                }
             }
         }
     }
