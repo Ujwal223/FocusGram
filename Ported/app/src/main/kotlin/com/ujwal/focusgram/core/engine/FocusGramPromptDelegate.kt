@@ -24,6 +24,7 @@ class FocusGramPromptDelegate(
         fun onPickFiles(
             mimeTypes: Array<String>,
             allowMultiple: Boolean,
+            capture: Int,
             onResult: (List<Uri>) -> Unit
         )
     }
@@ -34,12 +35,15 @@ class FocusGramPromptDelegate(
     ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse> {
         val handler = filePickerHandler
         if (handler == null) {
-            Log.d(TAG, "No FilePickerHandler attached. Dismissing file prompt.")
+            Log.w(TAG, "No FilePickerHandler attached. Dismissing file prompt.")
             return GeckoResult.fromValue(prompt.dismiss())
         }
 
         val mimeTypes = prompt.mimeTypes ?: arrayOf("*/*")
         val isMultiple = prompt.type == GeckoSession.PromptDelegate.FilePrompt.Type.MULTIPLE
+        val capture = prompt.capture
+
+        Log.i(TAG, "onFilePrompt triggered: type=${prompt.type}, isMultiple=$isMultiple, capture=$capture, mimeTypes=${mimeTypes.joinToString()}")
 
         val result = GeckoResult<GeckoSession.PromptDelegate.PromptResponse>()
 
@@ -47,13 +51,16 @@ class FocusGramPromptDelegate(
         // ActivityResultLauncher.launch() MUST be called on the main Looper thread.
         Handler(Looper.getMainLooper()).post {
             try {
-                handler.onPickFiles(mimeTypes, isMultiple) { uris ->
+                handler.onPickFiles(mimeTypes, isMultiple, capture) { uris ->
                     try {
                         if (uris.isEmpty()) {
+                            Log.i(TAG, "File picker dismissed or canceled by user.")
                             result.complete(prompt.dismiss())
                         } else if (isMultiple) {
+                            Log.i(TAG, "Confirming multiple files (${uris.size}) to GeckoView: ${uris.joinToString()}")
                             result.complete(prompt.confirm(context, uris.toTypedArray()))
                         } else {
+                            Log.i(TAG, "Confirming single file to GeckoView: ${uris.first()}")
                             result.complete(prompt.confirm(context, uris.first()))
                         }
                     } catch (e: Exception) {

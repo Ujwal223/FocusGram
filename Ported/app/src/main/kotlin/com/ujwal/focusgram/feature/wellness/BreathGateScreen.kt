@@ -35,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -42,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ujwal.focusgram.core.ui.theme.InstagramBlue
 import com.ujwal.focusgram.core.ui.theme.PureBlack
+import com.ujwal.focusgram.core.utils.HapticHelper
 import kotlinx.coroutines.delay
 
 /**
@@ -54,6 +56,7 @@ fun BreathGateScreen(
     durationSeconds: Int = 10,
     onFinish: () -> Unit
 ) {
+    val context = LocalContext.current
     val initialSeconds = durationSeconds.coerceIn(3, 60)
     var secondsRemaining by remember { mutableIntStateOf(initialSeconds) }
     val canContinue = secondsRemaining <= 0
@@ -64,6 +67,7 @@ fun BreathGateScreen(
             delay(1000L)
             secondsRemaining--
         }
+        HapticHelper.performSuccessPulse(context)
     }
 
     // Mindful Breathing Expansion/Contraction Animation

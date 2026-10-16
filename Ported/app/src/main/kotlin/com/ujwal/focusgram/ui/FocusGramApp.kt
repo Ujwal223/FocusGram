@@ -5,6 +5,7 @@ import android.net.Uri
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -18,13 +19,21 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.os.Build
+import android.provider.MediaStore
 import androidx.core.app.NotificationCompat
+import androidx.core.content.FileProvider
+import java.io.File
+import java.util.concurrent.atomic.AtomicReference
 import com.ujwal.focusgram.MainActivity
 import com.ujwal.focusgram.R
+import com.ujwal.focusgram.core.utils.HapticHelper
 import com.ujwal.focusgram.core.utils.MediaDownloadHelper
 import com.ujwal.focusgram.feature.screentime.ScreenTimeService
+import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -52,6 +61,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -122,7 +132,14 @@ enum class AppDestination {
 @Composable
 fun FocusGramApp() {
     val context = LocalContext.current
-    val activity = context as? Activity
+    val activity = remember(context) {
+        var ctx = context
+        while (ctx is ContextWrapper) {
+            if (ctx is Activity) break
+            ctx = ctx.baseContext
+        }
+        ctx as? Activity
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
 
@@ -177,6 +194,8 @@ fun FocusGramApp() {
 
     var isWebInputFocused by remember { mutableStateOf(false) }
     var isModalActive by remember { mutableStateOf(false) }
+    var isUserAuthenticated by remember { mutableStateOf(false) }
+    var isAuthPage by remember { mutableStateOf(false) }
 
     // Session intention countdown timer state
     var sessionDurationMinutes by remember { mutableIntStateOf(15) }
@@ -184,6 +203,8 @@ fun FocusGramApp() {
     var totalElapsedSeconds by remember { mutableIntStateOf(0) }
     var adExtensionsUsed by remember { mutableIntStateOf(0) }
     var isSessionExhausted by remember { mutableStateOf(false) }
+    var adRewardAction by remember { mutableStateOf<(suspend () -> Unit)?>(null) }
+    var settingsSubpage by rememberSaveable { mutableStateOf(com.ujwal.focusgram.feature.settings.SettingsSubpage.MAIN) }
 
     // Evaluates whether any barrier, lock, breath pause, effort friction, cooldown, or intention picker is active
     val isGateActive = shouldShowLock ||
@@ -193,59 +214,118 @@ fun FocusGramApp() {
             (settings.effortFrictionEnabled && settings.wordChallengeCount > 0 && !hasPassedEffortFriction) ||
             !hasPassedSessionPicker
 
-    // System File Chooser / Gallery Launchers for Post & Story uploads
-    var pendingFilePickerCallback by remember { mutableStateOf<((List<Uri>) -> Unit)?>(null) }
+    // System File Chooser / Camera / Gallery Launchers for Story, Post, DMs & Profile Uploads
+    val pendingFilePickerCallback = remember { AtomicReference<((List<Uri>) -> Unit)?>(null) }
+    val pendingCameraCaptureUri = remember { AtomicReference<Uri?>(null) }
 
-    val filePickerLauncher = rememberLauncherForActivityResult(
+    // 1. Android Modern Photo & Video Pickers (Official AndroidX contracts, zero permissions needed)
+    val singlePhotoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        val callback = pendingFilePickerCallback.getAndSet(null)
+        Log.i("FocusGramApp", "Single PhotoPicker result: $uri")
+        callback?.invoke(if (uri != null) listOf(uri) else emptyList())
+    }
+
+    val multiPhotoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia()
+    ) { uris ->
+        val callback = pendingFilePickerCallback.getAndSet(null)
+        Log.i("FocusGramApp", "Multi PhotoPicker result: ${uris.size} URIs: ${uris.joinToString()}")
+        callback?.invoke(uris)
+    }
+
+    // 2. Direct Camera Capture Launcher (Used when HTML input requests camera capture)
+    val takePictureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        val callback = pendingFilePickerCallback.getAndSet(null)
+        val uri = pendingCameraCaptureUri.getAndSet(null)
+        Log.i("FocusGramApp", "TakePicture result: success=$success, uri=$uri")
+        if (success && uri != null) {
+            callback?.invoke(listOf(uri))
+        } else {
+            callback?.invoke(emptyList())
+        }
+    }
+
+    // 3. System Document/Gallery Fallback Launcher
+    val fallbackFilePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         val uris = mutableListOf<Uri>()
-        val data = result.data
-        if (result.resultCode == android.app.Activity.RESULT_OK && data != null) {
-            val clipData = data.clipData
-            if (clipData != null) {
+        val callback = pendingFilePickerCallback.getAndSet(null)
+        if (result.resultCode == Activity.RESULT_OK) {
+            val data = result.data
+            val clipData = data?.clipData
+            val dataUri = data?.data
+            if (clipData != null && clipData.itemCount > 0) {
                 for (i in 0 until clipData.itemCount) {
                     clipData.getItemAt(i).uri?.let { uris.add(it) }
                 }
-            } else {
-                data.data?.let { uris.add(it) }
+            } else if (dataUri != null) {
+                uris.add(dataUri)
             }
         }
-        pendingFilePickerCallback?.invoke(uris)
-        pendingFilePickerCallback = null
+        Log.i("FocusGramApp", "Fallback file picker result code: ${result.resultCode}, selected: ${uris.size} URIs")
+        callback?.invoke(uris)
     }
 
     // Android Runtime Permissions Launcher (Camera, Audio, Storage)
-    var pendingPermissionCallback by remember { mutableStateOf<((Boolean) -> Unit)?>(null) }
+    val pendingPermissionCallback = remember { AtomicReference<((Boolean) -> Unit)?>(null) }
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
         val allGranted = results.values.all { it }
-        pendingPermissionCallback?.invoke(allGranted)
-        pendingPermissionCallback = null
+        val callback = pendingPermissionCallback.getAndSet(null)
+        callback?.invoke(allGranted)
     }
 
-    val filePickerHandler = remember {
-        object : FocusGramPromptDelegate.FilePickerHandler {
-            var launchChooser: ((Array<String>, Boolean) -> Unit)? = null
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        Log.i("FocusGramApp", "Notification permission result: $isGranted")
+    }
 
-            override fun onPickFiles(
-                mimeTypes: Array<String>,
-                allowMultiple: Boolean,
-                onResult: (List<Uri>) -> Unit
-            ) {
-                pendingFilePickerCallback = onResult
-                try {
-                    launchChooser?.invoke(mimeTypes, allowMultiple) ?: onResult(emptyList())
-                } catch (e: Exception) {
-                    Log.e("FocusGramApp", "Error launching file picker: ${e.message}", e)
-                    onResult(emptyList())
+    LaunchedEffect(settings.notifyPersistent, settings.notifySessionEnd) {
+        if (settings.notifyPersistent || settings.notifySessionEnd) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (androidx.core.content.ContextCompat.checkSelfPermission(
+                        context,
+                        android.Manifest.permission.POST_NOTIFICATIONS
+                    ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                ) {
+                    notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                 }
             }
         }
     }
 
-    filePickerHandler.launchChooser = { mimes, allowMultiple ->
+    val filePickerHandler = remember {
+        object : FocusGramPromptDelegate.FilePickerHandler {
+            var launchChooser: ((Array<String>, Boolean, Int) -> Unit)? = null
+
+            override fun onPickFiles(
+                mimeTypes: Array<String>,
+                allowMultiple: Boolean,
+                capture: Int,
+                onResult: (List<Uri>) -> Unit
+            ) {
+                pendingFilePickerCallback.set(onResult)
+                try {
+                    launchChooser?.invoke(mimeTypes, allowMultiple, capture) ?: run {
+                        Log.w("FocusGramApp", "launchChooser was null, returning empty list")
+                        pendingFilePickerCallback.getAndSet(null)?.invoke(emptyList())
+                    }
+                } catch (e: Exception) {
+                    Log.e("FocusGramApp", "Error invoking launchChooser: ${e.message}", e)
+                    pendingFilePickerCallback.getAndSet(null)?.invoke(emptyList())
+                }
+            }
+        }
+    }
+
+    filePickerHandler.launchChooser = { mimes, allowMultiple, capture ->
         val mimeMap = android.webkit.MimeTypeMap.getSingleton()
         val cleanMimes = mimes
             .flatMap { it.split(",") }
@@ -263,35 +343,120 @@ fun FocusGramApp() {
             .distinct()
             .toTypedArray()
 
-        val hasImages = cleanMimes.any { it.startsWith("image/") } || cleanMimes.isEmpty()
-        val hasVideos = cleanMimes.any { it.startsWith("video/") }
+        Log.i("FocusGramApp", "Launching media picker for cleanMimes: ${cleanMimes.joinToString()}, allowMultiple: $allowMultiple, capture: $capture")
 
-        val intent = android.content.Intent(android.content.Intent.ACTION_GET_CONTENT).apply {
-            addCategory(android.content.Intent.CATEGORY_OPENABLE)
-            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            if (allowMultiple) {
-                putExtra(android.content.Intent.EXTRA_ALLOW_MULTIPLE, true)
-            }
-            if (hasImages && !hasVideos) {
-                type = "image/*"
-                if (cleanMimes.isNotEmpty() && !cleanMimes.contains("image/*")) {
-                    putExtra(android.content.Intent.EXTRA_MIME_TYPES, cleanMimes)
-                }
-            } else if (hasVideos && !hasImages) {
-                type = "video/*"
-                if (cleanMimes.isNotEmpty() && !cleanMimes.contains("video/*")) {
-                    putExtra(android.content.Intent.EXTRA_MIME_TYPES, cleanMimes)
-                }
-            } else {
-                type = "*/*"
-                val fallbackTypes = if (cleanMimes.isNotEmpty()) cleanMimes else arrayOf("image/*", "video/*")
-                putExtra(android.content.Intent.EXTRA_MIME_TYPES, fallbackTypes)
+        val isAnyMedia = cleanMimes.isEmpty() || cleanMimes.contains("*/*")
+        val hasImages = isAnyMedia || cleanMimes.any { it.startsWith("image/") }
+        val hasVideos = isAnyMedia || cleanMimes.any { it.startsWith("video/") }
+
+        val currentUrlLower = sessionManager.currentUrl.value.lowercase()
+        val isProfilePictureEdit = currentUrlLower.contains("/accounts/edit")
+
+        // In Instagram, DMs (/direct/), Stories, and Feed Posts all support videos (MP4, MOV, WebM).
+        // Unless explicitly updating an account avatar/profile picture, always allow both Photos and Videos.
+        val allowsVideos = hasVideos || (!isProfilePictureEdit && hasImages)
+        val allowsImages = hasImages || isAnyMedia
+
+        var launched = false
+
+        // 1. Direct Camera Capture Mode (Explicitly requested by web page via capture attribute)
+        if (capture != org.mozilla.geckoview.GeckoSession.PromptDelegate.FilePrompt.Capture.NONE) {
+            try {
+                val cameraDir = File(context.cacheDir, "camera").apply { mkdirs() }
+                val photoFile = File(cameraDir, "camera_capture.jpg")
+                if (photoFile.exists()) photoFile.delete()
+                val photoUri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    photoFile
+                )
+                pendingCameraCaptureUri.set(photoUri)
+                takePictureLauncher.launch(photoUri)
+                launched = true
+            } catch (eCamera: Exception) {
+                Log.w("FocusGramApp", "Direct camera launch failed: ${eCamera.message}, trying photo picker", eCamera)
             }
         }
-        val chooser = android.content.Intent.createChooser(intent, "Select Media").apply {
-            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+        // 2. Primary Media Picker: Modern Android Photo & Video Picker (PickVisualMedia)
+        // Works seamlessly on Android 11+ and Samsung Galaxy OneUI without any permissions
+        if (!launched) {
+            try {
+                val visualMediaType = when {
+                    allowsImages && !allowsVideos -> ActivityResultContracts.PickVisualMedia.ImageOnly
+                    allowsVideos && !allowsImages -> ActivityResultContracts.PickVisualMedia.VideoOnly
+                    else -> ActivityResultContracts.PickVisualMedia.ImageAndVideo
+                }
+                val request = PickVisualMediaRequest.Builder()
+                    .setMediaType(visualMediaType)
+                    .build()
+
+                if (allowMultiple) {
+                    multiPhotoPickerLauncher.launch(request)
+                } else {
+                    singlePhotoPickerLauncher.launch(request)
+                }
+                launched = true
+            } catch (ePhotoPicker: Exception) {
+                Log.w("FocusGramApp", "PickVisualMedia failed: ${ePhotoPicker.message}, attempting ACTION_GET_CONTENT", ePhotoPicker)
+            }
         }
-        filePickerLauncher.launch(chooser)
+
+        // 3. Fallback 1: ACTION_GET_CONTENT (with CATEGORY_OPENABLE for Samsung & AOSP DocumentsUI)
+        if (!launched) {
+            try {
+                val getContentIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    if (allowMultiple) {
+                        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                    }
+                    if (allowsImages && !allowsVideos) {
+                        type = "image/*"
+                        if (cleanMimes.isNotEmpty() && !cleanMimes.contains("image/*")) {
+                            putExtra(Intent.EXTRA_MIME_TYPES, cleanMimes)
+                        }
+                    } else if (allowsVideos && !allowsImages) {
+                        type = "video/*"
+                        if (cleanMimes.isNotEmpty() && !cleanMimes.contains("video/*")) {
+                            putExtra(Intent.EXTRA_MIME_TYPES, cleanMimes)
+                        }
+                    } else {
+                        type = "*/*"
+                        val fallbackTypes = if (cleanMimes.isNotEmpty() && allowsVideos && !hasVideos) {
+                            (cleanMimes.toList() + listOf("video/*", "video/mp4")).toTypedArray()
+                        } else if (cleanMimes.isNotEmpty()) {
+                            cleanMimes
+                        } else {
+                            arrayOf("image/*", "video/*")
+                        }
+                        putExtra(Intent.EXTRA_MIME_TYPES, fallbackTypes)
+                    }
+                }
+                fallbackFilePickerLauncher.launch(getContentIntent)
+                launched = true
+            } catch (eGetContent: Exception) {
+                Log.w("FocusGramApp", "ACTION_GET_CONTENT failed: ${eGetContent.message}, attempting ACTION_PICK", eGetContent)
+            }
+        }
+
+        // 4. Fallback 2: ACTION_PICK from MediaStore
+        if (!launched) {
+            try {
+                val pickIntent = if (allowsVideos && !allowsImages) {
+                    Intent(Intent.ACTION_PICK, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
+                } else {
+                    Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
+                }.apply {
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                fallbackFilePickerLauncher.launch(pickIntent)
+                launched = true
+            } catch (ePick: Exception) {
+                Log.e("FocusGramApp", "All file picker fallbacks failed: ${ePick.message}", ePick)
+                pendingFilePickerCallback.getAndSet(null)?.invoke(emptyList())
+            }
+        }
     }
 
     // Pre-warm Rewarded Ad container and cache in background (isolated from GeckoView)
@@ -343,6 +508,7 @@ fun FocusGramApp() {
                             if (totalTodaySeconds >= settings.dailyLimitMinutes * 60) {
                                 isSessionExhausted = true
                                 settingsRepository.recordSessionEnd()
+                                HapticHelper.performSessionCompletionAlert(context)
                                 break
                             }
                         }
@@ -351,6 +517,7 @@ fun FocusGramApp() {
                     if (sessionRemainingSeconds <= 0) {
                         isSessionExhausted = true
                         settingsRepository.recordSessionEnd()
+                        HapticHelper.performSessionCompletionAlert(context)
                         if (settings.notifySessionEnd) {
                             postSessionExpiredNotification(context)
                         }
@@ -480,8 +647,19 @@ fun FocusGramApp() {
                 }
             }
         }
+        extensionManager.onDownloadStarted = { filename ->
+            MediaDownloadHelper.startIndeterminateProgress(filename)
+        }
         extensionManager.onDownloadRequested = { url, filename ->
             MediaDownloadHelper.download(context, url, filename)
+        }
+        extensionManager.onDownloadError = { error ->
+            MediaDownloadHelper.triggerDownloadFailure(context, error)
+        }
+        extensionManager.onAuthStateChanged = { authenticated, authPage ->
+            isUserAuthenticated = authenticated
+            isAuthPage = authPage
+            sessionManager.setAuthenticated(authenticated)
         }
     }
 
@@ -501,6 +679,10 @@ fun FocusGramApp() {
             sessionManager = sessionManager,
             onRouteChanged = { newUrl ->
                 val mode = IslandMode.fromUrl(newUrl)
+                val lower = newUrl.lowercase()
+                if (lower.contains("/accounts") || lower.contains("/login") || lower.contains("/signup")) {
+                    isAuthPage = true
+                }
                 sessionManager.updateCurrentUrl(newUrl)
                 sessionManager.updateIslandMode(mode)
                 extensionManager.setIslandMode(mode)
@@ -517,7 +699,7 @@ fun FocusGramApp() {
         sessionManager.session.permissionDelegate = FocusGramPermissionDelegate(
             context = context,
             onAndroidPermissionRequest = { perms, callback ->
-                pendingPermissionCallback = callback
+                pendingPermissionCallback.set(callback)
                 permissionLauncher.launch(perms)
             }
         )
@@ -560,6 +742,15 @@ fun FocusGramApp() {
             }
         }
         previousReloadSettings = settings
+    }
+
+    // Dynamic screen orientation lock: enforce portrait-only when enabled
+    LaunchedEffect(settings.portraitOnly, activity) {
+        activity?.requestedOrientation = if (settings.portraitOnly) {
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
     }
 
     // When any barrier, gate, lock, or intention picker is active, pressing back exits the app cleanly
@@ -672,10 +863,11 @@ fun FocusGramApp() {
                     sessionManager.refreshReels()
                 },
                 onDownloadClick = {
+                    MediaDownloadHelper.startIndeterminateProgress("Preparing Reel download...")
                     extensionManager.triggerReelDownload()
                     sessionManager.userScriptManager?.evaluate(
                         sessionManager.session,
-                        "window.dispatchEvent(new CustomEvent('focusgram:download-reel'));"
+                        "if (typeof window.__fgDownloadActiveReel === 'function') { window.__fgDownloadActiveReel(); } else { window.dispatchEvent(new CustomEvent('focusgram:download-reel', { bubbles: true })); }"
                     )
                 },
                 modifier = Modifier.align(Alignment.TopCenter)
@@ -688,6 +880,7 @@ fun FocusGramApp() {
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
                         .height(navBarTotalHeight)
+                        .blur(18.dp)
                         .background(
                             Brush.verticalGradient(
                                 colors = if (isAppLight) {
@@ -712,6 +905,7 @@ fun FocusGramApp() {
             // Native Bottom Navigation Bar (OLED floating island)
             if (!isGateActive && destination == AppDestination.MAIN_WEBVIEW) {
                 val instagramTheme by sessionManager.instagramTheme.collectAsState()
+                val downloadState by MediaDownloadHelper.downloadProgressFlow.collectAsState()
                 NativeBottomNavBar(
                     currentUrl = currentUrl,
                     settings = settings,
@@ -719,6 +913,12 @@ fun FocusGramApp() {
                     instagramTheme = instagramTheme,
                     isWebInputFocused = isWebInputFocused,
                     isModalActive = isModalActive,
+                    downloadProgress = downloadState.progress,
+                    isDownloading = downloadState.isDownloading,
+                    isDownloadCompleted = downloadState.isCompleted,
+                    isDownloadFailed = downloadState.isFailed,
+                    isAuthenticated = isUserAuthenticated,
+                    isAuthPage = isAuthPage,
                     onNavClick = { target ->
                         extensionManager.go(target)
                     },
@@ -776,12 +976,18 @@ fun FocusGramApp() {
                                 onNavigateScreenTime = { destination = AppDestination.SCREEN_TIME },
                                 onNavigateAppLock = { destination = AppDestination.APP_LOCK_SETTINGS },
                                 onWatchAd = { destination = AppDestination.ADSTERRA_REWARDED },
+                                onWatchAdWithReward = { action ->
+                                    adRewardAction = action
+                                    destination = AppDestination.ADSTERRA_REWARDED
+                                },
                                 onNavigateUrl = { url ->
                                     destination = AppDestination.MAIN_WEBVIEW
                                     sessionManager.navigateTo(url)
                                 },
                                 screenTimeDao = database.screenTimeDao(),
-                                reelHistory = reelHistory
+                                reelHistory = reelHistory,
+                                currentSubpage = settingsSubpage,
+                                onSubpageChange = { settingsSubpage = it }
                             )
                         }
 
@@ -850,9 +1056,14 @@ fun FocusGramApp() {
 
                         AppDestination.ADSTERRA_REWARDED -> {
                             AdsterraAdScreen(
-                                sessionType = if (isDailyLimitExhausted || isSessionExhausted) "session_extend" else "voluntary",
+                                sessionType = if (adRewardAction != null) "setting_toggle" else if (isDailyLimitExhausted || isSessionExhausted) "session_extend" else "voluntary",
                                 onRewardClaimed = {
-                                    if (isDailyLimitExhausted) {
+                                    val pendingAction = adRewardAction
+                                    adRewardAction = null
+                                    if (pendingAction != null) {
+                                        scope.launch { pendingAction.invoke() }
+                                        destination = AppDestination.SETTINGS
+                                    } else if (isDailyLimitExhausted) {
                                         scope.launch { settingsRepository.extendDailyLimit5Minutes(today) }
                                         sessionRemainingSeconds += 5 * 60
                                         sessionDurationMinutes += 5
@@ -872,6 +1083,7 @@ fun FocusGramApp() {
                                     }
                                 },
                                 onCancel = {
+                                    adRewardAction = null
                                     if (isDailyLimitExhausted || isSessionExhausted) {
                                         destination = AppDestination.MAIN_WEBVIEW
                                     } else {
@@ -960,6 +1172,9 @@ fun FocusGramApp() {
 
 private fun postSessionExpiredNotification(context: Context) {
     try {
+        // Direct physical vibration ensures the user feels the alert regardless of notification channel mutes
+        HapticHelper.performSessionCompletionAlert(context)
+
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val channelId = "focusgram_session_alerts"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -988,7 +1203,7 @@ private fun postSessionExpiredNotification(context: Context) {
         val notification = NotificationCompat.Builder(context, channelId)
             .setContentTitle("Focus Session Expired")
             .setContentText("Your scheduled time limit has finished. Take a breath and step away.")
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_notification)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setAutoCancel(true)

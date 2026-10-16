@@ -50,7 +50,8 @@ class UserScriptManager(private val context: Context) {
                     blockAutoplay: ${settings.noAutoplay},
                     grayscale: ${settings.grayscaleEnabled},
                     minimalMode: ${settings.minimalModeEnabled},
-                    videoDownloadEnabled: ${settings.videoDownloadEnabled}
+                    videoDownloadEnabled: ${settings.videoDownloadEnabled},
+                    portraitOnly: ${settings.portraitOnly}
                 };
                 window.__FOCUSGRAM_GHOST_CONFIG__ = {
                     enabled: ${settings.ghostModeEnabled},
@@ -121,6 +122,7 @@ class UserScriptManager(private val context: Context) {
         bundle.append(loadScript("autoplay_blocker.js")).append("\n")
         bundle.append(loadScript("grayscale.js")).append("\n")
         bundle.append(loadScript("native_feel.js")).append("\n")
+        bundle.append(loadScript("media_downloader.js")).append("\n")
         evaluate(session, bundle.toString())
         injectConfig(session, settings)
     }

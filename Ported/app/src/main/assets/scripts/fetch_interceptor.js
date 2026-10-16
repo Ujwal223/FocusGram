@@ -12,6 +12,19 @@
 'use strict';
 
 (function () {
+    function isAuthPage() {
+        try {
+            var path = (window.location.pathname || '').toLowerCase();
+            if (path.startsWith('/accounts') || path.startsWith('/login') || path.startsWith('/signup')) return true;
+            var c = document.cookie || '';
+            if (!c.includes('sessionid=') && !c.includes('ds_user_id=')) return true;
+            if (document.getElementById('loginForm') || document.querySelector('form[action*="login"], input[name="password"]')) return true;
+        } catch (_) {}
+        return false;
+    }
+
+    if (isAuthPage()) return; // Leave login/signup completely untouched
+
     if (window.__fgFetchInterceptorInstalled) return;
     window.__fgFetchInterceptorInstalled = true;
 
@@ -27,7 +40,7 @@
     const AD_KEYWORDS = [
         'sponsored', 'gesponsert', 'sponsorisé', 'sponsorise', 'publicidad',
         'patrocinado', 'sponsorizzato', 'sponsrad', 'paid partnership', 'werbung',
-        'anuncio', 'werbeanzeige', 'publicité', 'ad_id', 'ad_tracking', 'sponsor_tags'
+        'anuncio', 'werbeanzeige', 'publicité'
     ];
 
     function textHasAdSignal(value) {
@@ -39,69 +52,55 @@
     function isAdNode(node) {
         if (!node || typeof node !== 'object') return false;
         const typename = String(node.__typename || '');
-        const adText = JSON.stringify({
-            organic_tracking_token: node.organic_tracking_token,
-            sponsor_tags: node.sponsor_tags,
-            social_context: node.social_context,
-            title: node.title,
-            header: node.header,
-            label: node.label,
-            overlay_text: node.overlay_text
-        });
+        if (node.is_ad || node.is_paid_partnership || (Array.isArray(node.sponsor_tags) && node.sponsor_tags.length > 0)) {
+            return true;
+        }
+        if (node.ad_id || node.ad_action_link || node.ad_impression_token || node.ad_metadata) {
+            return true;
+        }
+        if (node.commerciality_status === 'commercial' || (node.product_type && node.product_type === 'ad')) {
+            return true;
+        }
+        if (node.ad_header_style && node.ad_header_style !== 'none') {
+            return true;
+        }
+        if (typename === 'GraphAdStory' || typename.includes('Ad')) {
+            return true;
+        }
 
-        return !!(
-            node.is_ad ||
-            node.is_paid_partnership ||
-            (node.sponsor_tags && node.sponsor_tags.length > 0) ||
-            node.ad_tracking_token ||
-            node.ad_action_link ||
-            node.ad_id ||
-            node.ad_impression_token ||
-            node.ad_metadata ||
-            node.commerciality_status === 'commercial' ||
-            (node.product_type && node.product_type === 'ad') ||
-            (node.ad_header_style && node.ad_header_style !== 'none') ||
-            typename === 'GraphAdStory' ||
-            typename.includes('Ad') ||
-            textHasAdSignal(adText)
-        );
+        const values = [node.social_context, node.title, node.header, node.label, node.overlay_text]
+            .filter(Boolean).map(v => typeof v === 'object' ? JSON.stringify(v) : String(v)).join(' ');
+
+        return textHasAdSignal(values);
     }
 
     function isSponsoredNode(node) {
         if (!node || typeof node !== 'object') return false;
-        return !!(
-            node.is_paid_partnership ||
-            (node.sponsor_tags && node.sponsor_tags.length > 0) ||
-            (node.ad_action_link && node.ad_action_link.href) ||
-            (node.ad_header_style && node.ad_header_style !== 'none') ||
-            textHasAdSignal(JSON.stringify(node.social_context || node.header || node.label || ''))
-        );
+        if (node.is_paid_partnership || (Array.isArray(node.sponsor_tags) && node.sponsor_tags.length > 0)) {
+            return true;
+        }
+        if (node.ad_action_link && node.ad_action_link.href) {
+            return true;
+        }
+        if (node.ad_header_style && node.ad_header_style !== 'none') {
+            return true;
+        }
+        const text = [node.social_context, node.header, node.label].filter(Boolean).map(v => typeof v === 'object' ? JSON.stringify(v) : String(v)).join(' ');
+        return textHasAdSignal(text);
     }
 
     function isSuggestedNode(node) {
         if (!node || typeof node !== 'object') return false;
         const typename = String(node.__typename || '');
-        const reason = JSON.stringify({
-            reason: node.suggested_reason,
-            social_context: node.social_context,
-            title: node.title,
-            header: node.header,
-            label: node.label
-        }).toLowerCase();
-
-        return !!(
-            node.is_suggested ||
-            node.is_suggested_for_you ||
-            node.is_recommendation ||
-            node.suggested_users ||
-            node.suggested_media ||
-            node.suggested_content ||
-            node.recommendation_source ||
-            typename.includes('Suggested') ||
-            typename.includes('Recommendation') ||
-            reason.includes('suggested') ||
-            reason.includes('recommend')
-        );
+        if (node.is_suggested || node.is_suggested_for_you || node.is_recommendation ||
+            node.suggested_users || node.suggested_media || node.suggested_content ||
+            node.recommendation_source || typename.includes('Suggested') || typename.includes('Recommendation')
+        ) {
+            return true;
+        }
+        const text = [node.suggested_reason, node.social_context, node.title, node.header, node.label]
+            .filter(Boolean).map(v => typeof v === 'object' ? JSON.stringify(v) : String(v)).join(' ').toLowerCase();
+        return text.includes('suggested') || text.includes('recommend');
     }
 
     function shouldFilterNode(node) {
@@ -128,7 +127,7 @@
 
     function unwrapNode(item) {
         if (!item || typeof item !== 'object') return item;
-        return item.media || item.node || item.post || item;
+        return item.media_or_ad || item.media || item.node || item.post || item;
     }
 
     function filterList(list) {
@@ -165,11 +164,69 @@
         }
 
         for (const key in obj) {
+            // Never filter pagination or connection metadata
+            if (key === 'page_info' || key === 'pagination_info' || key === 'paging_info') continue;
             if (Object.prototype.hasOwnProperty.call(obj, key) && key !== '__typename') {
                 const val = obj[key];
                 if (val && typeof val === 'object') {
                     walkAndFilter(val, visited);
                 }
+            }
+        }
+    }
+
+    window.__fg_media_harvest = window.__fg_media_harvest || {};
+    window.__fg_recent_media = window.__fg_recent_media || [];
+
+    function harvestMediaFromData(obj, depth = 0) {
+        if (!obj || typeof obj !== 'object' || depth > 12) return;
+        if (Array.isArray(obj)) {
+            for (let i = 0; i < obj.length; i++) harvestMediaFromData(obj[i], depth + 1);
+            return;
+        }
+
+        const code = obj.code || (obj.shortcode ? obj.shortcode : null);
+        if (code && (obj.video_versions || obj.image_versions2 || obj.carousel_media)) {
+            const isVideo = !!(obj.is_video || (obj.video_versions && obj.video_versions.length > 0));
+            const videoUrl = (obj.video_versions && obj.video_versions[0]?.url) || '';
+            const imageUrl = (obj.image_versions2?.candidates && obj.image_versions2.candidates[0]?.url) || '';
+            
+            const carousel = [];
+            if (Array.isArray(obj.carousel_media)) {
+                for (let c = 0; c < obj.carousel_media.length; c++) {
+                    const cItem = obj.carousel_media[c];
+                    const cIsVideo = !!(cItem.is_video || (cItem.video_versions && cItem.video_versions.length > 0));
+                    const cVideoUrl = (cItem.video_versions && cItem.video_versions[0]?.url) || '';
+                    const cImageUrl = (cItem.image_versions2?.candidates && cItem.image_versions2.candidates[0]?.url) || '';
+                    carousel.push({
+                        url: cIsVideo && cVideoUrl ? cVideoUrl : cImageUrl,
+                        videoUrl: cVideoUrl,
+                        imageUrl: cImageUrl,
+                        isVideo: cIsVideo && !!cVideoUrl
+                    });
+                }
+            }
+
+            const entry = {
+                code: code,
+                videoUrl: videoUrl,
+                imageUrl: imageUrl,
+                url: isVideo && videoUrl ? videoUrl : (imageUrl || videoUrl),
+                isVideo: isVideo && !!videoUrl,
+                carousel: carousel,
+                author: obj.user?.username || obj.owner?.username || ''
+            };
+
+            window.__fg_media_harvest[code] = entry;
+            window.__fg_recent_media.unshift(entry);
+            if (window.__fg_recent_media.length > 100) {
+                window.__fg_recent_media.pop();
+            }
+        }
+
+        for (const k in obj) {
+            if (Object.prototype.hasOwnProperty.call(obj, k) && k !== '__typename' && typeof obj[k] === 'object') {
+                harvestMediaFromData(obj[k], depth + 1);
             }
         }
     }
@@ -204,12 +261,20 @@
             }
 
             const data = await cloned.json();
+            harvestMediaFromData(data);
             walkAndFilter(data);
+
+            const newHeaders = new Headers(response.headers);
+            // CRITICAL: Must delete content-length and content-encoding so the uncompressed
+            // JSON body is not truncated or corrupted by the browser HTTP layer
+            newHeaders.delete('content-length');
+            newHeaders.delete('content-encoding');
+            newHeaders.set('content-type', 'application/json; charset=utf-8');
 
             return new Response(JSON.stringify(data), {
                 status: response.status,
                 statusText: response.statusText,
-                headers: response.headers
+                headers: newHeaders
             });
         } catch (_) {
             return response;

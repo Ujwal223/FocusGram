@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -43,6 +44,7 @@ import com.ujwal.focusgram.core.ui.theme.DarkCard
 import com.ujwal.focusgram.core.ui.theme.PureBlack
 import com.ujwal.focusgram.core.ui.theme.TextMuted
 import com.ujwal.focusgram.core.ui.theme.TextSecondary
+import com.ujwal.focusgram.core.utils.HapticHelper
 import kotlinx.coroutines.delay
 
 /**
@@ -55,6 +57,7 @@ fun CooldownGateScreen(
     onCooldownExpired: () -> Unit,
     onExit: () -> Unit
 ) {
+    val context = LocalContext.current
     var remainingSeconds by remember { mutableIntStateOf(remainingSecondsInitial.coerceAtLeast(0)) }
 
     val quotes = remember {
@@ -71,6 +74,7 @@ fun CooldownGateScreen(
 
     LaunchedEffect(remainingSeconds) {
         if (remainingSeconds <= 0) {
+            HapticHelper.performSuccessPulse(context)
             onCooldownExpired()
         } else {
             delay(1000L)

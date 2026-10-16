@@ -37,6 +37,8 @@ class FocusSettingsTest {
         // Initial user level
         assertEquals(1, settings.userLevel)
         assertEquals(0, settings.userXP)
+        // Portrait only enabled by default
+        assertTrue(settings.portraitOnly)
     }
 
     @Test

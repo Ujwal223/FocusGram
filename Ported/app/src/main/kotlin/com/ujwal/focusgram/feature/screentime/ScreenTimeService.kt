@@ -11,6 +11,8 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import android.content.pm.ServiceInfo
 import com.ujwal.focusgram.FocusGramApp
 import com.ujwal.focusgram.MainActivity
 import com.ujwal.focusgram.R
@@ -45,6 +47,27 @@ class ScreenTimeService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        val initialNotification = buildNotification("Focus Session Active", "Tracking active session time...")
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                ServiceCompat.startForeground(
+                    this,
+                    NOTIFICATION_ID,
+                    initialNotification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, initialNotification)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Primary startForeground failed in onCreate: ${e.message}", e)
+            try {
+                startForeground(NOTIFICATION_ID, initialNotification)
+            } catch (fallbackEx: Exception) {
+                Log.e(TAG, "Fallback startForeground failed: ${fallbackEx.message}", fallbackEx)
+                stopSelf()
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -68,6 +91,14 @@ class ScreenTimeService : Service() {
             }
             ACTION_STOP -> {
                 stopTracking()
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        stopForeground(true)
+                    }
+                } catch (_: Exception) {}
                 stopSelf()
             }
         }
@@ -80,8 +111,7 @@ class ScreenTimeService : Service() {
         sessionStartTime = System.currentTimeMillis()
         sessionSeconds = 0
 
-        val initialNotification = buildNotification("Focus Session Active", "Tracking active session time...")
-        startForeground(NOTIFICATION_ID, initialNotification)
+        updateNotification("Focus Session Active", "Tracking active session time...")
 
         trackingJob = serviceScope.launch {
             val app = FocusGramApp.instance
@@ -192,7 +222,7 @@ class ScreenTimeService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(content)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setSilent(true)
@@ -201,8 +231,12 @@ class ScreenTimeService : Service() {
     }
 
     private fun updateNotification(title: String, content: String) {
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(NOTIFICATION_ID, buildNotification(title, content))
+        try {
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.notify(NOTIFICATION_ID, buildNotification(title, content))
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to update notification: ${e.message}")
+        }
     }
 
     override fun onDestroy() {
@@ -224,14 +258,18 @@ class ScreenTimeService : Service() {
         const val EXTRA_IS_REELS = "extra_is_reels"
 
         fun startSession(context: Context, isReels: Boolean = false) {
-            val intent = Intent(context, ScreenTimeService::class.java).apply {
-                action = ACTION_START
-                putExtra(EXTRA_IS_REELS, isReels)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                val intent = Intent(context, ScreenTimeService::class.java).apply {
+                    action = ACTION_START
+                    putExtra(EXTRA_IS_REELS, isReels)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to startSession: ${e.message}", e)
             }
         }
 

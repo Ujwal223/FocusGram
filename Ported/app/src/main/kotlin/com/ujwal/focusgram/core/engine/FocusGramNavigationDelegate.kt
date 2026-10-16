@@ -38,6 +38,23 @@ class FocusGramNavigationDelegate(
             return GeckoResult.fromValue(AllowOrDeny.DENY)
         }
 
+        // 2b. Intercept native media download requests from in-page client scripts
+        if (scheme == "focusgram-download") {
+            val mediaUrl = uri.getQueryParameter("url") ?: ""
+            val filename = uri.getQueryParameter("filename") ?: ""
+            val error = uri.getQueryParameter("error") ?: ""
+            Log.d(TAG, "Intercepted focusgram-download: url=$mediaUrl, filename=$filename, error=$error")
+            val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+            mainHandler.post {
+                if (mediaUrl.isNotBlank()) {
+                    com.ujwal.focusgram.core.utils.MediaDownloadHelper.download(context, mediaUrl, filename)
+                } else if (error.isNotBlank()) {
+                    android.widget.Toast.makeText(context, error, android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+            return GeckoResult.fromValue(AllowOrDeny.DENY)
+        }
+
         // 3. Intercept navigation trap to suggested accounts (/explore/people) from Favorites
         val path = uri.path?.lowercase() ?: ""
         if (path.contains("/explore/people")) {
@@ -82,6 +99,7 @@ class FocusGramNavigationDelegate(
         hasUserGesture: Boolean
     ) {
         url?.let {
+            if (it.startsWith("focusgram-download:")) return
             if (it.lowercase().contains("/explore/people")) {
                 Log.i(TAG, "Location redirected away from /explore/people to home")
                 sessionManager.loadUrl("https://www.instagram.com/")

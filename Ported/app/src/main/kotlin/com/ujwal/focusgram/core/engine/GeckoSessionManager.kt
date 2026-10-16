@@ -44,6 +44,21 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
     val instagramTheme: StateFlow<String> = _instagramTheme.asStateFlow()
 
     private var isOpen = false
+    var isAuthenticated: Boolean = false
+        private set
+
+    fun setAuthenticated(auth: Boolean) {
+        val changed = isAuthenticated != auth
+        isAuthenticated = auth
+        if (auth && changed) {
+            val url = _currentUrl.value.lowercase()
+            val isAuth = url.contains("/accounts") || url.contains("/login") || url.contains("/signup")
+            if (!isAuth) {
+                injectBottomBarTrimmer()
+                userScriptManager?.injectAll(session, currentSettings)
+            }
+        }
+    }
 
     init {
         val settings = GeckoSessionSettings.Builder()
@@ -51,6 +66,7 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
             .suspendMediaWhenInactive(true)
             .allowJavascript(true)
             .userAgentMode(GeckoSessionSettings.USER_AGENT_MODE_MOBILE)
+            .userAgentOverride(IOS_USER_AGENT)
             .usePrivateMode(false) // Retain Instagram authentication cookies locally
             .build()
 
@@ -62,9 +78,11 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
         session.progressDelegate = object : GeckoSession.ProgressDelegate {
             override fun onPageStart(session: GeckoSession, url: String) {
                 Log.d(TAG, "Page started loading: $url")
-                _isLoading.value = true
-                _currentUrl.value = url
-                _progress.value = 10
+                if (!url.startsWith("focusgram-download:") && !url.startsWith("javascript:")) {
+                    _isLoading.value = true
+                    _currentUrl.value = url
+                    _progress.value = 10
+                }
             }
 
             override fun onPageStop(session: GeckoSession, success: Boolean) {
@@ -72,8 +90,12 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
                 _isLoading.value = false
                 _progress.value = 100
                 if (success) {
-                    injectBottomBarTrimmer()
-                    userScriptManager?.injectAll(session, currentSettings)
+                    val url = _currentUrl.value.lowercase()
+                    val isAuth = url.contains("/accounts") || url.contains("/login") || url.contains("/signup")
+                    if (isAuthenticated && !isAuth) {
+                        injectBottomBarTrimmer()
+                        userScriptManager?.injectAll(session, currentSettings)
+                    }
                 }
             }
 
@@ -145,7 +167,9 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
 
     fun updateSettings(settings: FocusSettings) {
         currentSettings = settings
-        userScriptManager?.injectConfig(session, settings)
+        if (isAuthenticated) {
+            userScriptManager?.injectConfig(session, settings)
+        }
     }
 
     fun updateCurrentUrl(url: String) {
@@ -275,7 +299,11 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
     fun injectBottomBarTrimmer() {
         val js = """javascript:(function() {
             try {
-                if (window.location.pathname.startsWith('/direct')) return;
+                var p = (window.location.pathname || '').toLowerCase();
+                if (p.startsWith('/direct') || p.startsWith('/accounts') || p.startsWith('/login') || p.startsWith('/signup')) return;
+                var c = document.cookie || '';
+                if ((p === '/' || p === '') && !c.includes('sessionid=') && !c.includes('ds_user_id=')) return;
+                if (document.getElementById('loginForm') || document.querySelector('form[action*="login"], input[name="password"]')) return;
                 document.querySelectorAll('a[href="/"], a[href="/?variant=home"], svg[aria-label="Home"], a[href*="/explore/"]').forEach(function(target) {
                     var el = target.closest('a') || target;
                     while (el && el !== document.body && el !== document.documentElement) {

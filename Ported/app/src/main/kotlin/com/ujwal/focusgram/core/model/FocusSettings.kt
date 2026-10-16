@@ -58,10 +58,11 @@ data class FocusSettings(
 
     // Extras & Notifications
     val startupPage: String = "home",
-    val videoDownloadEnabled: Boolean = true,
+    val videoDownloadEnabled: Boolean = false,
     val sanitizeLinks: Boolean = true,
     val notifySessionEnd: Boolean = false,
     val notifyPersistent: Boolean = false,
+    val portraitOnly: Boolean = true,
 
     // Ghost Mode (Privacy & Stealth)
     val ghostModeEnabled: Boolean = false,

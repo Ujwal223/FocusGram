@@ -5,6 +5,7 @@ import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
@@ -21,6 +22,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -42,6 +44,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -59,11 +62,13 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import com.ujwal.focusgram.core.model.FocusSettings
 import com.ujwal.focusgram.core.model.IslandMode
+import com.ujwal.focusgram.core.utils.HapticHelper
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -102,6 +107,12 @@ fun NativeBottomNavBar(
     instagramTheme: String = "auto",
     isWebInputFocused: Boolean = false,
     isModalActive: Boolean = false,
+    downloadProgress: Float = 0f,
+    isDownloading: Boolean = false,
+    isDownloadCompleted: Boolean = false,
+    isDownloadFailed: Boolean = false,
+    isAuthenticated: Boolean = false,
+    isAuthPage: Boolean = false,
     onNavClick: ((String) -> Unit)? = null,
     onNavigate: (String) -> Unit,
     onOpenProfile: () -> Unit,
@@ -110,6 +121,7 @@ fun NativeBottomNavBar(
     onRefreshReels: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val view = LocalView.current
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
@@ -137,7 +149,8 @@ fun NativeBottomNavBar(
     } else {
         isInDirect
     }
-    val isVisible = !isImeVisible && !shouldHideInDirect && !isWebInputFocused && !isModalActive && islandMode != IslandMode.HIDDEN
+    val isAuth = isAuthPage || !isAuthenticated || lowerUrl.contains("/accounts") || lowerUrl.contains("/login") || lowerUrl.contains("/signup")
+    val isVisible = !isAuth && !isImeVisible && !shouldHideInDirect && !isWebInputFocused && !isModalActive && islandMode != IslandMode.HIDDEN
 
     // Real-time animated color palette matching Instagram's web theme
     val isSystemDark = isSystemInDarkTheme()
@@ -148,18 +161,35 @@ fun NativeBottomNavBar(
     }
     val islandBackground by animateColorAsState(
         targetValue = if (islandMode == IslandMode.FLOATING) {
-            if (isLight) Color(0x9CFFFFFF) else Color(0x8B101014)
+            if (isLight) Color(0xB0FFFFFF) else Color(0x9E101014)
         } else {
-            if (isLight) Color(0x9EFFFFFF) else Color(0x9B141418)
+            if (isLight) Color(0xB2FFFFFF) else Color(0xAE141418)
         },
         animationSpec = tween(300),
         label = "islandBackground"
     )
     val borderColor by animateColorAsState(
-        targetValue = if (isLight) Color(0x2B000000) else Color(0x4DFFFFFF),
+        targetValue = if (isLight) Color(0x35000000) else Color(0x57FFFFFF),
         animationSpec = tween(300),
         label = "borderColor"
     )
+    val glassBorderBrush = remember(isLight) {
+        if (isLight) {
+            Brush.verticalGradient(
+                colors = listOf(
+                    Color(0x3E000000), // Top specular rim (+4% glassy)
+                    Color(0x20000000)  // Bottom diffused rim
+                )
+            )
+        } else {
+            Brush.verticalGradient(
+                colors = listOf(
+                    Color(0x60FFFFFF), // Top specular glass rim (+4% glassy)
+                    Color(0x36FFFFFF)  // Bottom subtle glass rim
+                )
+            )
+        }
+    }
     val selectedTabBackground by animateColorAsState(
         targetValue = if (isLight) Color(0x1F000000) else Color(0x33FFFFFF),
         animationSpec = tween(300),
@@ -183,18 +213,80 @@ fun NativeBottomNavBar(
     // Long press perimeter progress animation state
     val longPressProgressAnim = remember { Animatable(0f) }
 
-    // Determine currently active tab index
-    val selectedTabIndex = activeTabs.indexOfFirst { tab ->
+    // Animated download progress state (smooth sweep)
+    val animatedDownloadProgress by animateFloatAsState(
+        targetValue = if (isDownloading || downloadProgress > 0f) downloadProgress else 0f,
+        animationSpec = if (isDownloadFailed) {
+            tween(durationMillis = 60, easing = LinearEasing)
+        } else if (downloadProgress >= 1f) {
+            tween(durationMillis = 200, easing = LinearEasing)
+        } else if (downloadProgress == 0f) {
+            tween(durationMillis = 350, easing = FastOutSlowInEasing)
+        } else {
+            tween(durationMillis = 180, easing = LinearEasing)
+        },
+        label = "animatedDownloadProgress"
+    )
+
+    // Glow animation for download completion (glow out and glow in 2 times)
+    val glowAnim = remember { Animatable(0f) }
+    androidx.compose.runtime.LaunchedEffect(isDownloadCompleted) {
+        if (isDownloadCompleted) {
+            // Pulse 1: glow out (0f -> 1f) and glow in (1f -> 0f)
+            glowAnim.animateTo(1f, animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing))
+            glowAnim.animateTo(0f, animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing))
+            // Pulse 2: glow out (0f -> 1f) and glow in (1f -> 0f)
+            glowAnim.animateTo(1f, animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing))
+            glowAnim.animateTo(0f, animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing))
+        } else {
+            glowAnim.snapTo(0f)
+        }
+    }
+
+    // Retain last valid active tab index so custom schemes/downloads never jump to Profile
+    var lastValidTabIndex by remember { mutableIntStateOf(0) }
+
+    val cleanPath = remember(currentUrl) {
+        val afterScheme = if (currentUrl.contains("://")) currentUrl.substringAfter("://") else currentUrl
+        val pathPart = if (afterScheme.contains('/')) afterScheme.substringAfter('/') else ""
+        pathPart.substringBefore('?').substringBefore('#').trim('/')
+    }
+    val isHome = cleanPath.isEmpty()
+
+    val rawTabIndex = activeTabs.indexOfFirst { tab ->
         when (tab) {
-            NavTab.HOME -> lowerUrl == "https://www.instagram.com/" || lowerUrl.endsWith("instagram.com/") || lowerUrl == "/"
+            NavTab.HOME -> isHome || lowerUrl.startsWith("https://www.instagram.com/?") || lowerUrl.startsWith("https://instagram.com/?") || lowerUrl == "/"
             NavTab.SEARCH -> lowerUrl.contains("/explore")
             NavTab.REELS -> lowerUrl.contains("/reel")
             NavTab.MESSAGES -> lowerUrl.contains("/direct") || lowerUrl.contains("/inbox")
-            NavTab.PROFILE -> !lowerUrl.contains("/explore") && !lowerUrl.contains("/reel") && !lowerUrl.contains("/direct") &&
-                    (lowerUrl.contains("/profile") || (!lowerUrl.endsWith("instagram.com/") && !lowerUrl.endsWith("instagram.com") && lowerUrl != "/"))
+            NavTab.PROFILE -> {
+                val isInstagram = lowerUrl.contains("instagram.com") || lowerUrl.startsWith("/")
+                val isExcluded = isHome ||
+                        lowerUrl.contains("/explore") ||
+                        lowerUrl.contains("/reel") ||
+                        lowerUrl.contains("/direct") ||
+                        lowerUrl.contains("/inbox") ||
+                        lowerUrl.contains("/p/") ||
+                        lowerUrl.contains("/stories/") ||
+                        lowerUrl.startsWith("focusgram-download:") ||
+                        lowerUrl.startsWith("javascript:")
+
+                val segments = cleanPath.trim('/').split('/').filter { it.isNotEmpty() }
+                val isSingleUserSegment = segments.size == 1
+
+                !isHome && isInstagram && !isExcluded &&
+                        (lowerUrl.contains("/profile") || isSingleUserSegment)
+            }
             NavTab.SETTINGS -> false
         }
-    }.coerceAtLeast(0)
+    }
+
+    val selectedTabIndex = if (rawTabIndex >= 0) {
+        lastValidTabIndex = rawTabIndex
+        rawTabIndex
+    } else {
+        lastValidTabIndex.coerceIn(0, activeTabs.lastIndex)
+    }
 
     AnimatedVisibility(
         visible = isVisible,
@@ -219,15 +311,46 @@ fun NativeBottomNavBar(
                     .fillMaxWidth()
                     .height(56.dp)
                     .shadow(
-                        elevation = if (isLight) 8.dp else 4.dp,
+                        elevation = if (glowAnim.value > 0f) (8.dp + 12.dp * glowAnim.value) else (if (isLight) 8.dp else 4.dp),
                         shape = navShape,
-                        spotColor = if (isLight) Color(0x33000000) else Color.Transparent
+                        spotColor = if (glowAnim.value > 0f) Color(0xFF00D2FF).copy(alpha = 0.75f * glowAnim.value) else (if (isLight) Color(0x33000000) else Color.Transparent)
                     )
                     .clip(navShape)
-                    .background(islandBackground)
-                    .border(BorderStroke(1.dp, borderColor), navShape),
+                    .border(BorderStroke(1.dp, glassBorderBrush), navShape),
                 contentAlignment = Alignment.Center
             ) {
+                // 0. Frosted Glass Blur Background Layer (~13% more blur)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(navShape)
+                        .blur(20.dp)
+                        .background(islandBackground)
+                )
+
+                // 0.1 Specular Glass Sheen Gradient (+4% glass reflection)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(navShape)
+                        .background(
+                            Brush.verticalGradient(
+                                colors = if (isLight) {
+                                    listOf(
+                                        Color(0x24FFFFFF),
+                                        Color(0x08FFFFFF),
+                                        Color.Transparent
+                                    )
+                                } else {
+                                    listOf(
+                                        Color(0x1CFFFFFF),
+                                        Color(0x06FFFFFF),
+                                        Color.Transparent
+                                    )
+                                }
+                            )
+                        )
+                )
                 val totalWidthPx = constraints.maxWidth.toFloat()
                 val totalHeightPx = constraints.maxHeight.toFloat()
                 val tabCount = activeTabs.size
@@ -298,7 +421,7 @@ fun NativeBottomNavBar(
                                                         )
                                                     )
                                                     settingsOpened = true
-                                                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                                    HapticHelper.performLongPress(context, view)
                                                     longPressProgressAnim.snapTo(0f)
                                                     onOpenSettings()
                                                 } catch (_: CancellationException) {
@@ -313,7 +436,7 @@ fun NativeBottomNavBar(
                                                 animJob.cancel()
                                                 scope.launch { longPressProgressAnim.snapTo(0f) }
                                                 if (released) {
-                                                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                                    HapticHelper.performClick(context, view)
                                                     onOpenProfile()
                                                     onNavClick?.invoke("profile")
                                                 }
@@ -329,7 +452,7 @@ fun NativeBottomNavBar(
                                     detectTapGestures(
                                         onTap = {
                                             val now = SystemClock.uptimeMillis()
-                                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                            HapticHelper.performClick(context, view)
 
                                             when (tab) {
                                                 NavTab.HOME -> {
@@ -451,6 +574,111 @@ fun NativeBottomNavBar(
                                 cap = StrokeCap.Round
                             )
                         )
+                    }
+                }
+
+                // 4. Media Download Clockwise Perimeter Progress Animation & 2x Completion Glow
+                val currentDlProgress = animatedDownloadProgress
+                val currentGlow = glowAnim.value
+                if (currentDlProgress > 0f || currentGlow > 0f) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val fullPath = Path().apply {
+                            moveTo(startXPx, 0f)
+                            lineTo(totalWidthPx - cornerRadiusPx, 0f)
+                            arcTo(
+                                rect = Rect(totalWidthPx - 2 * cornerRadiusPx, 0f, totalWidthPx, 2 * cornerRadiusPx),
+                                startAngleDegrees = 270f,
+                                sweepAngleDegrees = 90f,
+                                forceMoveTo = false
+                            )
+                            lineTo(totalWidthPx, totalHeightPx - cornerRadiusPx)
+                            arcTo(
+                                rect = Rect(totalWidthPx - 2 * cornerRadiusPx, totalHeightPx - 2 * cornerRadiusPx, totalWidthPx, totalHeightPx),
+                                startAngleDegrees = 0f,
+                                sweepAngleDegrees = 90f,
+                                forceMoveTo = false
+                            )
+                            lineTo(cornerRadiusPx, totalHeightPx)
+                            arcTo(
+                                rect = Rect(0f, totalHeightPx - 2 * cornerRadiusPx, 2 * cornerRadiusPx, totalHeightPx),
+                                startAngleDegrees = 90f,
+                                sweepAngleDegrees = 90f,
+                                forceMoveTo = false
+                            )
+                            lineTo(0f, cornerRadiusPx)
+                            arcTo(
+                                rect = Rect(0f, 0f, 2 * cornerRadiusPx, 2 * cornerRadiusPx),
+                                startAngleDegrees = 180f,
+                                sweepAngleDegrees = 90f,
+                                forceMoveTo = false
+                            )
+                            lineTo(startXPx, 0f)
+                            close()
+                        }
+
+                        val blueGradient = Brush.linearGradient(
+                            colors = listOf(
+                                Color(0xFF00E5FF), // Bright Cyan
+                                Color(0xFF0091FF), // Electric Sky Blue
+                                Color(0xFF0055FF), // Deep Vivid Blue
+                                Color(0xFF00D2FF)  // Cyan-Blue
+                            )
+                        )
+                        val failureGradient = Brush.linearGradient(
+                            colors = listOf(
+                                Color(0xFFFF3B30), // Bright Red
+                                Color(0xFFCC0000), // Dark Red
+                                Color(0xFF8B0000), // Very Dark Crimson
+                                Color(0xFFFF3B30)  // Bright Red
+                            )
+                        )
+
+                        // 4a. If downloading or failed: Clockwise perimeter sweep starting above Home icon
+                        if (currentDlProgress > 0f && currentGlow == 0f) {
+                            val pathMeasure = PathMeasure()
+                            pathMeasure.setPath(fullPath, false)
+                            val totalLen = pathMeasure.length
+                            val segmentPath = Path()
+                            pathMeasure.getSegment(0f, totalLen * currentDlProgress.coerceIn(0f, 1f), segmentPath, true)
+
+                            drawPath(
+                                path = segmentPath,
+                                brush = if (isDownloadFailed) failureGradient else blueGradient,
+                                style = Stroke(
+                                    width = 3.dp.toPx(),
+                                    cap = StrokeCap.Round
+                                )
+                            )
+                        }
+
+                        // 4b. If download completed: 2x glowing outer halo + luminous neon perimeter rim
+                        if (currentGlow > 0f) {
+                            // Outer diffused glow halo
+                            drawPath(
+                                path = fullPath,
+                                color = Color(0xFF00D2FF).copy(alpha = 0.6f * currentGlow),
+                                style = Stroke(
+                                    width = (4.dp + 5.dp * currentGlow).toPx(),
+                                    cap = StrokeCap.Round
+                                )
+                            )
+                            // Core luminous neon rim
+                            drawPath(
+                                path = fullPath,
+                                brush = Brush.linearGradient(
+                                    colors = listOf(
+                                        Color(0xFF80EEFF).copy(alpha = currentGlow),
+                                        Color(0xFF00B4FF).copy(alpha = currentGlow),
+                                        Color(0xFF0066FF).copy(alpha = currentGlow),
+                                        Color(0xFF80EEFF).copy(alpha = currentGlow)
+                                    )
+                                ),
+                                style = Stroke(
+                                    width = 3.2.dp.toPx(),
+                                    cap = StrokeCap.Round
+                                )
+                            )
+                        }
                     }
                 }
             }

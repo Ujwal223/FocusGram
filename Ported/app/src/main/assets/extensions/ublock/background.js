@@ -26,8 +26,10 @@ let cachedSettings = {
     ghostHideDirectSeen: true,
     ghostHideTypingIndicator: true,
     unblurMode: 'tap',
-    videoDownloadEnabled: true
+    videoDownloadEnabled: false
 };
+
+let userIsAuthenticated = false;
 
 const BLOCKED_URL_PATTERNS = [
     "*://*.instagram.com/logging_client_events*",
@@ -66,8 +68,15 @@ const GHOST_BLOCKED_URL_PATTERNS = [
 if (typeof browser !== 'undefined' && browser.webRequest && browser.webRequest.onBeforeRequest) {
     browser.webRequest.onBeforeRequest.addListener(
         function (details) {
-            if (cachedSettings.noAds === false) {
-                // User turned ad blocker off: do not cancel requests
+            if (cachedSettings.noAds === false || !userIsAuthenticated) {
+                // User turned ad blocker off or user is not logged in: do not cancel requests
+                return { cancel: false };
+            }
+            const url = (details.url || '').toLowerCase();
+            // NEVER block anything on or related to authentication, login, signup, or security checks
+            if (url.includes('/accounts/') || url.includes('/login') || url.includes('/signup') ||
+                url.includes('facebook.net') || url.includes('facebook.com') || url.includes('/ajax/bz') ||
+                url.includes('/api/v1/web/accounts/') || url.includes('/api/v1/accounts/')) {
                 return { cancel: false };
             }
             console.log('[Content Blocker] Intercepted and blocked network ad request:', details.url);
@@ -156,6 +165,10 @@ function broadcastToTabs(message) {
 if (typeof browser !== 'undefined' && browser.runtime && browser.runtime.onMessage) {
     browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!message) return;
+
+        if (message.action === 'authStateChanged') {
+            userIsAuthenticated = !!message.isAuthenticated;
+        }
 
         if (message.action === 'getSettings') {
             sendResponse({ settings: cachedSettings });

@@ -109,6 +109,21 @@ class FocusFeaturesEnhancementsTest {
     }
 
     @Test
+    fun testHapticHelperImplementsUniversalDirectHardwareVibration() {
+        val source = getFile("src/main/kotlin/com/ujwal/focusgram/core/utils/HapticHelper.kt").readText()
+        assertFalse("Must not use deprecated Context.VIBRATOR_SERVICE", source.contains("Context.VIBRATOR_SERVICE"))
+        assertTrue("Must use VibratorManager on API 31+", source.contains("VibratorManager::class.java"))
+        assertTrue("Must use Vibrator class on pre-31", source.contains("context.getSystemService(Vibrator::class.java)"))
+        assertTrue("Must pulse physical vibrator directly with >= 30ms duration to overcome ERM motor inertia",
+            source.contains("createOneShot(35L") || source.contains("createOneShot(30L"))
+        assertTrue("Must provide session completion waveform pattern", source.contains("createWaveform(pattern"))
+
+        val sessionExhaustedSource = getFile("src/main/kotlin/com/ujwal/focusgram/feature/session/SessionExhaustedScreen.kt").readText()
+        assertTrue("SessionExhaustedScreen must trigger session completion alert vibration",
+            sessionExhaustedSource.contains("HapticHelper.performSessionCompletionAlert"))
+    }
+
+    @Test
     fun testAdsterraDirectContainerAndPreloader() {
         val source = getFile("src/main/kotlin/com/ujwal/focusgram/feature/wellness/AdsterraAdScreen.kt").readText()
         // Container element before script for reliable script invocation
@@ -192,4 +207,281 @@ class FocusFeaturesEnhancementsTest {
         assertTrue("Native bottom nav bar in minimal mode must only display MESSAGES and PROFILE",
             navBarSource.contains("listOf(NavTab.MESSAGES, NavTab.PROFILE)"))
     }
+
+    @Test
+    fun testFilePickerManifestAndProviderConfiguration() {
+        val manifestSource = getFile("src/main/AndroidManifest.xml").readText()
+        assertTrue("Manifest must declare FileProvider",
+            manifestSource.contains("androidx.core.content.FileProvider"))
+        assertTrue("Manifest must declare intent queries for PICK_IMAGES",
+            manifestSource.contains("android.provider.action.PICK_IMAGES"))
+        assertTrue("Manifest must declare intent queries for GET_CONTENT",
+            manifestSource.contains("android.intent.action.GET_CONTENT"))
+        assertTrue("Manifest must declare camera capture intents in queries",
+            manifestSource.contains("android.media.action.IMAGE_CAPTURE"))
+
+        val pathsSource = getFile("src/main/res/xml/file_paths.xml").readText()
+        assertTrue("file_paths.xml must configure cache-path for camera",
+            pathsSource.contains("cache-path name=\"camera_photos\" path=\"camera/\""))
+    }
+
+    @Test
+    fun testNativeBottomNavBarBlurAndGlassStyling() {
+        val navBarSource = getFile("src/main/kotlin/com/ujwal/focusgram/feature/navigation/NativeBottomNavBar.kt").readText()
+        assertTrue("NavBar must include frosted glass blur layer",
+            navBarSource.contains(".blur(20.dp)"))
+        assertTrue("NavBar must include glassBorderBrush",
+            navBarSource.contains("glassBorderBrush"))
+        assertTrue("NavBar must integrate HapticHelper for device-compatible vibrations",
+            navBarSource.contains("HapticHelper.performHapticFeedback") || navBarSource.contains("HapticHelper"))
+    }
+
+    @Test
+    fun testFragment186VersionEnforcement() {
+        val buildGradle = getFile("build.gradle.kts").readText()
+        assertTrue("build.gradle.kts must force androidx.fragment:fragment:1.8.6",
+            buildGradle.contains("androidx.fragment:fragment:1.8.6"))
+        assertTrue("build.gradle.kts must force androidx.fragment:fragment-ktx:1.8.6",
+            buildGradle.contains("androidx.fragment:fragment-ktx:1.8.6"))
+
+        val libsToml = getFile("../gradle/libs.versions.toml").readText()
+        assertTrue("libs.versions.toml must declare fragment = \"1.8.6\"",
+            libsToml.contains("fragment = \"1.8.6\""))
+    }
+
+    @Test
+    fun testFilePickerMimeParsingAndMediaRouting() {
+        fun resolveMediaTypes(mimes: Array<String>, isProfilePictureEdit: Boolean = false): Triple<Boolean, Boolean, String> {
+            val cleanMimes = mimes
+                .flatMap { it.split(",") }
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .mapNotNull { token ->
+                    if (token.startsWith(".jpg") || token.startsWith(".jpeg")) "image/jpeg"
+                    else if (token.startsWith(".png")) "image/png"
+                    else if (token.startsWith(".mp4")) "video/mp4"
+                    else if (token.contains("/")) token
+                    else null
+                }
+                .distinct()
+                .toTypedArray()
+
+            val isAnyMedia = cleanMimes.isEmpty() || cleanMimes.contains("*/*")
+            val hasImages = isAnyMedia || cleanMimes.any { it.startsWith("image/") }
+            val hasVideos = isAnyMedia || cleanMimes.any { it.startsWith("video/") }
+
+            val allowsVideos = hasVideos || (!isProfilePictureEdit && hasImages)
+            val allowsImages = hasImages || isAnyMedia
+
+            val visualMediaType = when {
+                allowsImages && !allowsVideos -> "ImageOnly"
+                allowsVideos && !allowsImages -> "VideoOnly"
+                else -> "ImageAndVideo"
+            }
+            return Triple(allowsImages, allowsVideos, visualMediaType)
+        }
+
+        // 1. Profile Picture: /accounts/edit screen strictly image only
+        val (profileImg, profileVid, profileType) = resolveMediaTypes(arrayOf("image/*"), isProfilePictureEdit = true)
+        assertTrue(profileImg)
+        assertFalse(profileVid)
+        assertEquals("ImageOnly", profileType)
+
+        // 2. DM / Story upload: Instagram sends only image MIME types, but we must allow both Images and Videos!
+        val (dmImg, dmVid, dmType) = resolveMediaTypes(arrayOf("image/avif, image/jpeg, image/png"), isProfilePictureEdit = false)
+        assertTrue(dmImg)
+        assertTrue(dmVid)
+        assertEquals("ImageAndVideo", dmType)
+
+        val (storyImg, storyVid, storyType) = resolveMediaTypes(arrayOf("image/png, image/jpeg"), isProfilePictureEdit = false)
+        assertTrue(storyImg)
+        assertTrue(storyVid)
+        assertEquals("ImageAndVideo", storyType)
+
+        // 3. Reels: Video only
+        val (reelsImg, reelsVid, reelsType) = resolveMediaTypes(arrayOf("video/mp4, video/quicktime"), isProfilePictureEdit = false)
+        assertFalse(reelsImg)
+        assertTrue(reelsVid)
+        assertEquals("VideoOnly", reelsType)
+
+        // 4. Fallback: Empty array or */*
+        val (emptyImg, emptyVid, emptyType) = resolveMediaTypes(emptyArray(), isProfilePictureEdit = false)
+        assertTrue(emptyImg)
+        assertTrue(emptyVid)
+        assertEquals("ImageAndVideo", emptyType)
+
+        val (starImg, starVid, starType) = resolveMediaTypes(arrayOf("*/*"), isProfilePictureEdit = false)
+        assertTrue(starImg)
+        assertTrue(starVid)
+        assertEquals("ImageAndVideo", starType)
+    }
+
+    @Test
+    fun testNativeFeelIncludesVideoSupportBridge() {
+        val script = getFile("src/main/assets/scripts/native_feel.js").readText()
+        assertTrue("native_feel.js must include enhanceFileInputsForVideoSupport",
+            script.contains("enhanceFileInputsForVideoSupport"))
+        assertTrue("native_feel.js must broaden accept attribute to include video formats",
+            script.contains("video/mp4,video/quicktime,video/webm,video/*"))
+        assertTrue("native_feel.js must exclude /accounts/edit from video patching",
+            script.contains("/accounts/edit"))
+    }
+
+    @Test
+    fun testReelsTopBarWatchedCount() {
+        val appSource = getFile("src/main/kotlin/com/ujwal/focusgram/ui/FocusGramApp.kt").readText()
+        assertTrue("FocusGramApp must pass reelsWatchedSessionCount directly to ReelsTopBar",
+            appSource.contains("watchedCount = reelsWatchedSessionCount"))
+
+        val topBarSource = getFile("src/main/kotlin/com/ujwal/focusgram/feature/navigation/ReelsTopBar.kt").readText()
+        assertTrue("ReelsTopBar must default watchedCount to 0",
+            topBarSource.contains("watchedCount: Int = 0"))
+    }
+
+    @Test
+    fun testDownloadProgressStateAndIndeterminateProgress() {
+        val defaultState = com.ujwal.focusgram.core.utils.DownloadProgressState()
+        assertFalse(defaultState.isDownloading)
+        assertFalse(defaultState.isCompleted)
+        assertEquals(0f, defaultState.progress, 0.001f)
+
+        com.ujwal.focusgram.core.utils.MediaDownloadHelper.startIndeterminateProgress("test_reel")
+        val activeState = com.ujwal.focusgram.core.utils.MediaDownloadHelper.downloadProgressFlow.value
+        assertTrue("isDownloading must be true after startIndeterminateProgress", activeState.isDownloading)
+        assertFalse("isCompleted must be false while downloading", activeState.isCompleted)
+        assertTrue("progress should be >= 0.05f", activeState.progress >= 0.05f)
+        assertEquals("test_reel", activeState.filename)
+    }
+
+    @Test
+    fun testHomeVsProfileTabResolutionWithQueryParams() {
+        // Simulates the exact logic in NativeBottomNavBar
+        fun getCleanPath(url: String): String {
+            val afterScheme = if (url.contains("://")) url.substringAfter("://") else url
+            val pathPart = if (afterScheme.contains('/')) afterScheme.substringAfter('/') else ""
+            return pathPart.substringBefore('?').substringBefore('#').trim('/')
+        }
+
+        fun resolveIsHome(url: String): Boolean {
+            val cleanPath = getCleanPath(url)
+            val lowerUrl = url.lowercase()
+            val isHome = cleanPath.isEmpty()
+            return isHome || lowerUrl.startsWith("https://www.instagram.com/?") || lowerUrl.startsWith("https://instagram.com/?") || lowerUrl == "/"
+        }
+
+        fun resolveIsProfile(url: String): Boolean {
+            val cleanPath = getCleanPath(url)
+            val lowerUrl = url.lowercase()
+            val isHome = cleanPath.isEmpty()
+            val isInstagram = lowerUrl.contains("instagram.com") || lowerUrl.startsWith("/")
+            val isExcluded = isHome ||
+                    lowerUrl.contains("/explore") ||
+                    lowerUrl.contains("/reel") ||
+                    lowerUrl.contains("/direct") ||
+                    lowerUrl.contains("/inbox") ||
+                    lowerUrl.contains("/p/") ||
+                    lowerUrl.contains("/stories/") ||
+                    lowerUrl.startsWith("focusgram-download:") ||
+                    lowerUrl.startsWith("javascript:")
+
+            val segments = cleanPath.trim('/').split('/').filter { it.isNotEmpty() }
+            val isSingleUserSegment = segments.size == 1
+
+            return !isHome && isInstagram && !isExcluded &&
+                    (lowerUrl.contains("/profile") || isSingleUserSegment)
+        }
+
+        // Home URLs with parameters must always resolve to Home, NEVER Profile
+        assertTrue(resolveIsHome("https://www.instagram.com/"))
+        assertFalse(resolveIsProfile("https://www.instagram.com/"))
+
+        assertTrue(resolveIsHome("https://www.instagram.com/?variant=home"))
+        assertFalse(resolveIsProfile("https://www.instagram.com/?variant=home"))
+
+        assertTrue(resolveIsHome("https://www.instagram.com/?theme=dark"))
+        assertFalse(resolveIsProfile("https://www.instagram.com/?theme=dark"))
+
+        // Profile URLs
+        assertFalse(resolveIsHome("https://www.instagram.com/zuck/"))
+        assertTrue(resolveIsProfile("https://www.instagram.com/zuck/"))
+
+        assertFalse(resolveIsHome("https://www.instagram.com/profile"))
+        assertTrue(resolveIsProfile("https://www.instagram.com/profile"))
+
+        // Excluded pages (Explore, Reels, DMs, Posts)
+        assertFalse(resolveIsProfile("https://www.instagram.com/explore/"))
+        assertFalse(resolveIsProfile("https://www.instagram.com/reel/C7x90/"))
+        assertFalse(resolveIsProfile("https://www.instagram.com/p/C7x90/"))
+        assertFalse(resolveIsProfile("https://www.instagram.com/direct/inbox/"))
+    }
+
+    @Test
+    fun testFocusGramContentAntiFlashDoesNotCollapseFeed() {
+        val script = getFile("src/main/assets/extensions/ublock/focusgram_content.js").readText()
+        assertFalse(
+            "focusgram_content.js must NOT have overly broad div:has(> a[href='/']) that caused feed blanking",
+            script.contains("div:has(> a[href=\"/\"]):has(a[href*=\"/explore/\"])")
+        )
+        assertFalse(
+            "focusgram_content.js must NOT have div:has(> div > a[href='/'])",
+            script.contains("div:has(> div > a[href=\"/\"]):has(a[href*=\"/explore/\"])")
+        )
+        assertTrue(
+            "focusgram_content.js must restrict anti-flash hiding to navigation/footer roles",
+            script.contains("nav[role=\"navigation\"]:has(a[href*=\"/explore/\"])")
+        )
+    }
+
+    @Test
+    fun testMediaDownloaderDoesNotUseIframeToPreventCspViolations() {
+        val script = getFile("src/main/assets/scripts/media_downloader.js").readText()
+        assertFalse(
+            "media_downloader.js must not create iframes with custom schemes which violate Instagram frame-src CSP",
+            script.contains("document.createElement('iframe')")
+        )
+    }
+
+    @Test
+    fun testMediaDownloaderAccidentalScrollGuard() {
+        val scriptUser = getFile("src/main/assets/scripts/media_downloader.js").readText()
+        assertTrue(
+            "media_downloader.js must guard against accidental download triggers during feed scrolling with hold timer",
+            scriptUser.contains("isGlobalScrolling") && scriptUser.contains("touchmove") && scriptUser.contains("holdThresholdPassed")
+        )
+    }
+
+    @Test
+    fun testMediaDownloaderPreventsFalseVideoHijackingOnPhotos() {
+        val scriptUser = getFile("src/main/assets/scripts/media_downloader.js").readText()
+        assertTrue(
+            "media_downloader.js must check hasVideoElement before inspecting video streams from performance timings",
+            scriptUser.contains("hasVideoElement")
+        )
+    }
+
+    @Test
+    fun testMediaDownloadHelperPhotoVsVideoDetectionAndFilename() {
+        val helper = com.ujwal.focusgram.core.utils.MediaDownloadHelper
+        val photoUrl = "https://instagram.fktm1-1.fna.fbcdn.net/v/t51.82787-15/841260402_18131269318760808_4130815482121662762_n.jpg?stp=dst-jpg_e15_tt6&_nc_cat=107"
+        val videoUrl = "https://instagram.fktm1-1.fna.fbcdn.net/v/t50.28834-16/123456_n.mp4"
+
+        assertFalse("Photo URL with /v/t51 and dst-jpg must NOT be detected as video", helper.detectIsVideo(photoUrl, "instagram_xyz.mp4"))
+        assertTrue("Video URL with /v/t50 and .mp4 must be detected as video", helper.detectIsVideo(videoUrl, "instagram_xyz.mp4"))
+
+        val formattedPhotoName = helper.formatTargetFilename("@ujwal - Focusgram.mp4", false)
+        assertEquals("@ujwal - Focusgram.jpg", formattedPhotoName)
+
+        val formattedVideoName = helper.formatTargetFilename("@ujwal - Focusgram.jpg", true)
+        assertEquals("@ujwal - Focusgram.mp4", formattedVideoName)
+
+        val fallbackFormatted = helper.formatTargetFilename("instagram_DehM0IhkVm0.jpg", false)
+        assertEquals("@Focusgram - Focusgram.jpg", fallbackFormatted)
+
+        val normalAuthorFormatted = helper.formatTargetFilename("@ujwal", true)
+        assertEquals("@ujwal - Focusgram.mp4", normalAuthorFormatted)
+
+        val longAuthorFormatted = helper.formatTargetFilename("ujwaldeveloper12345", true)
+        assertEquals("@ujwaldevelope - Focusgram.mp4", longAuthorFormatted)
+    }
 }
+

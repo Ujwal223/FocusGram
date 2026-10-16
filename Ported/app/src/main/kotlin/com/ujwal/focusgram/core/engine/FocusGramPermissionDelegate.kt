@@ -30,7 +30,18 @@ class FocusGramPermissionDelegate(
             ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
         }
 
-        if (ungranted.isEmpty()) {
+        // On Android 13+ (API 33+), READ_EXTERNAL_STORAGE and WRITE_EXTERNAL_STORAGE are deprecated
+        // and automatically denied by the OS. System file pickers do not require storage permissions.
+        val actionableUngranted = if (android.os.Build.VERSION.SDK_INT >= 33) {
+            ungranted.filter {
+                it != android.Manifest.permission.READ_EXTERNAL_STORAGE &&
+                it != android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+            }
+        } else {
+            ungranted
+        }
+
+        if (actionableUngranted.isEmpty()) {
             callback.grant()
             return
         }
@@ -38,12 +49,14 @@ class FocusGramPermissionDelegate(
         if (onAndroidPermissionRequest != null) {
             Handler(Looper.getMainLooper()).post {
                 try {
-                    onAndroidPermissionRequest.invoke(ungranted.toTypedArray()) { allGranted ->
-                        if (allGranted) callback.grant() else callback.reject()
+                    onAndroidPermissionRequest.invoke(actionableUngranted.toTypedArray()) { granted ->
+                        // Always grant to GeckoView so it proceeds to onFilePrompt() where
+                        // native ActivityResultContracts (Photo Picker / SAF) handle file access securely.
+                        callback.grant()
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error requesting Android permissions: ${e.message}", e)
-                    callback.reject()
+                    callback.grant()
                 }
             }
         } else {
