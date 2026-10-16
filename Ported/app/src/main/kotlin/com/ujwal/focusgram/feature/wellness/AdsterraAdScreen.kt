@@ -157,9 +157,10 @@ fun AdsterraAdScreen(
     var adsClicked by remember { mutableIntStateOf(0) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
 
+    val isSettingToggle = sessionType == "setting_toggle"
     val timerDone = elapsedSeconds >= requiredSeconds
     val bothClicked = adsClicked >= 2
-    val isComplete = timerDone && bothClicked
+    val isComplete = if (isSettingToggle) timerDone else (timerDone && bothClicked)
 
     // 20s Timer Loop - restarts cleanly on timerCycle increment
     LaunchedEffect(timerCycle) {
@@ -171,7 +172,8 @@ fun AdsterraAdScreen(
     }
 
     val statusText = when {
-        isComplete -> "Reward Unlocked! Tap below to claim focus minutes."
+        isComplete -> if (isSettingToggle) "Ad viewed! Tap below to apply your setting." else "Reward Unlocked! Tap below to claim focus minutes."
+        isSettingToggle -> "Viewing ad (${requiredSeconds - elapsedSeconds}s remaining)..."
         bothClicked -> "Both ads clicked! Waiting for countdown (${requiredSeconds - elapsedSeconds}s)..."
         timerDone -> "Timer completed. Please tap both ads ($adsClicked/2) to continue."
         else -> "Tap BOTH ads below to earn reward credits ($adsClicked/2 clicked)"
@@ -400,8 +402,13 @@ fun AdsterraAdScreen(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
+                    val buttonLabel = when {
+                        !isComplete -> if (isSettingToggle) "Viewing Ad (${(requiredSeconds - elapsedSeconds).coerceAtLeast(0)}s)" else "Complete Ad Actions to Unlock"
+                        isSettingToggle -> "Continue & Apply Setting"
+                        else -> "Continue & Earn Reward (+2 min)"
+                    }
                     Text(
-                        text = if (isComplete) "Continue & Earn Reward (+2 min)" else "Complete Ad Actions to Unlock",
+                        text = buttonLabel,
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp
                     )

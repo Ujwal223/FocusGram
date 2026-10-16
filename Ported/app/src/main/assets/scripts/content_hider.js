@@ -13,6 +13,23 @@
 (function () {
     const STYLE_ID = 'focusgram-dynamic-guardrails-styles';
 
+    function isAuthPage() {
+        try {
+            var path = (window.location.pathname || '').toLowerCase();
+            if (path.startsWith('/accounts') || path.startsWith('/login') || path.startsWith('/signup')) return true;
+            var c = document.cookie || '';
+            if (!c.includes('sessionid=') && !c.includes('ds_user_id=')) return true;
+            if (document.getElementById('loginForm') || document.querySelector('form[action*="login"], input[name="password"]')) return true;
+        } catch (_) {}
+        return false;
+    }
+
+    if (isAuthPage()) {
+        var existing = document.getElementById(STYLE_ID);
+        if (existing) existing.remove();
+        return; // Leave login/signup completely untouched
+    }
+
     // 1. Client-Side SPA Navigation Helper
     window.__focusgramNavigate = function (path) {
         if (!path) return;
@@ -286,16 +303,13 @@
 
         if (config.noAds !== false) {
             css += `
-                article:has(a[href*="/ad_"]),
                 article:has(a[href*="/ads/"]),
                 article:has(a[href*="ads.instagram.com"]),
-                article:has([aria-label="Ad" i]),
                 article:has([aria-label*="Sponsored" i]),
                 article[data-fg-ad-filtered="true"] {
-                    display: none !important;
-                    height: 0px !important;
-                    min-height: 0px !important;
-                    max-height: 0px !important;
+                    height: 1px !important;
+                    min-height: 1px !important;
+                    max-height: 1px !important;
                     overflow: hidden !important;
                     opacity: 0 !important;
                     pointer-events: none !important;
@@ -309,8 +323,7 @@
                 }
                 div[data-ad-preview],
                 div[data-testid="post_ad"],
-                div[data-testid="suggested-users"],
-                div[aria-label="Ad" i]:not(main):not([role="feed"]) {
+                div[data-testid="suggested-users"] {
                     display: none !important;
                 }
             `;
@@ -373,7 +386,6 @@
                         article.style.setProperty('margin', '0', 'important');
                         article.style.setProperty('padding', '0', 'important');
                         article.dataset.fgAdFiltered = 'true';
-                        window.dispatchEvent(new Event('scroll'));
                     }
                 });
 

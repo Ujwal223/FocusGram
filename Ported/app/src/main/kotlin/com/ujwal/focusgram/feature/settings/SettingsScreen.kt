@@ -2,6 +2,11 @@ package com.ujwal.focusgram.feature.settings
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.ujwal.focusgram.R
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
@@ -49,6 +54,7 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StayCurrentPortrait
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -126,9 +132,12 @@ fun SettingsScreen(
     onNavigateScreenTime: () -> Unit,
     onNavigateAppLock: () -> Unit,
     onWatchAd: () -> Unit = {},
+    onWatchAdWithReward: (((suspend () -> Unit) -> Unit))? = null,
     onNavigateUrl: (String) -> Unit = {},
     screenTimeDao: ScreenTimeDao? = null,
     reelHistory: ReelHistory? = null,
+    currentSubpage: SettingsSubpage = SettingsSubpage.MAIN,
+    onSubpageChange: (SettingsSubpage) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val settings by repository.settingsFlow.collectAsState(initial = FocusSettings())
@@ -136,14 +145,28 @@ fun SettingsScreen(
     val context = LocalContext.current
 
     val mainListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
-    var currentSubpage by remember { mutableStateOf(SettingsSubpage.MAIN) }
+    var activeSubpage by remember(currentSubpage) { mutableStateOf(currentSubpage) }
+    val setSubpage: (SettingsSubpage) -> Unit = { page ->
+        activeSubpage = page
+        onSubpageChange(page)
+    }
     var showLegalDialog by remember { mutableStateOf(false) }
     var showDeveloperDialog by remember { mutableStateOf(false) }
 
+    var pendingRewardAction by remember { mutableStateOf<(suspend () -> Unit)?>(null) }
+    var adDialogReason by remember { mutableStateOf<String?>(null) }
+    var showSupportAdDialog by remember { mutableStateOf(false) }
+
+    val onRequestAdReward: (action: suspend () -> Unit, reason: String) -> Unit = { action, reason ->
+        pendingRewardAction = action
+        adDialogReason = reason
+        showSupportAdDialog = true
+    }
+
     // Intercept back presses: go back to MAIN subpage first, or pop screen
     BackHandler {
-        if (currentSubpage != SettingsSubpage.MAIN) {
-            currentSubpage = SettingsSubpage.MAIN
+        if (activeSubpage != SettingsSubpage.MAIN) {
+            setSubpage(SettingsSubpage.MAIN)
         } else {
             onBack()
         }
@@ -271,6 +294,78 @@ fun SettingsScreen(
         )
     }
 
+    // Support Ad Dialog
+    if (showSupportAdDialog && adDialogReason != null) {
+        AlertDialog(
+            onDismissRequest = {
+                showSupportAdDialog = false
+                pendingRewardAction = null
+            },
+            containerColor = Color(0xFF1C1C1E),
+            title = {
+                Text(
+                    text = "Support FocusGram ❤️",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = adDialogReason ?: "Please watch an ad in order to toggle this setting.",
+                        color = Color.White,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp
+                    )
+                    Text(
+                        text = "Your 20 seconds can provide a huge contribution to the continuous development and improvement of FocusGram.\n\nThank you for supporting this project! ❤️",
+                        color = Color(0xFF8E8E93),
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showSupportAdDialog = false
+                        val action = pendingRewardAction
+                        pendingRewardAction = null
+                        if (action != null) {
+                            if (onWatchAdWithReward != null) {
+                                onWatchAdWithReward(action)
+                            } else {
+                                scope.launch { action() }
+                                onWatchAd()
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.White,
+                        contentColor = Color.Black
+                    ),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Text("Watch Ad & Continue", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        showSupportAdDialog = false
+                        pendingRewardAction = null
+                    },
+                    border = BorderStroke(1.dp, Color(0xFF3A3A3C)),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -285,8 +380,8 @@ fun SettingsScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = {
-                if (currentSubpage != SettingsSubpage.MAIN) {
-                    currentSubpage = SettingsSubpage.MAIN
+                if (activeSubpage != SettingsSubpage.MAIN) {
+                    setSubpage(SettingsSubpage.MAIN)
                 } else {
                     onBack()
                 }
@@ -298,7 +393,7 @@ fun SettingsScreen(
                 )
             }
             Text(
-                text = when (currentSubpage) {
+                text = when (activeSubpage) {
                     SettingsSubpage.MAIN -> "Settings and activity"
                     SettingsSubpage.FOCUS -> "Focus Mode"
                     SettingsSubpage.GUARDRAILS -> "Time Control & Guardrails"
@@ -316,12 +411,12 @@ fun SettingsScreen(
         }
 
         // Subpage Router
-        when (currentSubpage) {
+        when (activeSubpage) {
             SettingsSubpage.MAIN -> {
                 MainSettingsContent(
                     settings = settings,
                     listState = mainListState,
-                    onNavigateSubpage = { currentSubpage = it },
+                    onNavigateSubpage = { setSubpage(it) },
                     onNavigateAppLock = onNavigateAppLock,
                     onNavigateScreenTime = onNavigateScreenTime,
                     onNavigateReelsHistory = onNavigateReelsHistory,
@@ -333,7 +428,11 @@ fun SettingsScreen(
                 )
             }
             SettingsSubpage.FOCUS -> {
-                FocusModeSubpage(repository = repository, settings = settings)
+                FocusModeSubpage(
+                    repository = repository,
+                    settings = settings,
+                    onRequestAdReward = onRequestAdReward
+                )
             }
             SettingsSubpage.GUARDRAILS -> {
                 GuardrailsSubpage(
@@ -347,6 +446,7 @@ fun SettingsScreen(
                 ExtrasSubpage(
                     repository = repository,
                     settings = settings,
+                    onRequestAdReward = onRequestAdReward,
                     onNavigateUrl = { url ->
                         onNavigateUrl(url)
                         onBack()
@@ -585,7 +685,7 @@ private fun MainSettingsContent(
             IOSGroupedCard {
                 IOSSettingsRow(
                     title = "Extras",
-                    subtitle = "Startup launch page, download media",
+                    subtitle = "Startup launch page, media downloader",
                     icon = Icons.Default.Star,
                     iconBgColor = IOSBlue,
                     onClick = { onNavigateSubpage(SettingsSubpage.EXTRAS) },
@@ -713,7 +813,8 @@ private fun MainSettingsContent(
 @Composable
 private fun FocusModeSubpage(
     repository: SettingsRepository,
-    settings: FocusSettings
+    settings: FocusSettings,
+    onRequestAdReward: (action: suspend () -> Unit, reason: String) -> Unit = { _, _ -> }
 ) {
     val scope = rememberCoroutineScope()
 
@@ -887,7 +988,16 @@ private fun FocusModeSubpage(
                     icon = Icons.Default.Block,
                     iconBgColor = IOSGreen,
                     checked = settings.noAds,
-                    onCheckedChange = { scope.launch { repository.setNoAds(it) } },
+                    onCheckedChange = { willEnable ->
+                        if (willEnable) {
+                            onRequestAdReward(
+                                { repository.setNoAds(true) },
+                                "Please watch an ad in order to re-enable Ad Blocking."
+                            )
+                        } else {
+                            scope.launch { repository.setNoAds(false) }
+                        }
+                    },
                     showDivider = false
                 )
             }
@@ -1347,9 +1457,11 @@ private fun GhostModeSubpage(
 private fun ExtrasSubpage(
     repository: SettingsRepository,
     settings: FocusSettings,
+    onRequestAdReward: (action: suspend () -> Unit, reason: String) -> Unit = { _, _ -> },
     onNavigateUrl: (String) -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
+    var showLaunchPageModal by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier
@@ -1360,56 +1472,38 @@ private fun ExtrasSubpage(
         item {
             IOSSectionTitle(title = "STARTUP")
             IOSGroupedCard {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                ) {
-                    Text(
-                        text = "Launch Page",
-                        color = Color.White,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Choose which page opens when you launch FocusGram.",
-                        color = Color(0xFF8E8E93),
-                        fontSize = 13.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    val pages = listOf(
-                        "home" to "Home Feed",
-                        "following" to "Following Feed",
-                        "favorites" to "Favorites Feed",
-                        "direct" to "Direct Messages"
-                    )
-
-                    pages.forEach { (key, label) ->
-                        val isSelected = settings.startupPage == key
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (isSelected) Color.White.copy(alpha = 0.1f) else Color.Transparent)
-                                .clickable { scope.launch { repository.setStartupPage(key) } }
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = label,
-                                color = if (isSelected) Color.White else Color(0xFF8E8E93),
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                fontSize = 14.sp
-                            )
-                            if (isSelected) {
-                                Text("✓", color = Color.White, fontWeight = FontWeight.Bold)
+                val isCustomLaunch = settings.startupPage != "home"
+                IOSSettingsRow(
+                    title = "Launch Page",
+                    subtitle = if (isCustomLaunch) "Start on ${when (settings.startupPage) { "following" -> "Following Feed"; "favorites" -> "Favorites Feed"; "direct" -> "Direct Messages"; else -> "Home Feed" }}" else "Opens default Instagram Home",
+                    icon = Icons.AutoMirrored.Filled.OpenInNew,
+                    iconBgColor = IOSBlue,
+                    checked = isCustomLaunch,
+                    onCheckedChange = { isChecked ->
+                        scope.launch {
+                            if (isChecked) {
+                                repository.setStartupPage("following")
+                                showLaunchPageModal = true
+                            } else {
+                                repository.setStartupPage("home")
                             }
                         }
-                    }
+                    },
+                    showDivider = isCustomLaunch
+                )
+                if (isCustomLaunch) {
+                    IOSSettingsRow(
+                        title = "Selected Target",
+                        subtitle = "Choose screen to open upon launch",
+                        trailingText = when (settings.startupPage) {
+                            "following" -> "Following Feed"
+                            "favorites" -> "Favorites Feed"
+                            "direct" -> "Direct Messages"
+                            else -> "Home Feed"
+                        },
+                        onClick = { showLaunchPageModal = true },
+                        showDivider = false
+                    )
                 }
             }
         }
@@ -1419,12 +1513,38 @@ private fun ExtrasSubpage(
             IOSSectionTitle(title = "MEDIA")
             IOSGroupedCard {
                 IOSSettingsRow(
-                    title = "Download Media (Feed + Reels)",
-                    subtitle = "Adds a download option on posts and reels",
+                    title = "Media Downloader",
+                    subtitle = "Download media from Feed, Reels, and Profiles",
                     icon = Icons.Default.Star,
                     iconBgColor = IOSOrange,
                     checked = settings.videoDownloadEnabled,
-                    onCheckedChange = { scope.launch { repository.setVideoDownloadEnabled(it) } },
+                    onCheckedChange = { newState ->
+                        val actionDesc = if (newState) "enable" else "disable"
+                        onRequestAdReward(
+                            { repository.setVideoDownloadEnabled(newState) },
+                            "Please watch an ad in order to $actionDesc the Media Downloader."
+                        )
+                    },
+                    showDivider = false
+                )
+            }
+        }
+
+        // DISPLAY
+        item {
+            IOSSectionTitle(title = "DISPLAY")
+            IOSGroupedCard {
+                IOSSettingsRow(
+                    title = "Portrait Only",
+                    subtitle = "Lock app orientation to portrait mode",
+                    icon = Icons.Default.StayCurrentPortrait,
+                    iconBgColor = IOSBlue,
+                    checked = settings.portraitOnly,
+                    onCheckedChange = { isChecked ->
+                        scope.launch {
+                            repository.setPortraitOnly(isChecked)
+                        }
+                    },
                     showDivider = false
                 )
             }
@@ -1450,6 +1570,31 @@ private fun ExtrasSubpage(
         item {
             Spacer(modifier = Modifier.height(40.dp))
         }
+    }
+
+    if (showLaunchPageModal) {
+        val launchPages = remember {
+            listOf(
+                "home" to "Home Feed",
+                "following" to "Following Feed",
+                "favorites" to "Favorites Feed",
+                "direct" to "Direct Messages"
+            )
+        }
+        val currentIdx = remember(settings.startupPage) {
+            launchPages.indexOfFirst { it.first == settings.startupPage }.coerceAtLeast(0)
+        }
+        WheelPickerModalDialog(
+            title = "Launch Page",
+            subtitle = "Choose which page opens when you launch FocusGram",
+            options = launchPages,
+            initialIndex = currentIdx,
+            onDismiss = { showLaunchPageModal = false },
+            onConfirm = { option ->
+                scope.launch { repository.setStartupPage(option.first) }
+            },
+            labelProvider = { it.second }
+        )
     }
 }
 
@@ -1496,6 +1641,26 @@ private fun NotificationsSubpage(
     settings: FocusSettings
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ -> }
+
+    val checkAndRequestNotificationPermission = { onGranted: () -> Unit ->
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                onGranted()
+            }
+        } else {
+            onGranted()
+        }
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -1528,7 +1693,16 @@ private fun NotificationsSubpage(
                     icon = Icons.Default.Notifications,
                     iconBgColor = IOSTeal,
                     checked = settings.notifySessionEnd,
-                    onCheckedChange = { scope.launch { repository.setNotifySessionEnd(it) } }
+                    onCheckedChange = { willEnable ->
+                        if (willEnable) {
+                            checkAndRequestNotificationPermission {
+                                scope.launch { repository.setNotifySessionEnd(true) }
+                            }
+                            scope.launch { repository.setNotifySessionEnd(true) }
+                        } else {
+                            scope.launch { repository.setNotifySessionEnd(false) }
+                        }
+                    }
                 )
                 IOSSettingsRow(
                     title = "Persistent Status Notification",
@@ -1536,7 +1710,16 @@ private fun NotificationsSubpage(
                     icon = Icons.Default.Timer,
                     iconBgColor = IOSBlue,
                     checked = settings.notifyPersistent,
-                    onCheckedChange = { scope.launch { repository.setNotifyPersistent(it) } },
+                    onCheckedChange = { willEnable ->
+                        if (willEnable) {
+                            checkAndRequestNotificationPermission {
+                                scope.launch { repository.setNotifyPersistent(true) }
+                            }
+                            scope.launch { repository.setNotifyPersistent(true) }
+                        } else {
+                            scope.launch { repository.setNotifyPersistent(false) }
+                        }
+                    },
                     showDivider = false
                 )
             }

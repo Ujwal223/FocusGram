@@ -12,6 +12,7 @@ room = "2.6.1"
 datastore = "1.1.2"
 securityCrypto = "1.1.0-alpha06"
 biometric = "1.2.0-alpha05"
+fragment = "1.8.6"
 geckoview = "157.0.20260924084938"
 coroutines = "1.10.1"
 junit = "4.13.2"
@@ -47,6 +48,7 @@ androidx-datastore-preferences = { group = "androidx.datastore", name = "datasto
 # Security & Biometrics
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 androidx-biometric = { group = "androidx.biometric", name = "biometric", version.ref = "biometric" }
+androidx-fragment-ktx = { group = "androidx.fragment", name = "fragment-ktx", version.ref = "fragment" }
 
 # Coroutines
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }

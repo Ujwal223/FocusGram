@@ -34,6 +34,9 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
     var onReelViewed: ((url: String, title: String, author: String, thumbnail: String) -> Unit)? = null
     var onReelMeta: ((url: String, title: String, author: String) -> Unit)? = null
     var onDownloadRequested: ((url: String, filename: String) -> Unit)? = null
+    var onDownloadError: ((error: String) -> Unit)? = null
+    var onDownloadStarted: ((filename: String) -> Unit)? = null
+    var onAuthStateChanged: ((isAuthenticated: Boolean, isAuthPage: Boolean) -> Unit)? = null
 
     /**
      * Installs and activates built-in content blocking and FocusGram controller from APK assets.
@@ -42,9 +45,16 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
         contentBlockerExtension?.let { return Result.success(it) }
         return try {
             Log.i(TAG, "Mounting built-in Content Blocker WebExtension from assets...")
-            val extension = runtime.webExtensionController
-                .ensureBuiltIn(CONTENT_BLOCKER_ASSET_URI, CONTENT_BLOCKER_EXTENSION_ID)
-                .await()
+            val extension = try {
+                runtime.webExtensionController
+                    .installBuiltIn(CONTENT_BLOCKER_ASSET_URI)
+                    .await()
+            } catch (e: Exception) {
+                Log.w(TAG, "installBuiltIn fallback to ensureBuiltIn: ${e.message}")
+                runtime.webExtensionController
+                    .ensureBuiltIn(CONTENT_BLOCKER_ASSET_URI, CONTENT_BLOCKER_EXTENSION_ID)
+                    .await()
+            }
 
             if (extension != null) {
                 try {
@@ -177,12 +187,32 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                     }
                 }
             }
+            "downloadStarted" -> {
+                val filename = json.optString("filename")
+                Log.d(TAG, "Received downloadStarted from web: filename=$filename")
+                mainHandler.post {
+                    onDownloadStarted?.invoke(filename)
+                }
+            }
             "downloadMedia" -> {
                 val mediaUrl = json.optString("url")
                 val filename = json.optString("filename")
-                Log.d(TAG, "Received downloadMedia from web: url=$mediaUrl, filename=$filename")
+                val error = json.optString("error")
+                Log.d(TAG, "Received downloadMedia from web: url=$mediaUrl, filename=$filename, error=$error")
                 mainHandler.post {
-                    onDownloadRequested?.invoke(mediaUrl, filename)
+                    if (mediaUrl.isNotBlank()) {
+                        onDownloadRequested?.invoke(mediaUrl, filename)
+                    } else if (error.isNotBlank()) {
+                        onDownloadError?.invoke(error)
+                    }
+                }
+            }
+            "authStateChanged" -> {
+                val isAuthenticated = json.optBoolean("isAuthenticated", true)
+                val isAuthPage = json.optBoolean("isAuthPage", false)
+                Log.d(TAG, "Received authStateChanged from web: isAuthenticated=$isAuthenticated, isAuthPage=$isAuthPage")
+                mainHandler.post {
+                    onAuthStateChanged?.invoke(isAuthenticated, isAuthPage)
                 }
             }
             "getSettings" -> {
@@ -219,6 +249,7 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                 put("grayscale", settings.grayscaleEnabled)
                 put("minimalMode", settings.minimalModeEnabled)
                 put("videoDownloadEnabled", settings.videoDownloadEnabled)
+                put("portraitOnly", settings.portraitOnly)
                 put("ghostModeEnabled", settings.ghostModeEnabled)
                 put("ghostHideStorySeen", settings.ghostHideStorySeen)
                 put("ghostHideDirectSeen", settings.ghostHideDirectSeen)

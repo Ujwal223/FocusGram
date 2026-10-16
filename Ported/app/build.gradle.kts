@@ -126,6 +126,7 @@ dependencies {
     // Security & Biometric
     implementation(libs.androidx.security.crypto)
     implementation(libs.androidx.biometric)
+    implementation(libs.androidx.fragment.ktx)
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.core)
@@ -158,6 +159,8 @@ configurations.all {
             "androidx.lifecycle:lifecycle-common-java8:2.8.7",
             "androidx.core:core:1.15.0",
             "androidx.core:core-ktx:1.15.0",
+            "androidx.fragment:fragment:1.8.6",
+            "androidx.fragment:fragment-ktx:1.8.6",
             "org.jetbrains.kotlin:kotlin-stdlib:2.0.21",
             "org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.0.21",
             "org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.0.21",

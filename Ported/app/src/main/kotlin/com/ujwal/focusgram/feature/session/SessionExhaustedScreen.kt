@@ -28,16 +28,19 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ujwal.focusgram.core.ui.theme.PureBlack
+import com.ujwal.focusgram.core.utils.HapticHelper
 
 /**
  * SessionExhaustedScreen
@@ -54,6 +57,13 @@ fun SessionExhaustedScreen(
     onWatchAdToExtend: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+
+    // Trigger physical session completion vibration alert (double buzz)
+    LaunchedEffect(Unit) {
+        HapticHelper.performSessionCompletionAlert(context)
+    }
+
     // Lock down back navigation: back button will exit the app, never return to webview
     BackHandler(enabled = true) {
         onExit()

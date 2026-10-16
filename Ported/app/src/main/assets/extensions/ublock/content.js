@@ -11,23 +11,40 @@
     const COSMETIC_STYLE_ID = 'focusgram-cosmetic-filters';
     let adBlockingEnabled = true;
 
+    function isAuthPage() {
+        try {
+            const path = (window.location.pathname || '').toLowerCase();
+            if (path.startsWith('/accounts') || path.startsWith('/login') || path.startsWith('/signup')) {
+                return true;
+            }
+            const cookies = document.cookie || '';
+            const hasAuthCookie = cookies.includes('sessionid=') || cookies.includes('ds_user_id=');
+            if ((path === '/' || path === '') && !hasAuthCookie) {
+                return true;
+            }
+            if (document.getElementById('loginForm') || document.querySelector('form[action*="login"], input[name="password"]')) {
+                return true;
+            }
+        } catch (_) {}
+        return false;
+    }
+
+    if (isAuthPage()) {
+        const existing = document.getElementById(COSMETIC_STYLE_ID);
+        if (existing) existing.remove();
+        return; // NEVER run on auth, login, or signup pages
+    }
+
     const CSS_RULES = `
-        /* Hide sponsored feed articles and containers without breaking Infinite Scroll IntersectionObserver */
+        /* Hide sponsored feed articles without breaking Infinite Scroll IntersectionObserver or feed containers */
         div[data-ad-preview],
         div[data-testid="post_ad"],
-        div[aria-label*="Sponsored" i]:not(main):not([role="feed"]),
-        div[aria-label*="sponsored" i]:not(main):not([role="feed"]),
-        div[aria-label="Ad" i]:not(main):not([role="feed"]),
-        article:has([aria-label="Ad" i]),
-        article:has([aria-label*="Sponsored" i]),
         article:has(a[href*="/ads/"]),
-        article:has(a[href*="/ad_"]),
         article:has(a[href*="ads.instagram.com"]),
         article[data-ad-filtered="true"] {
-            display: none !important;
-            height: 0px !important;
-            min-height: 0px !important;
-            max-height: 0px !important;
+            height: 1px !important;
+            min-height: 1px !important;
+            max-height: 1px !important;
             overflow: hidden !important;
             opacity: 0 !important;
             pointer-events: none !important;
@@ -71,7 +88,7 @@
     ];
 
     const STRICT_AD_CTAS = [
-        'shop now', 'install now', 'sign up', 'apply now',
+        'shop now', 'install now', 'apply now',
         'book now', 'order now', 'get offer'
     ];
 
@@ -127,7 +144,6 @@
                 article.style.setProperty('margin', '0', 'important');
                 article.style.setProperty('padding', '0', 'important');
                 article.dataset.adFiltered = 'true';
-                window.dispatchEvent(new Event('scroll'));
             }
         }
 

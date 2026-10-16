@@ -74,10 +74,11 @@ class SettingsRepository(private val context: Context) {
             isFirstRun = prefs[KEY_IS_FIRST_RUN] ?: false,
 
             startupPage = prefs[KEY_STARTUP_PAGE] ?: "home",
-            videoDownloadEnabled = prefs[KEY_VIDEO_DOWNLOAD_ENABLED] ?: true,
+            videoDownloadEnabled = prefs[KEY_VIDEO_DOWNLOAD_ENABLED] ?: false,
             sanitizeLinks = prefs[KEY_SANITIZE_LINKS] ?: true,
             notifySessionEnd = prefs[KEY_NOTIFY_SESSION_END] ?: false,
             notifyPersistent = prefs[KEY_NOTIFY_PERSISTENT] ?: false,
+            portraitOnly = prefs[KEY_PORTRAIT_ONLY] ?: true,
 
             ghostModeEnabled = prefs[KEY_GHOST_MODE_ENABLED] ?: false,
             ghostHideStorySeen = prefs[KEY_GHOST_HIDE_STORY_SEEN] ?: true,
@@ -154,6 +155,7 @@ class SettingsRepository(private val context: Context) {
     suspend fun setSanitizeLinks(enabled: Boolean) = setBoolean(KEY_SANITIZE_LINKS, enabled)
     suspend fun setNotifySessionEnd(enabled: Boolean) = setBoolean(KEY_NOTIFY_SESSION_END, enabled)
     suspend fun setNotifyPersistent(enabled: Boolean) = setBoolean(KEY_NOTIFY_PERSISTENT, enabled)
+    suspend fun setPortraitOnly(enabled: Boolean) = setBoolean(KEY_PORTRAIT_ONLY, enabled)
 
     suspend fun addInstaMinutes(minutes: Int) {
         context.dataStore.edit { prefs ->
@@ -286,6 +288,7 @@ class SettingsRepository(private val context: Context) {
         val KEY_SANITIZE_LINKS = booleanPreferencesKey("set_sanitize_links")
         val KEY_NOTIFY_SESSION_END = booleanPreferencesKey("set_notify_session_end")
         val KEY_NOTIFY_PERSISTENT = booleanPreferencesKey("set_notify_persistent")
+        val KEY_PORTRAIT_ONLY = booleanPreferencesKey("portrait_only")
 
         val KEY_GHOST_MODE_ENABLED = booleanPreferencesKey("ghost_mode_enabled")
         val KEY_GHOST_HIDE_STORY_SEEN = booleanPreferencesKey("ghost_hide_story_seen")

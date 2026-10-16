@@ -8,6 +8,19 @@
 'use strict';
 
 (function () {
+    function isAuthPage() {
+        try {
+            var path = (window.location.pathname || '').toLowerCase();
+            if (path.startsWith('/accounts') || path.startsWith('/login') || path.startsWith('/signup')) return true;
+            var c = document.cookie || '';
+            if (!c.includes('sessionid=') && !c.includes('ds_user_id=')) return true;
+            if (document.getElementById('loginForm') || document.querySelector('form[action*="login"], input[name="password"]')) return true;
+        } catch (_) {}
+        return false;
+    }
+
+    if (isAuthPage()) return; // Leave login/signup completely untouched
+
     if (window.__fgAutoplayPatched) return;
     window.__fgAutoplayPatched = true;
 

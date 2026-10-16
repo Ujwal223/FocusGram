@@ -8,6 +8,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.view.HapticFeedbackConstants
+import com.ujwal.focusgram.core.utils.HapticHelper
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -383,41 +384,10 @@ private fun getVibrator(context: Context): Vibrator? {
 
 /**
  * Perform crisp haptic tick even when user has system "touch feedback" disabled.
- * Uses both View ignore flags, and falls back to physical Vibrator with USAGE_ALARM.
+ * Uses direct physical vibration (35ms pulse) to ensure tactile feedback on all devices
+ * (both ERM and LRA motors, like MX Player), without relying on unsupported predefined effects.
  */
 private fun performWheelHaptic(context: Context, view: android.view.View) {
-    try {
-        // 1. Try View haptics with ignore flags
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING
-        } else {
-            @Suppress("DEPRECATION")
-            HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING or HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
-        }
-        val performed = view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK, flags)
-        if (performed) return
-
-        // 2. Hardware Vibrator fallback with USAGE_ALARM to bypass system touch vibration disablement
-        val vibrator = getVibrator(context) ?: return
-        if (!vibrator.hasVibrator()) return
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val attributes = VibrationAttributes.Builder()
-                .setUsage(VibrationAttributes.USAGE_ALARM)
-                .build()
-            val effect = VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK)
-            vibrator.vibrate(effect, attributes)
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val audioAttributes = AudioAttributes.Builder()
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .setUsage(AudioAttributes.USAGE_ALARM)
-                .build()
-            val effect = VibrationEffect.createOneShot(12L, VibrationEffect.DEFAULT_AMPLITUDE)
-            @Suppress("DEPRECATION")
-            vibrator.vibrate(effect, audioAttributes)
-        } else {
-            @Suppress("DEPRECATION")
-            vibrator.vibrate(10L)
-        }
-    } catch (_: Exception) {}
+    HapticHelper.performWheelTick(context, view)
 }
+
