@@ -61,6 +61,9 @@ fun AppLockSetupScreen(
     settingsRepository: SettingsRepository,
     onBack: () -> Unit,
     onSuccess: () -> Unit,
+    title: String = "Set App Lock PIN",
+    subtitle: String = "Used to unlock FocusGram and secure your mindful limits.",
+    isChatPinSetup: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     var step by remember { mutableStateOf(1) } // 1: Enter, 2: Confirm
@@ -89,8 +92,13 @@ fun AppLockSetupScreen(
                     if (firstPin == confirmPin) {
                         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                         scope.launch {
-                            encryptedStorage.savePin(confirmPin)
-                            settingsRepository.setAppLock(enabled = true, biometric = false)
+                            if (isChatPinSetup) {
+                                encryptedStorage.saveChatPin(confirmPin)
+                                settingsRepository.setUseSeparateChatPin(true)
+                            } else {
+                                encryptedStorage.savePin(confirmPin)
+                                settingsRepository.setAppLock(enabled = true, biometric = false)
+                            }
                             onSuccess()
                         }
                     } else {
@@ -121,7 +129,7 @@ fun AppLockSetupScreen(
             .padding(WindowInsets.statusBars.asPaddingValues())
     ) {
         FocusGramTopBar(
-            title = "Set App Lock PIN",
+            title = title,
             onBack = onBack
         )
 
@@ -160,7 +168,7 @@ fun AppLockSetupScreen(
             Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = "Used to unlock FocusGram and secure your mindful limits.",
+                text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary
             )

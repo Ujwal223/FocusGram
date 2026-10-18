@@ -27,6 +27,14 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        try {
+            val appIcon = com.ujwal.focusgram.core.datastore.SettingsRepository(this).getSettingsSync().appIcon
+            com.ujwal.focusgram.core.utils.AppIconManager.applyTaskDescription(this, appIcon)
+        } catch (_: Exception) {}
+    }
+
     private fun applyHighRefreshRate() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

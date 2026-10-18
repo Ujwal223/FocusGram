@@ -47,6 +47,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -152,9 +153,11 @@ fun AdsterraAdScreen(
     onRewardClaimed: () -> Unit,
     onCancel: () -> Unit
 ) {
-    var timerCycle by remember { mutableIntStateOf(0) }
-    var elapsedSeconds by remember { mutableIntStateOf(0) }
-    var adsClicked by remember { mutableIntStateOf(0) }
+    var timerCycle by rememberSaveable { mutableIntStateOf(0) }
+    var elapsedSeconds by rememberSaveable { mutableIntStateOf(0) }
+    var adsClicked by rememberSaveable { mutableIntStateOf(0) }
+    var lastClickedUrl by rememberSaveable { mutableStateOf("") }
+    var lastClickTime by rememberSaveable { mutableStateOf(0L) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
 
     val isSettingToggle = sessionType == "setting_toggle"
@@ -162,9 +165,17 @@ fun AdsterraAdScreen(
     val bothClicked = adsClicked >= 2
     val isComplete = if (isSettingToggle) timerDone else (timerDone && bothClicked)
 
-    // 20s Timer Loop - restarts cleanly on timerCycle increment
+    // Ensure clean countdown and state when entering a setting toggle session
+    LaunchedEffect(sessionType) {
+        if (isSettingToggle) {
+            elapsedSeconds = 0
+            adsClicked = 0
+            timerCycle++
+        }
+    }
+
+    // 20s Timer Loop - continues cleanly from saved elapsedSeconds without resetting
     LaunchedEffect(timerCycle) {
-        elapsedSeconds = 0
         while (elapsedSeconds < requiredSeconds) {
             delay(1000L)
             elapsedSeconds++
@@ -308,25 +319,43 @@ fun AdsterraAdScreen(
                             }
                             setBackgroundColor(0xFF111111.toInt())
 
+                            fun handleAdClick(url: String): Boolean {
+                                val clean = url.trim()
+                                if (clean.isNotBlank() && !clean.contains("effectivecpmnetwork.com") && !clean.contains("highperformanceformat.com") && !clean.startsWith("about:") && !clean.startsWith("data:")) {
+                                    val now = System.currentTimeMillis()
+                                    if (clean != lastClickedUrl || now - lastClickTime > 1500L) {
+                                        lastClickedUrl = clean
+                                        lastClickTime = now
+                                        if (adsClicked < 2) {
+                                            adsClicked++
+                                        }
+                                    }
+                                    try {
+                                        val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(clean)).apply {
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        ctx.startActivity(browserIntent)
+                                    } catch (_: Exception) {}
+                                    return true
+                                }
+                                return false
+                            }
+
                             webViewClient = object : WebViewClient() {
                                 override fun shouldOverrideUrlLoading(
                                     view: WebView?,
                                     request: WebResourceRequest?
                                 ): Boolean {
                                     val url = request?.url?.toString() ?: ""
-                                    if (url.isNotBlank() && !url.contains("effectivecpmnetwork.com") && !url.contains("highperformanceformat.com") && !url.startsWith("about:")) {
-                                        if (adsClicked < 2) {
-                                            adsClicked++
-                                        }
-                                        try {
-                                            val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                            }
-                                            ctx.startActivity(browserIntent)
-                                        } catch (_: Exception) {}
-                                        return true
-                                    }
-                                    return false
+                                    return handleAdClick(url)
+                                }
+
+                                @Deprecated("Deprecated in Java")
+                                override fun shouldOverrideUrlLoading(
+                                    view: WebView?,
+                                    url: String?
+                                ): Boolean {
+                                    return handleAdClick(url ?: "")
                                 }
                             }
 
@@ -339,25 +368,34 @@ fun AdsterraAdScreen(
                                 ): Boolean {
                                     val transport = resultMsg?.obj as? WebView.WebViewTransport
                                     val tempWebView = WebView(ctx).apply {
+                                        settings.javaScriptEnabled = true
+                                        settings.domStorageEnabled = true
+                                        settings.setSupportMultipleWindows(true)
                                         webViewClient = object : WebViewClient() {
                                             override fun shouldOverrideUrlLoading(
                                                 view: WebView?,
                                                 request: WebResourceRequest?
                                             ): Boolean {
                                                 val url = request?.url?.toString() ?: ""
-                                                if (url.isNotBlank() && !url.startsWith("about:")) {
-                                                    if (adsClicked < 2) {
-                                                        adsClicked++
+                                                return handleAdClick(url)
+                                            }
+
+                                            @Deprecated("Deprecated in Java")
+                                            override fun shouldOverrideUrlLoading(
+                                                view: WebView?,
+                                                url: String?
+                                            ): Boolean {
+                                                return handleAdClick(url ?: "")
+                                            }
+
+                                            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                                                super.onPageStarted(view, url, favicon)
+                                                val u = url ?: ""
+                                                if (u.isNotBlank() && !u.startsWith("about:") && !u.startsWith("data:")) {
+                                                    if (!u.contains("effectivecpmnetwork.com") && !u.contains("highperformanceformat.com")) {
+                                                        handleAdClick(u)
                                                     }
-                                                    try {
-                                                        val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                        }
-                                                        ctx.startActivity(browserIntent)
-                                                    } catch (_: Exception) {}
-                                                    return true
                                                 }
-                                                return false
                                             }
                                         }
                                     }
@@ -383,7 +421,11 @@ fun AdsterraAdScreen(
             ) {
                 // Primary Claim Button: Apple Style Pill Button
                 Button(
-                    onClick = onRewardClaimed,
+                    onClick = {
+                        elapsedSeconds = 0
+                        adsClicked = 0
+                        onRewardClaimed()
+                    },
                     enabled = isComplete,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -419,7 +461,10 @@ fun AdsterraAdScreen(
                     Button(
                         onClick = {
                             timerCycle++
+                            elapsedSeconds = 0
                             adsClicked = 0
+                            lastClickedUrl = ""
+                            lastClickTime = 0L
                             webViewRef?.loadDataWithBaseURL("https://effectivecpmnetwork.com", AD_HTML, "text/html", "UTF-8", null)
                         },
                         modifier = Modifier

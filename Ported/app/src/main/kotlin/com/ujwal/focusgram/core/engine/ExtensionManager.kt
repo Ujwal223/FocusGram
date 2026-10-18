@@ -6,6 +6,7 @@ import com.ujwal.focusgram.core.model.IslandMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.json.JSONArray
 import org.json.JSONObject
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
@@ -28,6 +29,7 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
 
     var onOpenSettings: (() -> Unit)? = null
     var onInputFocused: ((Boolean) -> Unit)? = null
+    var onBioInputFocused: ((Boolean) -> Unit)? = null
     var onUrlChanged: ((String) -> Unit)? = null
     var onModalOrChatActive: ((Boolean) -> Unit)? = null
     var onThemeChanged: ((String) -> Unit)? = null
@@ -37,6 +39,9 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
     var onDownloadError: ((error: String) -> Unit)? = null
     var onDownloadStarted: ((filename: String) -> Unit)? = null
     var onAuthStateChanged: ((isAuthenticated: Boolean, isAuthPage: Boolean) -> Unit)? = null
+    var onThreadUsernameMapped: ((threadId: String, usernames: List<String>) -> Unit)? = null
+    var onToggleChatLock: ((threadId: String, username: String?) -> Unit)? = null
+    var onRequestUnlockChat: ((threadId: String, username: String?, targetUrl: String?) -> Unit)? = null
 
     /**
      * Installs and activates built-in content blocking and FocusGram controller from APK assets.
@@ -136,6 +141,11 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                 Log.d(TAG, "Received inputFocused from Instagram web: $focused")
                 mainHandler.post { onInputFocused?.invoke(focused) }
             }
+            "bioInputFocused" -> {
+                val focused = json.optBoolean("focused", false)
+                Log.d(TAG, "Received bioInputFocused from Instagram web: $focused")
+                mainHandler.post { onBioInputFocused?.invoke(focused) }
+            }
             "urlChanged" -> {
                 val url = json.optString("url")
                 if (url.isNotEmpty()) {
@@ -215,6 +225,52 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                     onAuthStateChanged?.invoke(isAuthenticated, isAuthPage)
                 }
             }
+            "threadUsernameMapped" -> {
+                val threadId = json.optString("threadId")
+                val usernamesArr = json.optJSONArray("usernames")
+                val singleUser = json.optString("username").takeIf { it.isNotBlank() }
+                val displayName = json.optString("displayName").takeIf { it.isNotBlank() }
+                val list = mutableListOf<String>()
+                if (usernamesArr != null) {
+                    for (i in 0 until usernamesArr.length()) {
+                        val u = usernamesArr.optString(i)
+                        if (u.isNotBlank()) list.add(u)
+                    }
+                }
+                if (singleUser != null && !list.contains(singleUser)) {
+                    list.add(0, singleUser)
+                }
+                if (displayName != null && !list.contains(displayName)) {
+                    list.add(displayName)
+                }
+                if (threadId.isNotBlank()) {
+                    Log.d(TAG, "Received threadUsernameMapped from web: threadId=$threadId, usernames=$list, displayName=$displayName")
+                    mainHandler.post {
+                        onThreadUsernameMapped?.invoke(threadId, list)
+                    }
+                }
+            }
+            "requestUnlockChat" -> {
+                val threadId = json.optString("threadId")
+                val username = json.optString("username").takeIf { it.isNotBlank() }
+                val targetUrl = json.optString("targetUrl").takeIf { it.isNotBlank() }
+                if (threadId.isNotBlank()) {
+                    Log.d(TAG, "Received requestUnlockChat from web: threadId=$threadId, username=$username, targetUrl=$targetUrl")
+                    mainHandler.post {
+                        onRequestUnlockChat?.invoke(threadId, username, targetUrl)
+                    }
+                }
+            }
+            "toggleChatLock" -> {
+                val threadId = json.optString("threadId")
+                val username = json.optString("username").takeIf { it.isNotBlank() }
+                if (threadId.isNotBlank()) {
+                    Log.d(TAG, "Received toggleChatLock from web: threadId=$threadId, username=$username")
+                    mainHandler.post {
+                        onToggleChatLock?.invoke(threadId, username)
+                    }
+                }
+            }
             "getSettings" -> {
                 activePort?.let { sendSettingsToPort(it, cachedSettings) }
             }
@@ -254,6 +310,11 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                 put("ghostHideStorySeen", settings.ghostHideStorySeen)
                 put("ghostHideDirectSeen", settings.ghostHideDirectSeen)
                 put("ghostHideTypingIndicator", settings.ghostHideTypingIndicator)
+
+                put("chatLockMode", settings.chatLockMode)
+                put("chatLockAll", settings.chatLockAll)
+                put("lockedChatIds", JSONArray(settings.lockedChatIds.toList()))
+                put("lockedChatUsernames", JSONObject(settings.lockedChatUsernames))
             }
 
             val msg = JSONObject().apply {
@@ -262,9 +323,42 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                 put("revealMode", settings.unblurMode)
             }
             port.postMessage(msg)
-            Log.d(TAG, "Broadcast settings to WebExtension: noAds=${settings.noAds}, ghost=${settings.ghostModeEnabled}, revealMode=${settings.unblurMode}")
+            Log.d(TAG, "Broadcast settings to WebExtension: noAds=${settings.noAds}, ghost=${settings.ghostModeEnabled}, chatLockAll=${settings.chatLockAll}, lockedChats=${settings.lockedChatIds.size}")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to send settings to WebExtension port", e)
+        }
+    }
+
+    /**
+     * Informs WebExtension content script that a locked chat has successfully been unlocked.
+     */
+    fun notifyChatUnlocked(threadId: String, isAll: Boolean = false) {
+        try {
+            val msg = JSONObject().apply {
+                put("action", "unlockChat")
+                put("threadId", threadId)
+                put("all", isAll)
+            }
+            activePort?.postMessage(msg)
+            Log.d(TAG, "Sent unlockChat to WebExtension port: threadId=$threadId, all=$isAll")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed sending unlockChat to WebExtension", e)
+        }
+    }
+
+    /**
+     * Informs WebExtension content script that a conversation has been locked.
+     */
+    fun notifyChatLocked(threadId: String) {
+        try {
+            val msg = JSONObject().apply {
+                put("action", "lockChat")
+                put("threadId", threadId)
+            }
+            activePort?.postMessage(msg)
+            Log.d(TAG, "Sent lockChat to WebExtension port: threadId=$threadId")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed sending lockChat to WebExtension", e)
         }
     }
 
@@ -377,6 +471,23 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
             Log.d(TAG, "Sent requestReelDownload to WebExtension port")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to send requestReelDownload to port: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Sends the active Unicode font style selection to the WebExtension content script
+     * for real-time live bio transformation.
+     */
+    fun setBioStyle(style: String) {
+        try {
+            val msg = JSONObject().apply {
+                put("action", "setBioStyle")
+                put("style", style)
+            }
+            activePort?.postMessage(msg)
+            Log.d(TAG, "Sent setBioStyle ($style) to WebExtension port")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send setBioStyle to port: ${e.message}", e)
         }
     }
 

@@ -35,4 +35,67 @@ class AdsterraAdFlowTest {
         val isComplete4 = (25 >= requiredSeconds) && (3 >= requiredClicks)
         assertTrue(isComplete4)
     }
+
+    @Test
+    fun testSettingToggleCriteria() {
+        val requiredSeconds = 20
+        // Setting toggles only require watching the 20s ad countdown without mandatory external clicks
+        fun isToggleComplete(elapsed: Int) = elapsed >= requiredSeconds
+
+        assertFalse(isToggleComplete(0))
+        assertFalse(isToggleComplete(19))
+        assertTrue(isToggleComplete(20))
+        assertTrue(isToggleComplete(25))
+    }
+
+    @Test
+    fun testAdDestinationGateExemption() {
+        fun isGateActive(
+            destination: String,
+            shouldShowLock: Boolean,
+            isExhausted: Boolean,
+            effortFrictionActive: Boolean
+        ): Boolean {
+            if (destination == "ADSTERRA_REWARDED") return false
+            return shouldShowLock || isExhausted || effortFrictionActive
+        }
+
+        // When watching ad, gate must NOT be active even if lock, exhaustion, or friction are present
+        assertFalse(isGateActive("ADSTERRA_REWARDED", shouldShowLock = true, isExhausted = true, effortFrictionActive = true))
+        assertFalse(isGateActive("ADSTERRA_REWARDED", shouldShowLock = false, isExhausted = false, effortFrictionActive = false))
+
+        // When in Main WebView or Settings, gate evaluates normally
+        assertTrue(isGateActive("MAIN_WEBVIEW", shouldShowLock = true, isExhausted = false, effortFrictionActive = false))
+        assertTrue(isGateActive("MAIN_WEBVIEW", shouldShowLock = false, isExhausted = true, effortFrictionActive = false))
+        assertFalse(isGateActive("MAIN_WEBVIEW", shouldShowLock = false, isExhausted = false, effortFrictionActive = false))
+    }
+
+    @Test
+    fun testAdClickDebouncing() {
+        fun shouldCountClick(
+            url: String,
+            lastUrl: String,
+            now: Long,
+            lastTime: Long
+        ): Boolean {
+            val clean = url.trim()
+            if (clean.isBlank() || clean.contains("effectivecpmnetwork.com") || clean.startsWith("about:")) return false
+            return clean != lastUrl || (now - lastTime > 1500L)
+        }
+
+        val url1 = "https://example.com/ad1"
+        val url2 = "https://example.com/ad2"
+
+        // First click count
+        assertTrue(shouldCountClick(url1, "", 1000L, 0L))
+
+        // Rapid duplicate click on same url within 500ms -> debounced
+        assertFalse(shouldCountClick(url1, url1, 1500L, 1000L))
+
+        // Duplicate click after 2000ms -> accepted
+        assertTrue(shouldCountClick(url1, url1, 3100L, 1000L))
+
+        // Different ad url even rapidly -> accepted
+        assertTrue(shouldCountClick(url2, url1, 1500L, 1000L))
+    }
 }

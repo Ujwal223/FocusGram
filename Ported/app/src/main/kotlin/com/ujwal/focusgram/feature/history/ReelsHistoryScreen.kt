@@ -84,11 +84,12 @@ fun ReelsHistoryScreen(
 
     val allReels by reelHistory.items.collectAsState()
     val reels = remember(allReels, searchQuery) {
+        val deduplicated = allReels.distinctBy { it.code.ifBlank { it.url } }
         if (searchQuery.isBlank()) {
-            allReels
+            deduplicated
         } else {
             val q = searchQuery.trim().lowercase()
-            allReels.filter {
+            deduplicated.filter {
                 it.author.lowercase().contains(q) ||
                 it.caption.lowercase().contains(q) ||
                 it.code.lowercase().contains(q)

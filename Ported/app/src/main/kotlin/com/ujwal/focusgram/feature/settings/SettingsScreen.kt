@@ -38,6 +38,18 @@ import kotlinx.coroutines.delay
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lock
+import android.widget.Toast
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.material3.CircularProgressIndicator
+import com.ujwal.focusgram.core.utils.AppIconManager
+import com.ujwal.focusgram.core.utils.HistoricalIconManager
+import com.ujwal.focusgram.core.security.EncryptedStorage
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Close
@@ -113,9 +125,11 @@ enum class SettingsSubpage {
     GUARDRAILS,
     EXTRAS,
     APPEARANCE,
+    CHOOSE_APP_ICON,
     NOTIFICATIONS,
     GHOST,
-    LICENSES
+    LICENSES,
+    CHAT_SECURITY
 }
 
 /**
@@ -127,6 +141,7 @@ enum class SettingsSubpage {
 @Composable
 fun SettingsScreen(
     repository: SettingsRepository,
+    inputSettings: FocusSettings? = null,
     onBack: () -> Unit,
     onNavigateReelsHistory: () -> Unit,
     onNavigateScreenTime: () -> Unit,
@@ -138,9 +153,12 @@ fun SettingsScreen(
     reelHistory: ReelHistory? = null,
     currentSubpage: SettingsSubpage = SettingsSubpage.MAIN,
     onSubpageChange: (SettingsSubpage) -> Unit = {},
+    encryptedStorage: EncryptedStorage? = null,
+    onNavigateChatPinSetup: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val settings by repository.settingsFlow.collectAsState(initial = FocusSettings())
+    val collectedSettings by repository.settingsFlow.collectAsState(initial = inputSettings ?: FocusSettings())
+    val settings = inputSettings ?: collectedSettings
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -165,7 +183,9 @@ fun SettingsScreen(
 
     // Intercept back presses: go back to MAIN subpage first, or pop screen
     BackHandler {
-        if (activeSubpage != SettingsSubpage.MAIN) {
+        if (activeSubpage == SettingsSubpage.CHOOSE_APP_ICON) {
+            setSubpage(SettingsSubpage.APPEARANCE)
+        } else if (activeSubpage != SettingsSubpage.MAIN) {
             setSubpage(SettingsSubpage.MAIN)
         } else {
             onBack()
@@ -380,7 +400,9 @@ fun SettingsScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = {
-                if (activeSubpage != SettingsSubpage.MAIN) {
+                if (activeSubpage == SettingsSubpage.CHOOSE_APP_ICON) {
+                    setSubpage(SettingsSubpage.APPEARANCE)
+                } else if (activeSubpage != SettingsSubpage.MAIN) {
                     setSubpage(SettingsSubpage.MAIN)
                 } else {
                     onBack()
@@ -399,9 +421,11 @@ fun SettingsScreen(
                     SettingsSubpage.GUARDRAILS -> "Time Control & Guardrails"
                     SettingsSubpage.EXTRAS -> "Extras"
                     SettingsSubpage.APPEARANCE -> "Appearance"
+                    SettingsSubpage.CHOOSE_APP_ICON -> "Choose App Icon"
                     SettingsSubpage.NOTIFICATIONS -> "Privacy & Notifications"
                     SettingsSubpage.GHOST -> "Ghost Mode"
                     SettingsSubpage.LICENSES -> "Open Source & Credits"
+                    SettingsSubpage.CHAT_SECURITY -> "Chat Security & DM Lock"
                 },
                 color = IOSTextPrimary,
                 fontSize = 17.sp,
@@ -454,7 +478,18 @@ fun SettingsScreen(
                 )
             }
             SettingsSubpage.APPEARANCE -> {
-                AppearanceSubpage(repository = repository, settings = settings)
+                AppearanceSubpage(
+                    repository = repository,
+                    settings = settings,
+                    onNavigateChooseIcon = { setSubpage(SettingsSubpage.CHOOSE_APP_ICON) }
+                )
+            }
+            SettingsSubpage.CHOOSE_APP_ICON -> {
+                ChooseAppIconSubpage(
+                    repository = repository,
+                    settings = settings,
+                    onBack = { setSubpage(SettingsSubpage.APPEARANCE) }
+                )
             }
             SettingsSubpage.NOTIFICATIONS -> {
                 NotificationsSubpage(repository = repository, settings = settings)
@@ -464,6 +499,14 @@ fun SettingsScreen(
             }
             SettingsSubpage.LICENSES -> {
                 LicensesSubpage()
+            }
+            SettingsSubpage.CHAT_SECURITY -> {
+                ChatSecuritySubpage(
+                    repository = repository,
+                    settings = settings,
+                    encryptedStorage = encryptedStorage,
+                    onNavigateChatPinSetup = onNavigateChatPinSetup
+                )
             }
         }
     }
@@ -713,13 +756,25 @@ private fun MainSettingsContent(
         item {
             IOSSectionTitle(title = "SECURITY & PRIVACY")
             IOSGroupedCard {
+                val isBiometricsActive = settings.appLockEnabled && settings.biometricEnabled
                 IOSSettingsRow(
                     title = "App Lock",
-                    subtitle = if (settings.appLockEnabled) "PIN & Biometrics enabled" else "Off",
-                    icon = Icons.Default.Fingerprint,
-                    iconBgColor = IOSGreen,
+                    subtitle = when {
+                        !settings.appLockEnabled -> "Off"
+                        isBiometricsActive -> "PIN & Biometrics enabled"
+                        else -> "4-Digit PIN enabled"
+                    },
+                    icon = if (isBiometricsActive) Icons.Default.Fingerprint else Icons.Default.Lock,
+                    iconBgColor = if (isBiometricsActive) IOSGreen else IOSOrange,
                     trailingText = if (settings.appLockEnabled) "Enabled" else "Off",
                     onClick = onNavigateAppLock
+                )
+                IOSSettingsRow(
+                    title = "Chat Security & DM Lock",
+                    subtitle = if (settings.chatLockAll || settings.lockedChatIds.isNotEmpty()) "Active · Locked conversations" else "Lock inbox & chats with PIN/Biometrics",
+                    icon = Icons.AutoMirrored.Filled.Chat,
+                    iconBgColor = IOSBlue,
+                    onClick = { onNavigateSubpage(SettingsSubpage.CHAT_SECURITY) }
                 )
                 IOSSettingsRow(
                     title = "Ghost Mode (Stealth)",
@@ -896,7 +951,7 @@ private fun FocusModeSubpage(
             IOSGroupedCard {
                 IOSSettingsRow(
                     title = "Block Video Autoplay",
-                    subtitle = "Stop videos and reels from playing automatically",
+                    subtitle = "Stop videos and reels from playing automatically (click audio icon to play)",
                     icon = Icons.Default.PlayArrow,
                     iconBgColor = IOSBlue,
                     checked = settings.noAutoplay,
@@ -1603,7 +1658,8 @@ private fun ExtrasSubpage(
 @Composable
 private fun AppearanceSubpage(
     repository: SettingsRepository,
-    settings: FocusSettings
+    settings: FocusSettings,
+    onNavigateChooseIcon: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
 
@@ -1625,6 +1681,320 @@ private fun AppearanceSubpage(
                     showDivider = false
                 )
             }
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(16.dp))
+            IOSSectionTitle(title = "APP ICON")
+            IOSGroupedCard {
+                IOSSettingsRow(
+                    title = "Custom Icons",
+                    subtitle = "Enable custom launcher and era icons",
+                    icon = Icons.Default.Palette,
+                    iconBgColor = IOSPurple,
+                    checked = settings.customIconsEnabled,
+                    onCheckedChange = { isChecked ->
+                        scope.launch { repository.setCustomIconsEnabled(isChecked) }
+                    },
+                    showDivider = settings.customIconsEnabled
+                )
+                if (settings.customIconsEnabled) {
+                    val activeOption = AppIconManager.IconOption.fromId(settings.appIcon)
+                    IOSSettingsRow(
+                        title = "Choose App Icon",
+                        subtitle = "Select launcher icon style",
+                        icon = Icons.Default.Palette,
+                        iconBgColor = IOSBlue,
+                        trailingText = activeOption.displayName,
+                        onClick = onNavigateChooseIcon,
+                        showDivider = false
+                    )
+                }
+            }
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(40.dp))
+        }
+    }
+}
+
+// ─── CHOOSE APP ICON SUBPAGE ───────────────────────────────────────────────
+
+@Composable
+private fun ChooseAppIconSubpage(
+    repository: SettingsRepository,
+    settings: FocusSettings,
+    onBack: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val currentIconId = settings.appIcon.ifEmpty { "default" }
+
+    val coreOptions = remember {
+        AppIconManager.IconOption.values().filter { it.category == "Core" }
+    }
+    val originalOptions = remember {
+        AppIconManager.IconOption.values().filter { it.category == "Originals" }
+    }
+    val redesignOptions = remember {
+        AppIconManager.IconOption.values().filter { it.category == "Redesigns" }
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp)
+    ) {
+        // Section 1: Core System Icons
+        item {
+            IOSSectionTitle(title = "CORE ICONS")
+            IOSGroupedCard {
+                coreOptions.forEachIndexed { index, option ->
+                    val isSelected = currentIconId == option.id
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                scope.launch {
+                                    repository.setAppIcon(option.id)
+                                    AppIconManager.setAppIcon(context, option.id)
+                                }
+                            }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val iconBitmap = remember(option.iconRes) {
+                            AppIconManager.getIconBitmap(context, option.iconRes)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(50.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(
+                                    width = if (isSelected) 2.dp else 1.dp,
+                                    color = if (isSelected) IOSBlue else Color.White.copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(12.dp)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (iconBitmap != null) {
+                                androidx.compose.foundation.Image(
+                                    bitmap = iconBitmap.asImageBitmap(),
+                                    contentDescription = option.displayName,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(14.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = option.displayName,
+                                fontSize = 16.sp,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = IOSTextPrimary
+                            )
+                            Text(
+                                text = option.subtitle,
+                                fontSize = 12.sp,
+                                color = IOSTextSecondary,
+                                lineHeight = 16.sp
+                            )
+                        }
+
+                        if (isSelected) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Active",
+                                tint = IOSBlue,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    if (index < coreOptions.size - 1) {
+                        androidx.compose.material3.HorizontalDivider(
+                            color = IOSDivider,
+                            thickness = 0.5.dp,
+                            modifier = Modifier.padding(start = 80.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Section 2: Originals
+        item {
+            Spacer(modifier = Modifier.height(16.dp))
+            IOSSectionTitle(title = "ORIGINALS")
+            IOSGroupedCard {
+                originalOptions.forEachIndexed { index, option ->
+                    val isSelected = currentIconId == option.id
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                scope.launch {
+                                    repository.setAppIcon(option.id)
+                                    AppIconManager.setAppIcon(context, option.id)
+                                }
+                            }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val iconBitmap = remember(option.iconRes) {
+                            AppIconManager.getIconBitmap(context, option.iconRes)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(50.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(
+                                    width = if (isSelected) 2.dp else 1.dp,
+                                    color = if (isSelected) IOSBlue else Color.White.copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(12.dp)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (iconBitmap != null) {
+                                androidx.compose.foundation.Image(
+                                    bitmap = iconBitmap.asImageBitmap(),
+                                    contentDescription = option.displayName,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(14.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = option.displayName,
+                                fontSize = 16.sp,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = IOSTextPrimary
+                            )
+                            Text(
+                                text = option.subtitle,
+                                fontSize = 12.sp,
+                                color = IOSTextSecondary,
+                                lineHeight = 16.sp
+                            )
+                        }
+
+                        if (isSelected) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Active",
+                                tint = IOSBlue,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    if (index < originalOptions.size - 1) {
+                        androidx.compose.material3.HorizontalDivider(
+                            color = IOSDivider,
+                            thickness = 0.5.dp,
+                            modifier = Modifier.padding(start = 80.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Section 3: Redesigns (alt-logos)
+        item {
+            Spacer(modifier = Modifier.height(16.dp))
+            IOSSectionTitle(title = "REDESIGNS")
+            IOSGroupedCard {
+                redesignOptions.forEachIndexed { index, option ->
+                    val isSelected = currentIconId == option.id
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                scope.launch {
+                                    repository.setAppIcon(option.id)
+                                    AppIconManager.setAppIcon(context, option.id)
+                                }
+                            }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val iconBitmap = remember(option.iconRes) {
+                            AppIconManager.getIconBitmap(context, option.iconRes)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(50.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(
+                                    width = if (isSelected) 2.dp else 1.dp,
+                                    color = if (isSelected) IOSBlue else Color.White.copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(12.dp)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (iconBitmap != null) {
+                                androidx.compose.foundation.Image(
+                                    bitmap = iconBitmap.asImageBitmap(),
+                                    contentDescription = option.displayName,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(14.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = option.displayName,
+                                fontSize = 16.sp,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = IOSTextPrimary
+                            )
+                            Text(
+                                text = option.subtitle,
+                                fontSize = 12.sp,
+                                color = IOSTextSecondary,
+                                lineHeight = 16.sp
+                            )
+                        }
+
+                        if (isSelected) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Active",
+                                tint = IOSBlue,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    if (index < redesignOptions.size - 1) {
+                        androidx.compose.material3.HorizontalDivider(
+                            color = IOSDivider,
+                            thickness = 0.5.dp,
+                            modifier = Modifier.padding(start = 80.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "Core, Original, and Redesign icons replace the application icon system-wide across Home Screen, App Drawer, and Recents.",
+                color = Color(0xFF8E8E93),
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
         }
 
         item {
@@ -1857,5 +2227,233 @@ private fun LicensesSubpage() {
         item {
             Spacer(modifier = Modifier.height(40.dp))
         }
+    }
+}
+
+// ─── CHAT SECURITY & DM PRIVACY SUBPAGE ─────────────────────────────────────
+
+@Composable
+private fun ChatSecuritySubpage(
+    repository: SettingsRepository,
+    settings: FocusSettings,
+    encryptedStorage: EncryptedStorage?,
+    onNavigateChatPinSetup: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var showLockModeModal by remember { mutableStateOf(false) }
+
+    val lockModeOptions = remember {
+        listOf(
+            "off" to "Off",
+            "individual" to "Individual DMs",
+            "whole_dm" to "Whole DM"
+        )
+    }
+    val currentLockModeIdx = remember(settings.chatLockMode) {
+        lockModeOptions.indexOfFirst { it.first == settings.chatLockMode }.coerceAtLeast(0)
+    }
+    val lockModeLabel = when (settings.chatLockMode) {
+        "whole_dm" -> "Whole DM"
+        "individual" -> "Individual DMs"
+        else -> "Off"
+    }
+    val lockModeSubtitle = when (settings.chatLockMode) {
+        "whole_dm" -> "Require authentication to open your DM inbox and any chat"
+        "individual" -> "Protect selected chats individually with lock button in header"
+        else -> "Direct messages protection disabled"
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp)
+    ) {
+        item {
+            IOSSectionTitle(title = "DIRECT MESSAGE PRIVACY")
+            IOSGroupedCard {
+                IOSSettingsRow(
+                    title = "Messages Lock Mode",
+                    subtitle = lockModeSubtitle,
+                    trailingText = lockModeLabel,
+                    icon = Icons.AutoMirrored.Filled.Chat,
+                    iconBgColor = IOSBlue,
+                    onClick = { showLockModeModal = true },
+                    showDivider = false
+                )
+            }
+        }
+
+        item {
+            IOSSectionTitle(title = "AUTHENTICATION METHOD")
+            IOSGroupedCard {
+                IOSSettingsRow(
+                    title = "Biometric Unlock",
+                    subtitle = "Use fingerprint or face recognition for chat locks",
+                    icon = Icons.Default.Fingerprint,
+                    iconBgColor = IOSGreen,
+                    checked = settings.chatBiometricEnabled,
+                    onCheckedChange = { scope.launch { repository.setChatBiometricEnabled(it) } }
+                )
+                IOSSettingsRow(
+                    title = "Use Separate Chat PIN",
+                    subtitle = if (settings.useSeparateChatPin) {
+                        if (encryptedStorage?.hasChatPin() == true) "Dedicated Chat PIN configured" else "Tap below to set dedicated PIN"
+                    } else {
+                        "Uses the main App Lock PIN"
+                    },
+                    icon = Icons.Default.Lock,
+                    iconBgColor = IOSOrange,
+                    checked = settings.useSeparateChatPin,
+                    onCheckedChange = { isChecked ->
+                        scope.launch { repository.setUseSeparateChatPin(isChecked) }
+                        if (isChecked && encryptedStorage?.hasChatPin() != true) {
+                            onNavigateChatPinSetup()
+                        }
+                    },
+                    showDivider = settings.useSeparateChatPin
+                )
+                if (settings.useSeparateChatPin) {
+                    IOSSettingsRow(
+                        title = if (encryptedStorage?.hasChatPin() == true) "Change Chat PIN" else "Set Chat PIN",
+                        subtitle = "Configure dedicated 4-digit PIN for chats",
+                        icon = Icons.Default.Lock,
+                        iconBgColor = Color(0xFF636366),
+                        onClick = onNavigateChatPinSetup,
+                        showDivider = false
+                    )
+                }
+            }
+        }
+
+        item {
+            IOSSectionTitle(title = "LOCKED CONVERSATIONS")
+            IOSGroupedCard {
+                if (settings.lockedChatIds.isEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "No individual conversations locked yet. Open any chat on Instagram and tap the Lock icon in the header to protect it.",
+                            color = IOSTextSecondary,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp
+                        )
+                    }
+                } else {
+                    settings.lockedChatIds.toList().forEachIndexed { index, id ->
+                        val username = settings.lockedChatUsernames[id]
+                        val displayTitle = if (!username.isNullOrBlank()) {
+                            "@${username.removePrefix("@")}"
+                        } else if (!id.all { it.isDigit() }) {
+                            "@${id.removePrefix("@")}"
+                        } else {
+                            "Conversation (@$id)"
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF2C2C2E)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = null,
+                                    tint = IOSPurple,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = displayTitle,
+                                    color = IOSTextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = if (!username.isNullOrBlank()) "Protected direct message" else if (!id.all { it.isDigit() }) "Protected direct message" else "Direct conversation · $id",
+                                    color = IOSTextSecondary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    scope.launch { repository.removeLockedChatId(id) }
+                                    Toast.makeText(context, "Unlocked $displayTitle", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Remove lock",
+                                    tint = IOSRed,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        if (index < settings.lockedChatIds.size - 1) {
+                            androidx.compose.material3.HorizontalDivider(
+                                color = IOSDivider,
+                                thickness = 0.5.dp,
+                                modifier = Modifier.padding(start = 64.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            IOSGroupedCard {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = null,
+                        tint = IOSBlue,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "To lock a conversation, open the chat in Direct Messages and tap the Lock icon next to the conversation details (i) in the top bar.",
+                        color = IOSTextSecondary,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp
+                    )
+                }
+            }
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(40.dp))
+        }
+    }
+
+    if (showLockModeModal) {
+        WheelPickerModalDialog(
+            title = "Messages Lock Mode",
+            subtitle = "Choose lock protection mode for Instagram direct messages",
+            options = lockModeOptions,
+            initialIndex = currentLockModeIdx,
+            onDismiss = { showLockModeModal = false },
+            onConfirm = { option ->
+                scope.launch { repository.setChatLockMode(option.first) }
+            },
+            labelProvider = { it.second }
+        )
     }
 }

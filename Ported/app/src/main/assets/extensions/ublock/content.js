@@ -14,6 +14,9 @@
     function isAuthPage() {
         try {
             const path = (window.location.pathname || '').toLowerCase();
+            if (path.includes('/accounts/edit')) {
+                return false;
+            }
             if (path.startsWith('/accounts') || path.startsWith('/login') || path.startsWith('/signup')) {
                 return true;
             }

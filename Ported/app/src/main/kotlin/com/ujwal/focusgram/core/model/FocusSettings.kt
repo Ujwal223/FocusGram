@@ -63,6 +63,16 @@ data class FocusSettings(
     val notifySessionEnd: Boolean = false,
     val notifyPersistent: Boolean = false,
     val portraitOnly: Boolean = true,
+    val appIcon: String = "default",
+    val customIconsEnabled: Boolean = false,
+
+    // Chat Lock & Direct Message Privacy
+    val chatLockMode: String = "individual", // "off", "individual", "whole_dm"
+    val chatLockAll: Boolean = false,
+    val lockedChatIds: Set<String> = emptySet(),
+    val lockedChatUsernames: Map<String, String> = emptyMap(),
+    val useSeparateChatPin: Boolean = false,
+    val chatBiometricEnabled: Boolean = true,
 
     // Ghost Mode (Privacy & Stealth)
     val ghostModeEnabled: Boolean = false,

@@ -8,12 +8,14 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.ujwal.focusgram.core.model.FocusSettings
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
+import org.json.JSONObject
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "focusgram_settings")
 
@@ -79,12 +81,37 @@ class SettingsRepository(private val context: Context) {
             notifySessionEnd = prefs[KEY_NOTIFY_SESSION_END] ?: false,
             notifyPersistent = prefs[KEY_NOTIFY_PERSISTENT] ?: false,
             portraitOnly = prefs[KEY_PORTRAIT_ONLY] ?: true,
+            appIcon = prefs[KEY_APP_ICON] ?: "default",
+            customIconsEnabled = prefs[KEY_CUSTOM_ICONS_ENABLED] ?: false,
+
+            chatLockMode = prefs[KEY_CHAT_LOCK_MODE] ?: if (prefs[KEY_CHAT_LOCK_ALL] == true) "whole_dm" else "individual",
+            chatLockAll = (prefs[KEY_CHAT_LOCK_MODE] ?: if (prefs[KEY_CHAT_LOCK_ALL] == true) "whole_dm" else "individual") == "whole_dm",
+            lockedChatIds = prefs[KEY_LOCKED_CHAT_IDS] ?: emptySet(),
+            lockedChatUsernames = parseUsernamesMap(prefs[KEY_LOCKED_CHAT_USERNAMES]),
+            useSeparateChatPin = prefs[KEY_USE_SEPARATE_CHAT_PIN] ?: false,
+            chatBiometricEnabled = prefs[KEY_CHAT_BIOMETRIC_ENABLED] ?: true,
 
             ghostModeEnabled = prefs[KEY_GHOST_MODE_ENABLED] ?: false,
             ghostHideStorySeen = prefs[KEY_GHOST_HIDE_STORY_SEEN] ?: true,
             ghostHideDirectSeen = prefs[KEY_GHOST_HIDE_DIRECT_SEEN] ?: true,
             ghostHideTypingIndicator = prefs[KEY_GHOST_HIDE_TYPING] ?: true
         )
+    }
+
+    private fun parseUsernamesMap(jsonStr: String?): Map<String, String> {
+        if (jsonStr.isNullOrBlank()) return emptyMap()
+        return try {
+            val json = JSONObject(jsonStr)
+            val map = mutableMapOf<String, String>()
+            val keys = json.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                map[k] = json.optString(k)
+            }
+            map
+        } catch (_: Exception) {
+            emptyMap()
+        }
     }
 
     val lastSessionEndTimestampFlow: Flow<Long> = context.dataStore.data.map { prefs ->
@@ -237,6 +264,105 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { it[key] = value }
     }
 
+    suspend fun setAppIcon(icon: String) = setString(KEY_APP_ICON, icon)
+    suspend fun setCustomIconsEnabled(enabled: Boolean) = setBoolean(KEY_CUSTOM_ICONS_ENABLED, enabled)
+    suspend fun setChatLockMode(mode: String) {
+        val cleanMode = when (mode.lowercase().trim()) {
+            "whole_dm", "whole", "all" -> "whole_dm"
+            "individual", "individual_dms", "single" -> "individual"
+            else -> "off"
+        }
+        context.dataStore.edit { prefs ->
+            prefs[KEY_CHAT_LOCK_MODE] = cleanMode
+            prefs[KEY_CHAT_LOCK_ALL] = (cleanMode == "whole_dm")
+        }
+    }
+    suspend fun setChatLockAll(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_CHAT_LOCK_ALL] = enabled
+            prefs[KEY_CHAT_LOCK_MODE] = if (enabled) "whole_dm" else "individual"
+        }
+    }
+    suspend fun setLockedChatIds(ids: Set<String>) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_LOCKED_CHAT_IDS] = ids
+        }
+    }
+    suspend fun addLockedChatId(id: String) {
+        val clean = id.trim().lowercase().removePrefix("@")
+        if (clean.isBlank()) return
+        context.dataStore.edit { prefs ->
+            val current = prefs[KEY_LOCKED_CHAT_IDS] ?: emptySet()
+            prefs[KEY_LOCKED_CHAT_IDS] = current + clean
+        }
+    }
+    suspend fun removeLockedChatId(id: String) {
+        val clean = id.trim().lowercase().removePrefix("@")
+        context.dataStore.edit { prefs ->
+            val current = prefs[KEY_LOCKED_CHAT_IDS] ?: emptySet()
+            val usernamesMap = parseUsernamesMap(prefs[KEY_LOCKED_CHAT_USERNAMES]).toMutableMap()
+            val mappedUser = usernamesMap[clean]
+            val toRemove = buildSet {
+                add(clean)
+                if (!mappedUser.isNullOrBlank()) add(mappedUser)
+            }
+            prefs[KEY_LOCKED_CHAT_IDS] = current - toRemove
+            usernamesMap.remove(clean)
+            if (!mappedUser.isNullOrBlank()) usernamesMap.remove(mappedUser)
+            prefs[KEY_LOCKED_CHAT_USERNAMES] = JSONObject(usernamesMap as Map<*, *>).toString()
+        }
+    }
+    suspend fun toggleLockedChat(threadId: String, username: String? = null): Boolean {
+        val cleanId = threadId.trim().lowercase()
+        if (cleanId.isBlank()) return false
+        val cleanUser = username?.trim()?.lowercase()?.removePrefix("@")
+        var isNowLocked = false
+        context.dataStore.edit { prefs ->
+            val currentIds = prefs[KEY_LOCKED_CHAT_IDS] ?: emptySet()
+            val usernamesMap = parseUsernamesMap(prefs[KEY_LOCKED_CHAT_USERNAMES]).toMutableMap()
+            val existingUser = usernamesMap[cleanId] ?: cleanUser
+            val matchesExisting = currentIds.contains(cleanId) ||
+                    (!cleanUser.isNullOrBlank() && currentIds.contains(cleanUser)) ||
+                    (!existingUser.isNullOrBlank() && currentIds.contains(existingUser))
+
+            if (matchesExisting) {
+                val toRemove = buildSet {
+                    add(cleanId)
+                    if (!cleanUser.isNullOrBlank()) add(cleanUser)
+                    if (!existingUser.isNullOrBlank()) add(existingUser)
+                }
+                prefs[KEY_LOCKED_CHAT_IDS] = currentIds - toRemove
+                usernamesMap.remove(cleanId)
+                if (!cleanUser.isNullOrBlank()) usernamesMap.remove(cleanUser)
+                if (!existingUser.isNullOrBlank()) usernamesMap.remove(existingUser)
+                isNowLocked = false
+            } else {
+                prefs[KEY_LOCKED_CHAT_IDS] = currentIds + cleanId
+                val effectiveUser = if (!cleanUser.isNullOrBlank()) cleanUser else existingUser
+                if (!effectiveUser.isNullOrBlank()) {
+                    usernamesMap[cleanId] = effectiveUser
+                    usernamesMap[effectiveUser] = cleanId
+                }
+                isNowLocked = true
+            }
+            prefs[KEY_LOCKED_CHAT_USERNAMES] = JSONObject(usernamesMap as Map<*, *>).toString()
+        }
+        return isNowLocked
+    }
+    suspend fun mapThreadUsername(threadId: String, username: String) {
+        val cleanId = threadId.trim().lowercase()
+        val cleanUser = username.trim().lowercase().removePrefix("@")
+        if (cleanId.isBlank() || cleanUser.isBlank()) return
+        context.dataStore.edit { prefs ->
+            val usernamesMap = parseUsernamesMap(prefs[KEY_LOCKED_CHAT_USERNAMES]).toMutableMap()
+            usernamesMap[cleanId] = cleanUser
+            usernamesMap[cleanUser] = cleanId
+            prefs[KEY_LOCKED_CHAT_USERNAMES] = JSONObject(usernamesMap as Map<*, *>).toString()
+        }
+    }
+    suspend fun setUseSeparateChatPin(enabled: Boolean) = setBoolean(KEY_USE_SEPARATE_CHAT_PIN, enabled)
+    suspend fun setChatBiometricEnabled(enabled: Boolean) = setBoolean(KEY_CHAT_BIOMETRIC_ENABLED, enabled)
+
     companion object {
         val KEY_NO_ADS = booleanPreferencesKey("no_ads")
         val KEY_NO_STORIES = booleanPreferencesKey("no_stories")
@@ -295,5 +421,14 @@ class SettingsRepository(private val context: Context) {
         val KEY_GHOST_HIDE_DIRECT_SEEN = booleanPreferencesKey("ghost_hide_direct_seen")
         val KEY_GHOST_HIDE_TYPING = booleanPreferencesKey("ghost_hide_typing")
         val KEY_LAST_SESSION_END_TIMESTAMP = longPreferencesKey("last_session_end_timestamp")
+
+        val KEY_APP_ICON = stringPreferencesKey("app_icon")
+        val KEY_CUSTOM_ICONS_ENABLED = booleanPreferencesKey("custom_icons_enabled")
+        val KEY_CHAT_LOCK_MODE = stringPreferencesKey("chat_lock_mode")
+        val KEY_CHAT_LOCK_ALL = booleanPreferencesKey("chat_lock_all")
+        val KEY_LOCKED_CHAT_IDS = stringSetPreferencesKey("locked_chat_ids")
+        val KEY_LOCKED_CHAT_USERNAMES = stringPreferencesKey("locked_chat_usernames")
+        val KEY_USE_SEPARATE_CHAT_PIN = booleanPreferencesKey("use_separate_chat_pin")
+        val KEY_CHAT_BIOMETRIC_ENABLED = booleanPreferencesKey("chat_biometric_enabled")
     }
 }

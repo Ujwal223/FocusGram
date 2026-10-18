@@ -15,6 +15,7 @@
     function isAuthPage() {
         try {
             var path = (window.location.pathname || '').toLowerCase();
+            if (path.includes('/accounts/edit')) return false;
             if (path.startsWith('/accounts') || path.startsWith('/login') || path.startsWith('/signup')) return true;
             var c = document.cookie || '';
             if (!c.includes('sessionid=') && !c.includes('ds_user_id=')) return true;
@@ -231,6 +232,271 @@
         }
     }
 
+    let localChatLockMode = 'individual';
+    let localChatLockAll = false;
+    let localLockedChatIds = [];
+    let localUnlockedThreads = [];
+    let localThreadUsernameMap = {};
+
+    function handleChatLockSync(detail) {
+        if (!detail) return;
+        if (typeof detail.chatLockMode !== 'undefined') localChatLockMode = String(detail.chatLockMode).toLowerCase();
+        if (typeof detail.chatLockAll !== 'undefined') localChatLockAll = !!detail.chatLockAll;
+        if (Array.isArray(detail.lockedChatIds)) localLockedChatIds = detail.lockedChatIds;
+        if (Array.isArray(detail.unlockedThreads)) localUnlockedThreads = detail.unlockedThreads;
+        if (detail.threadUsernameMap && typeof detail.threadUsernameMap === 'object') localThreadUsernameMap = detail.threadUsernameMap;
+    }
+
+    window.addEventListener('focusgram:chat-lock-sync', (e) => handleChatLockSync(e.detail));
+    document.addEventListener('focusgram:chat-lock-sync', (e) => handleChatLockSync(e.detail));
+
+    function isDirectThreadLocked(threadId, username) {
+        const mode = window.__fgChatLockMode || localChatLockMode || 'individual';
+        if (mode === 'off') return false;
+
+        const cleanTid = String(threadId || '').toLowerCase().trim();
+        const cleanUser = String(username || '').toLowerCase().trim().replace(/^@/, '');
+
+        // Resolve mapped usernames/IDs from maps
+        const gMap = window.__fgThreadUsernameMap || localThreadUsernameMap || {};
+        const mappedUser = cleanTid ? (gMap.get ? gMap.get(cleanTid) : gMap[cleanTid]) : '';
+        const mappedId = cleanUser ? (gMap.get ? gMap.get(cleanUser) : gMap[cleanUser]) : '';
+
+        const checkInCollection = (collection, val) => {
+            if (!collection || !val) return false;
+            if (typeof collection.has === 'function') return collection.has(val);
+            if (Array.isArray(collection)) return collection.includes(val);
+            return false;
+        };
+
+        // Check if unlocked in current session
+        const unlockedSources = [window.__fgUnlockedThreads, localUnlockedThreads];
+        for (const unl of unlockedSources) {
+            if (unl) {
+                if (checkInCollection(unl, '__all__') ||
+                    checkInCollection(unl, cleanTid) ||
+                    checkInCollection(unl, cleanUser) ||
+                    (mappedUser && checkInCollection(unl, mappedUser)) ||
+                    (mappedId && checkInCollection(unl, mappedId))) {
+                    return false;
+                }
+            }
+        }
+
+        // Whole DM lock mode
+        if (mode === 'whole_dm' || window.__fgChatLockAll || localChatLockAll) return true;
+
+        // Individual chat lock check
+        const lockedSources = [window.__fgLockedChatIds, localLockedChatIds];
+        for (const lk of lockedSources) {
+            if (lk) {
+                if (checkInCollection(lk, cleanTid) ||
+                    checkInCollection(lk, cleanUser) ||
+                    (mappedUser && checkInCollection(lk, mappedUser)) ||
+                    (mappedId && checkInCollection(lk, mappedId))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    function maskMessageNode(node) {
+        if (!node || typeof node !== 'object') return false;
+        let didMask = false;
+        if (typeof node.text_body === 'string' && node.text_body.length > 0) {
+            node.text_body = '••••••••••••';
+            didMask = true;
+        }
+        if (typeof node.text === 'string' && node.text.length > 0) {
+            node.text = '••••••••••••';
+            didMask = true;
+        }
+        if (typeof node.snippet === 'string' && node.snippet.length > 0) {
+            node.snippet = '••••••••••••';
+            didMask = true;
+        }
+        if (node.content && typeof node.content === 'object') {
+            if (typeof node.content.text_body === 'string' && node.content.text_body.length > 0) {
+                node.content.text_body = '••••••••••••';
+                didMask = true;
+            }
+            if (typeof node.content.text === 'string' && node.content.text.length > 0) {
+                node.content.text = '••••••••••••';
+                didMask = true;
+            }
+            if (typeof node.content.snippet === 'string' && node.content.snippet.length > 0) {
+                node.content.snippet = '••••••••••••';
+                didMask = true;
+            }
+        }
+        return didMask;
+    }
+
+    function maskThreadMessages(thread) {
+        if (!thread || typeof thread !== 'object') return false;
+        let threadMod = false;
+
+        // 1. slide_messages.edges[].node (HAR / GraphQL IGDThreadDetailQuery format)
+        if (thread.slide_messages && Array.isArray(thread.slide_messages.edges)) {
+            for (const edge of thread.slide_messages.edges) {
+                if (edge && edge.node && maskMessageNode(edge.node)) {
+                    threadMod = true;
+                }
+            }
+        }
+
+        // 2. messages.edges or messages.items or messages[]
+        if (thread.messages) {
+            if (Array.isArray(thread.messages.edges)) {
+                for (const edge of thread.messages.edges) {
+                    if (edge && edge.node && maskMessageNode(edge.node)) {
+                        threadMod = true;
+                    }
+                }
+            } else if (Array.isArray(thread.messages.items)) {
+                for (const item of thread.messages.items) {
+                    if (maskMessageNode(item)) {
+                        threadMod = true;
+                    }
+                }
+            } else if (Array.isArray(thread.messages)) {
+                for (const item of thread.messages) {
+                    if (maskMessageNode(item)) {
+                        threadMod = true;
+                    }
+                }
+            }
+        }
+
+        // 3. items[]
+        if (Array.isArray(thread.items)) {
+            for (const item of thread.items) {
+                if (maskMessageNode(item)) {
+                    threadMod = true;
+                }
+            }
+        }
+
+        // 4. last_permanent_item
+        if (thread.last_permanent_item && maskMessageNode(thread.last_permanent_item)) {
+            threadMod = true;
+        }
+
+        // 5. snippet
+        if (typeof thread.snippet === 'string') {
+            thread.snippet = '••••••••••••';
+            threadMod = true;
+        }
+
+        return threadMod;
+    }
+
+    function findThreadsInPayload(root) {
+        const threads = [];
+        if (!root || typeof root !== 'object') return threads;
+
+        if (root.get_slide_thread_nullable?.as_ig_direct_thread) {
+            threads.push(root.get_slide_thread_nullable.as_ig_direct_thread);
+        } else if (root.get_slide_thread_nullable && typeof root.get_slide_thread_nullable === 'object') {
+            threads.push(root.get_slide_thread_nullable);
+        }
+        if (root.message_thread && typeof root.message_thread === 'object') {
+            threads.push(root.message_thread);
+        }
+        if (root.thread && typeof root.thread === 'object') {
+            threads.push(root.thread);
+        }
+
+        const inbox = root.viewer?.inbox || root.inbox;
+        if (inbox && Array.isArray(inbox.threads)) {
+            for (const t of inbox.threads) {
+                if (t && typeof t === 'object') threads.push(t);
+            }
+        }
+
+        if (threads.length === 0) {
+            for (const key of Object.keys(root)) {
+                const val = root[key];
+                if (val && typeof val === 'object') {
+                    if (val.slide_messages || val.as_ig_direct_thread || (val.thread_fbid && (val.items || val.messages))) {
+                        threads.push(val.as_ig_direct_thread || val);
+                    }
+                }
+            }
+        }
+
+        return threads;
+    }
+
+    function processDirectMessagesPayload(data) {
+        if (!data || typeof data !== 'object') return false;
+
+        let modified = false;
+        const root = data.data || data;
+        const threads = findThreadsInPayload(root);
+        if (threads.length === 0) return false;
+
+        for (const thread of threads) {
+            const tid = String(thread.thread_fbid || thread.id || thread.thread_id || '').toLowerCase().trim();
+            const threadKey = String(thread.thread_key || '').toLowerCase().trim();
+            let username = '';
+            let displayName = thread.thread_title || '';
+            const allUsernames = [];
+
+            if (Array.isArray(thread.users)) {
+                for (const u of thread.users) {
+                    if (u && u.username) {
+                        const uname = String(u.username).toLowerCase().trim().replace(/^@/, '');
+                        if (uname) allUsernames.push(uname);
+                    }
+                }
+                if (allUsernames.length > 0) {
+                    username = allUsernames[0];
+                    if (!displayName) displayName = thread.users[0].full_name || username;
+                }
+            }
+
+            const primaryId = tid || threadKey;
+            if (primaryId && (allUsernames.length > 0 || displayName)) {
+                window.dispatchEvent(new CustomEvent('focusgram:thread-matched', {
+                    detail: {
+                        threadId: primaryId,
+                        threadKey: threadKey,
+                        usernames: allUsernames,
+                        displayName: displayName
+                    }
+                }));
+            }
+
+            let isLocked = isDirectThreadLocked(tid, username);
+            if (!isLocked && threadKey) isLocked = isDirectThreadLocked(threadKey, username);
+            if (!isLocked) {
+                for (const u of allUsernames) {
+                    if (isDirectThreadLocked(tid || threadKey, u)) {
+                        isLocked = true;
+                        break;
+                    }
+                }
+            }
+
+            if (isLocked) {
+                // Do not mask inbox list previews
+                const isInboxItem = !thread.slide_messages && (thread.last_permanent_item || thread.snippet);
+                if (isInboxItem) {
+                    continue;
+                }
+                if (maskThreadMessages(thread)) {
+                    modified = true;
+                }
+            }
+        }
+
+        return modified;
+    }
+
+    window.__fgProcessDirectMessagesPayload = processDirectMessagesPayload;
+
     // Override fetch in the main world
     const _fetch = window.fetch.bind(window);
 
@@ -241,35 +507,83 @@
             ? input.href
             : input?.url ?? '';
 
+        // Story viewer request detection: immediately notify UI when request is sent and received
+        if (url.includes('/list_reel_media_viewer/')) {
+            const mediaIdMatch = url.match(/\/api\/v1\/media\/(\d+)\/list_reel_media_viewer\//);
+            const mediaId = mediaIdMatch ? mediaIdMatch[1] : '';
+            const loadingDetail = { phase: 'loading', mediaId: mediaId, url: url };
+            
+            // Dispatch to both window & document for maximum compatibility across script compartments
+            window.dispatchEvent(new CustomEvent('focusgram:story-viewers-detected', { detail: loadingDetail }));
+            document.dispatchEvent(new CustomEvent('focusgram:story-viewers-detected', { detail: loadingDetail }));
+            window.postMessage({ type: 'FOCUSGRAM_STORY_VIEWERS', detail: loadingDetail }, '*');
+            handleStoryViewersDetected(loadingDetail);
+
+            const response = await _fetch(input, init);
+            try {
+                const cloned = response.clone();
+                cloned.json().then(data => {
+                    const readyDetail = { phase: 'ready', mediaId: mediaId, url: url, data: data };
+                    window.dispatchEvent(new CustomEvent('focusgram:story-viewers-detected', { detail: readyDetail }));
+                    document.dispatchEvent(new CustomEvent('focusgram:story-viewers-detected', { detail: readyDetail }));
+                    window.postMessage({ type: 'FOCUSGRAM_STORY_VIEWERS', detail: readyDetail }, '*');
+                    handleStoryViewersDetected(readyDetail);
+                }).catch(() => {});
+            } catch (_) {}
+            return response;
+        }
+
+        // Always execute fetch
         const response = await _fetch(input, init);
 
-        // Only inspect GraphQL, feed, and clips endpoints
-        if (!url.includes('/graphql') && !url.includes('/api/v1/feed') && !url.includes('/api/v1/clips/')) {
+        // Only inspect GraphQL, feed, clips, and threads endpoints
+        if (!url.includes('/graphql') && !url.includes('/api/v1/feed') && !url.includes('/api/v1/clips/') && !url.includes('/api/v1/direct_v2/threads/')) {
             return response;
         }
 
         const config = window.__fgFilterConfig;
-        if (config && config.blockAds === false) {
-            return response;
-        }
 
         const cloned = response.clone();
         try {
             const contentType = response.headers.get('content-type') || '';
-            if (!contentType.includes('application/json')) {
+            if (!contentType.includes('json') && !contentType.includes('javascript')) {
                 return response;
             }
 
-            const data = await cloned.json();
-            harvestMediaFromData(data);
-            walkAndFilter(data);
+            let data;
+            try {
+                data = await cloned.json();
+            } catch (_) {
+                try {
+                    let text = await cloned.text();
+                    text = text.replace(/^for\s*\(\s*;\s*;\s*\)\s*;\s*/, '');
+                    data = JSON.parse(text);
+                } catch (e) {
+                    return response;
+                }
+            }
 
+            harvestMediaFromData(data);
+
+            const directModified = processDirectMessagesPayload(data);
+
+            let adModified = false;
+            if (config && config.blockAds !== false) {
+                walkAndFilter(data);
+                adModified = true;
+            }
+
+            if (!directModified && !adModified) {
+                return response;
+            }
+
+            const originalContentType = response.headers.get('content-type') || 'application/json; charset=utf-8';
             const newHeaders = new Headers(response.headers);
             // CRITICAL: Must delete content-length and content-encoding so the uncompressed
             // JSON body is not truncated or corrupted by the browser HTTP layer
             newHeaders.delete('content-length');
             newHeaders.delete('content-encoding');
-            newHeaders.set('content-type', 'application/json; charset=utf-8');
+            newHeaders.set('content-type', originalContentType);
 
             return new Response(JSON.stringify(data), {
                 status: response.status,
@@ -286,6 +600,259 @@
         writable: true,
         configurable: true
     });
+
+    // Hook XMLHttpRequest for complete coverage of background API calls
+    const origXHR = window.XMLHttpRequest;
+    if (origXHR && origXHR.prototype) {
+        const origOpen = origXHR.prototype.open;
+        const origSend = origXHR.prototype.send;
+
+        origXHR.prototype.open = function(method, url) {
+            this._fgUrl = typeof url === 'string' ? url : (url ? url.toString() : '');
+            return origOpen.apply(this, arguments);
+        };
+
+        origXHR.prototype.send = function() {
+            const xhr = this;
+            const url = xhr._fgUrl || '';
+            if (url.includes('/graphql') || url.includes('/api/v1/direct') || url.includes('/direct/')) {
+                const onReady = function() {
+                    if (xhr.readyState === 4 && xhr.status === 200) {
+                        try {
+                            const cType = xhr.getResponseHeader('content-type') || '';
+                            if (cType.includes('json') || cType.includes('javascript')) {
+                                let text = xhr.responseText;
+                                if (text) {
+                                    text = text.replace(/^for\s*\(\s*;\s*;\s*\)\s*;\s*/, '');
+                                    const data = JSON.parse(text);
+                                    if (processDirectMessagesPayload(data)) {
+                                        const modifiedText = JSON.stringify(data);
+                                        Object.defineProperty(xhr, 'responseText', { value: modifiedText, writable: true, configurable: true });
+                                        Object.defineProperty(xhr, 'response', { value: modifiedText, writable: true, configurable: true });
+                                    }
+                                }
+                            }
+                        } catch (_) {}
+                    }
+                };
+                xhr.addEventListener('readystatechange', onReady, false);
+            }
+            return origSend.apply(this, arguments);
+        };
+    }
+
+    /* ==========================================================================
+       STORY VIEWER CLIENT-SIDE SEARCH ENGINE
+       Autonomous DOM detector + Network Interception.
+       Injects a native-style Instagram search bar inside the "Viewers" modal
+       whether opened from cached story data or network requests.
+       ========================================================================== */
+    let storyViewersData = [];
+    let storySearchCardEl = null;
+
+    function findViewersDialog() {
+        const dialogs = document.querySelectorAll('div[aria-modal="true"][role="dialog"], div[role="dialog"]');
+        for (const d of dialogs) {
+            const headings = Array.from(d.querySelectorAll('h2, [role="heading"], div'));
+            const h2 = headings.find(el => el.textContent.trim().toLowerCase() === 'viewers' && el.children.length === 0);
+            if (h2) {
+                // h2.parentElement is the flex row containing Close button, Viewers title, and spacer
+                const headerRow = h2.parentElement;
+                const scrollContainer = d.querySelector('div[style*="overflow"]') || 
+                                        d.querySelector('div[style*="height"]') ||
+                                        (headerRow ? headerRow.nextElementSibling : null);
+                return { dialog: d, header: headerRow, scrollContainer: scrollContainer, h2: h2 };
+            }
+        }
+        return null;
+    }
+
+    function createStorySearchCard() {
+        const card = document.createElement('div');
+        card.id = 'fg-story-search-card';
+        card.style.cssText = `
+            margin: 6px 16px 10px 16px !important;
+            padding: 0 10px !important;
+            height: 38px !important;
+            background: #262626 !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            border-radius: 8px !important;
+            display: flex !important;
+            align-items: center !important;
+            gap: 8px !important;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+            color: #ffffff !important;
+            box-sizing: border-box !important;
+            flex-shrink: 0 !important;
+        `;
+
+        const searchIcon = document.createElement('span');
+        searchIcon.style.cssText = 'display: flex; align-items: center; color: #8e8e8e;';
+        searchIcon.innerHTML = `<svg aria-label="Search" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" height="15" viewBox="0 0 24 24" width="15"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>`;
+
+        const searchInput = document.createElement('input');
+        searchInput.id = 'fg-story-search-input';
+        searchInput.type = 'text';
+        searchInput.placeholder = 'Search viewers';
+        searchInput.autocomplete = 'off';
+        searchInput.style.cssText = `
+            flex: 1 !important;
+            background: transparent !important;
+            border: none !important;
+            color: #FAFAFA !important;
+            font-size: 14px !important;
+            outline: none !important;
+            padding: 0 !important;
+            height: 100% !important;
+            font-family: inherit !important;
+        `;
+
+        const clearBtn = document.createElement('button');
+        clearBtn.type = 'button';
+        clearBtn.textContent = '✕';
+        clearBtn.style.cssText = `
+            background: transparent !important;
+            border: none !important;
+            color: #8e8e8e !important;
+            font-size: 13px !important;
+            cursor: pointer !important;
+            padding: 4px !important;
+            display: none !important;
+            line-height: 1 !important;
+        `;
+
+        clearBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            searchInput.value = '';
+            clearBtn.style.display = 'none';
+            filterViewers('');
+            searchInput.focus();
+        });
+
+        searchInput.addEventListener('input', () => {
+            const val = searchInput.value;
+            clearBtn.style.display = val.length > 0 ? 'block' : 'none';
+            filterViewers(val.trim().toLowerCase());
+        });
+
+        card.appendChild(searchIcon);
+        card.appendChild(searchInput);
+        card.appendChild(clearBtn);
+
+        return card;
+    }
+
+    function filterViewers(query) {
+        const info = findViewersDialog();
+        if (!info || !info.dialog) return;
+
+        const scrollContainer = info.scrollContainer || 
+                                info.dialog.querySelector('div[style*="overflow"]') || 
+                                info.dialog.querySelector('div[style*="height"]') ||
+                                info.dialog;
+
+        // Target viewer rows: .x1qnrgzn, or rows containing profile links
+        const rows = scrollContainer.querySelectorAll('.x1qnrgzn, div[style*="display: flex"] > div:has(a[href^="/"]), div[style*="padding"] > div:has(a[href^="/"])');
+        let matchedCount = 0;
+        let totalCount = 0;
+
+        rows.forEach(row => {
+            if (row.id === 'fg-story-search-card' || row.contains(document.getElementById('fg-story-search-card'))) return;
+            const links = row.querySelectorAll('a[href^="/"]');
+            if (links.length === 0) return;
+
+            totalCount++;
+            if (!query) {
+                row.style.display = '';
+                matchedCount++;
+                return;
+            }
+
+            const text = (row.textContent || '').toLowerCase();
+            let matched = text.includes(query);
+            for (let i = 0; i < links.length; i++) {
+                const href = (links[i].getAttribute('href') || '').toLowerCase().replace(/\//g, '');
+                if (href.includes(query)) {
+                    matched = true;
+                    break;
+                }
+            }
+
+            row.style.display = matched ? '' : 'none';
+            if (matched) matchedCount++;
+        });
+
+        // Handle "No results found" placeholder
+        let noResultsEl = scrollContainer.querySelector('#fg-no-viewer-results');
+        if (query && matchedCount === 0 && totalCount > 0) {
+            if (!noResultsEl) {
+                noResultsEl = document.createElement('div');
+                noResultsEl.id = 'fg-no-viewer-results';
+                noResultsEl.style.cssText = 'padding: 24px; text-align: center; color: #8e8e8e; font-size: 14px;';
+                noResultsEl.textContent = 'No viewers found';
+                scrollContainer.appendChild(noResultsEl);
+            }
+            noResultsEl.style.display = 'block';
+        } else if (noResultsEl) {
+            noResultsEl.style.display = 'none';
+        }
+    }
+
+    function checkAndMountStorySearch() {
+        const info = findViewersDialog();
+        if (!info || !info.header) {
+            const existing = document.getElementById('fg-story-search-card');
+            if (existing && !document.querySelector('div[aria-modal="true"][role="dialog"]')) {
+                existing.remove();
+                storySearchCardEl = null;
+            }
+            return;
+        }
+
+        if (info.dialog.querySelector('#fg-story-search-card')) {
+            return;
+        }
+
+        const card = createStorySearchCard();
+        info.header.after(card);
+        storySearchCardEl = card;
+    }
+
+    function handleStoryViewersDetected(detail) {
+        if (!detail) return;
+        checkAndMountStorySearch();
+
+        if (detail.phase === 'ready' && detail.data) {
+            const data = detail.data;
+            const users = data.users || [];
+            const viewers = data.viewers || [];
+            const userMap = new Map();
+            users.forEach(u => {
+                const pk = String(u.pk || u.id || '');
+                if (pk) userMap.set(pk, { username: u.username || '', fullName: u.full_name || '' });
+            });
+            viewers.forEach(v => {
+                const u = v.user || v;
+                const pk = String(u.pk || u.id || '');
+                if (pk) userMap.set(pk, { username: u.username || '', fullName: u.full_name || '' });
+            });
+            storyViewersData = Array.from(userMap.values());
+            const input = document.getElementById('fg-story-search-input');
+            if (input && input.value.trim()) {
+                filterViewers(input.value.trim().toLowerCase());
+            }
+        }
+    }
+
+    window.__fgHandleStoryViewers = handleStoryViewersDetected;
+    window.addEventListener('focusgram:story-viewers-detected', (e) => handleStoryViewersDetected(e.detail));
+    document.addEventListener('focusgram:story-viewers-detected', (e) => handleStoryViewersDetected(e.detail));
+
+    // Continuous autonomous observer for Viewers modal
+    const viewersObserver = new MutationObserver(() => {
+        checkAndMountStorySearch();
+    });
+    viewersObserver.observe(document.documentElement, { childList: true, subtree: true });
 
     window.__fgSetFilterConfig = function (cfg) {
         if (typeof cfg === 'object' && cfg) {

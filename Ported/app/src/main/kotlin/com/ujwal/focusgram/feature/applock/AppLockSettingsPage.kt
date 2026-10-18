@@ -1,52 +1,48 @@
 package com.ujwal.focusgram.feature.applock
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.ujwal.focusgram.core.datastore.SettingsRepository
 import com.ujwal.focusgram.core.model.FocusSettings
 import com.ujwal.focusgram.core.security.EncryptedStorage
-import androidx.activity.compose.BackHandler
-import com.ujwal.focusgram.core.ui.components.FocusGramCard
-import com.ujwal.focusgram.core.ui.components.FocusGramSectionHeader
-import com.ujwal.focusgram.core.ui.components.FocusGramToggleRow
 import com.ujwal.focusgram.core.ui.components.FocusGramTopBar
-import com.ujwal.focusgram.core.ui.theme.AlertRed
-import com.ujwal.focusgram.core.ui.theme.InstagramBlue
+import com.ujwal.focusgram.core.ui.components.IOSGroupedCard
+import com.ujwal.focusgram.core.ui.components.IOSSectionTitle
+import com.ujwal.focusgram.core.ui.components.IOSSettingsRow
 import com.ujwal.focusgram.core.ui.theme.PureBlack
 import kotlinx.coroutines.launch
 
-/**
- * AppLockSettingsPage
- * Configure PIN protection, biometric sensor authentication, and auto-lock timeout.
- */
+private val IOSBlue = Color(0xFF007AFF)
+private val IOSGreen = Color(0xFF34C759)
+private val IOSOrange = Color(0xFFFF9500)
+
 @Composable
 fun AppLockSettingsPage(
     repository: SettingsRepository,
     encryptedStorage: EncryptedStorage,
     onBack: () -> Unit,
     onChangePin: () -> Unit,
+    onChangeChatPin: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val settings by repository.settingsFlow.collectAsState(initial = FocusSettings())
@@ -63,88 +59,86 @@ fun AppLockSettingsPage(
             .padding(WindowInsets.statusBars.asPaddingValues())
     ) {
         FocusGramTopBar(
-            title = "App Lock Settings",
+            title = "App Lock",
             onBack = onBack
         )
 
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(horizontal = 16.dp)
         ) {
             item {
-                FocusGramSectionHeader(
-                    title = "Security Guard",
-                    subtitle = "Restrict app access to prevent unconscious Instagram opens"
-                )
-            }
-
-            item {
-                FocusGramToggleRow(
-                    title = "Enable App Lock",
-                    subtitle = if (settings.appLockEnabled) "App requires 4-digit PIN to open" else "Disabled",
-                    checked = settings.appLockEnabled,
-                    onCheckedChange = { isChecked ->
-                        if (isChecked && !encryptedStorage.hasPin()) {
-                            onChangePin()
-                        } else {
-                            scope.launch { repository.setAppLock(isChecked, settings.biometricEnabled) }
-                        }
-                    },
-                    icon = Icons.Default.Lock
-                )
+                IOSSectionTitle(title = "APP PROTECTION")
+                IOSGroupedCard {
+                    IOSSettingsRow(
+                        title = "App Lock Protection",
+                        subtitle = "Require 4-digit PIN or biometrics upon opening FocusGram",
+                        icon = Icons.Default.Lock,
+                        iconBgColor = IOSBlue,
+                        checked = settings.appLockEnabled,
+                        onCheckedChange = { isChecked ->
+                            scope.launch {
+                                repository.setAppLock(isChecked, settings.biometricEnabled)
+                            }
+                            if (isChecked && !encryptedStorage.hasPin()) {
+                                onChangePin()
+                            }
+                        },
+                        showDivider = false
+                    )
+                }
             }
 
             if (settings.appLockEnabled) {
                 item {
-                    FocusGramToggleRow(
-                        title = "Biometric Unlock",
-                        subtitle = "Use fingerprint or face recognition to unlock",
-                        checked = settings.biometricEnabled,
-                        onCheckedChange = { scope.launch { repository.setAppLock(true, it) } }
-                    )
-                }
-
-                item {
-                    FocusGramToggleRow(
-                        title = "Auto-Lock on Background",
-                        subtitle = "Immediately lock whenever leaving FocusGram",
-                        checked = settings.autoLockOnBackground,
-                        onCheckedChange = { isChecked ->
-                            scope.launch { repository.setAutoLockBackground(isChecked) }
-                        }
-                    )
-                }
-
-                item {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Button(
-                        onClick = onChangePin,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = InstagramBlue)
-                    ) {
-                        Text("Change PIN", color = PureBlack)
+                    IOSSectionTitle(title = "AUTHENTICATION METHOD")
+                    IOSGroupedCard {
+                        IOSSettingsRow(
+                            title = "Biometric Unlock",
+                            subtitle = "Use fingerprint or face unlock",
+                            icon = Icons.Default.Fingerprint,
+                            iconBgColor = IOSGreen,
+                            checked = settings.biometricEnabled,
+                            onCheckedChange = { isChecked ->
+                                scope.launch {
+                                    repository.setAppLock(settings.appLockEnabled, isChecked)
+                                }
+                            }
+                        )
+                        IOSSettingsRow(
+                            title = if (encryptedStorage.hasPin()) "Change 4-Digit PIN" else "Set 4-Digit PIN",
+                            subtitle = "Update master passcode for app entry",
+                            icon = Icons.Default.Lock,
+                            iconBgColor = IOSOrange,
+                            onClick = onChangePin,
+                            showDivider = false
+                        )
                     }
                 }
 
                 item {
-                    OutlinedButton(
-                        onClick = {
-                            scope.launch {
-                                encryptedStorage.clearPin()
-                                repository.setAppLock(enabled = false, biometric = false)
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Disable & Remove PIN", color = AlertRed)
+                    IOSSectionTitle(title = "AUTO-LOCK BEHAVIOR")
+                    IOSGroupedCard {
+                        IOSSettingsRow(
+                            title = "Auto-Lock in Background",
+                            subtitle = "Lock immediately whenever FocusGram is minimized",
+                            icon = Icons.Default.Schedule,
+                            iconBgColor = Color(0xFF636366),
+                            checked = settings.autoLockOnBackground,
+                            onCheckedChange = { isChecked ->
+                                scope.launch {
+                                    repository.setAutoLockBackground(isChecked)
+                                }
+                            },
+                            showDivider = false
+                        )
                     }
                 }
             }
 
             item {
-                Spacer(modifier = Modifier.height(30.dp))
+                Spacer(modifier = Modifier.height(40.dp))
             }
         }
     }

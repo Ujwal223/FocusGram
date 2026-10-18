@@ -118,6 +118,25 @@ class FocusGramNavigationDelegate(
                 }
             }
             Log.d(TAG, "Location changed to: $it")
+            val lower = it.lowercase()
+            if (lower.contains("/direct/t/")) {
+                val path = try { Uri.parse(it).path?.lowercase() ?: "" } catch (_: Exception) { "" }
+                val tid = path.removePrefix("/direct/t/").trim('/').split('/').firstOrNull()?.trim() ?: ""
+                val settings = sessionManager.currentSettings
+                val isLocked = if (settings.chatLockMode == "off") {
+                    false
+                } else if (settings.chatLockMode == "whole_dm" || settings.chatLockAll) {
+                    true
+                } else {
+                    settings.lockedChatIds.any { lockedId ->
+                        val clean = lockedId.trim().lowercase().removePrefix("@")
+                        clean.equals(tid, ignoreCase = true) || lower.contains(clean)
+                    }
+                }
+                if (isLocked) {
+                    session.loadUri("javascript:(function(){if(typeof window.__fgApplyPrivacyVeil==='function'){window.__fgApplyPrivacyVeil();}})()")
+                }
+            }
             sessionManager.updateCurrentUrl(it)
             onRouteChanged?.invoke(it)
             sessionManager.injectBottomBarTrimmer()
