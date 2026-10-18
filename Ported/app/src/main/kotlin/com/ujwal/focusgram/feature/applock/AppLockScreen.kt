@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.Fingerprint
@@ -67,6 +68,8 @@ fun AppLockScreen(
     isBiometricAllowed: Boolean = true,
     title: String = "FocusGram is Locked",
     subtitle: String = "Enter your PIN to unlock",
+    customVerifyPin: ((String) -> Boolean)? = null,
+    onCancel: (() -> Unit)? = null,
     onUnlockSuccess: () -> Unit
 ) {
     val context = LocalContext.current
@@ -120,7 +123,7 @@ fun AppLockScreen(
             )
 
             val promptInfo = BiometricPrompt.PromptInfo.Builder()
-                .setTitle("Unlock FocusGram")
+                .setTitle(title)
                 .setSubtitle("Confirm your biometric to proceed")
                 .setNegativeButtonText("Use PIN")
                 .build()
@@ -129,9 +132,11 @@ fun AppLockScreen(
         }
     }
 
-    // Trigger BiometricPrompt if enabled and available
-    LaunchedEffect(Unit) {
-        triggerBiometricPrompt()
+    // Trigger BiometricPrompt only if enabled and allowed
+    LaunchedEffect(isBiometricAllowed) {
+        if (isBiometricAllowed) {
+            triggerBiometricPrompt()
+        }
     }
 
     fun verifyEnteredPin(pin: String) {
@@ -142,7 +147,11 @@ fun AppLockScreen(
             return
         }
 
-        val isValid = encryptedStorage.verifyPin(pin)
+        val isValid = if (customVerifyPin != null) {
+            customVerifyPin(pin)
+        } else {
+            encryptedStorage.verifyPin(pin)
+        }
         if (isValid) {
             onUnlockSuccess()
         } else {
@@ -200,6 +209,26 @@ fun AppLockScreen(
                 .padding(horizontal = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            if (onCancel != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.Start
+                ) {
+                    Text(
+                        text = "Cancel",
+                        color = InstagramBlue,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onCancel() }
+                            .padding(vertical = 6.dp, horizontal = 4.dp)
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.weight(1f))
 
             // Lock Icon
@@ -277,11 +306,12 @@ fun AppLockScreen(
                     .padding(bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                val bioKey = if (isBiometricAllowed) "BIO" else ""
                 val keypadRows = listOf(
                     listOf("1", "2", "3"),
                     listOf("4", "5", "6"),
                     listOf("7", "8", "9"),
-                    listOf("BIO", "0", "DEL")
+                    listOf(bioKey, "0", "DEL")
                 )
 
                 for (row in keypadRows) {
@@ -340,6 +370,7 @@ private fun KeypadButton(
                 tint = InstagramBlue,
                 modifier = Modifier.size(28.dp)
             )
+            "" -> {}
             else -> Text(
                 text = key,
                 fontSize = 26.sp,

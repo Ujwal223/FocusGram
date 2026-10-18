@@ -26,7 +26,11 @@ let cachedSettings = {
     ghostHideDirectSeen: true,
     ghostHideTypingIndicator: true,
     unblurMode: 'tap',
-    videoDownloadEnabled: false
+    videoDownloadEnabled: false,
+    chatLockMode: 'individual',
+    chatLockAll: false,
+    lockedChatIds: [],
+    lockedChatUsernames: {}
 };
 
 let userIsAuthenticated = false;
@@ -109,14 +113,148 @@ if (typeof browser !== 'undefined' && browser.webRequest && browser.webRequest.o
         { urls: GHOST_BLOCKED_URL_PATTERNS },
         ["blocking"]
     );
+
+    // --- Story Viewer List Interception (Client-Side Search) ---
+    // Passively captures the response of Instagram's own web client when opening viewers list.
+    // Zero automated/extra requests — uses web client's authenticated response.
+    const storyViewersCache = new Map(); // mediaId -> Array<{pk, username, fullName, avatar, hasLiked}>
+
+    browser.webRequest.onBeforeRequest.addListener(
+        function (details) {
+            const url = details.url || '';
+            const match = url.match(/\/api\/v1\/media\/(\d+)\/list_reel_media_viewer\//);
+            if (!match) return;
+
+            const mediaId = match[1];
+
+            // Immediately broadcast detection when request is SENT so search bar appears right away!
+            broadcastToTabs({
+                action: 'storyViewersDetected',
+                phase: 'loading',
+                mediaId: mediaId,
+                url: url
+            });
+
+            if (typeof browser.webRequest.filterResponseData === 'function') {
+                try {
+                    const filter = browser.webRequest.filterResponseData(details.requestId);
+                    const chunks = [];
+
+                    filter.ondata = function (event) {
+                        chunks.push(event.data);
+                        filter.write(event.data); // Transparently stream data to Instagram web client
+                    };
+
+                    filter.onstop = async function () {
+                        filter.close();
+                        try {
+                            const blob = new Blob(chunks);
+                            const text = await blob.text();
+                            const json = JSON.parse(text);
+                            const users = json.users || [];
+                            const rawViewers = json.viewers || [];
+
+                            const existing = storyViewersCache.get(mediaId) || [];
+                            const userMap = new Map(existing.map(u => [String(u.pk || u.id), u]));
+
+                            users.forEach(u => {
+                                const pk = String(u.pk || u.id);
+                                if (!pk) return;
+                                userMap.set(pk, {
+                                    pk: pk,
+                                    username: u.username || '',
+                                    fullName: u.full_name || '',
+                                    avatar: u.profile_pic_url || '',
+                                    isVerified: !!u.is_verified,
+                                    hasLiked: false
+                                });
+                            });
+
+                            rawViewers.forEach(v => {
+                                const u = v.user || v;
+                                const pk = String(u.pk || u.id);
+                                if (!pk) return;
+                                const existingEntry = userMap.get(pk) || {};
+                                userMap.set(pk, {
+                                    pk: pk,
+                                    username: u.username || existingEntry.username || '',
+                                    fullName: u.full_name || existingEntry.fullName || '',
+                                    avatar: u.profile_pic_url || existingEntry.avatar || '',
+                                    isVerified: !!(u.is_verified || existingEntry.isVerified),
+                                    hasLiked: !!(v.has_liked || existingEntry.hasLiked)
+                                });
+                            });
+
+                            const viewerList = Array.from(userMap.values());
+                            storyViewersCache.set(mediaId, viewerList);
+                            console.log(`[FocusGram] Story viewers captured for ${mediaId}: ${viewerList.length} users`);
+
+                            // Broadcast captured viewers to active tabs
+                            broadcastToTabs({
+                                action: 'storyViewersDetected',
+                                phase: 'ready',
+                                mediaId: mediaId,
+                                viewers: viewerList
+                            });
+                            broadcastToTabs({
+                                action: 'storyViewersCaptured',
+                                mediaId: mediaId,
+                                viewers: viewerList
+                            });
+                        } catch (e) {
+                            console.warn('[FocusGram] Error parsing story viewers payload:', e);
+                        }
+                    };
+                } catch (err) {
+                    console.warn('[FocusGram] filterResponseData error:', err);
+                }
+            }
+        },
+        { urls: ["*://*.instagram.com/api/v1/media/*/list_reel_media_viewer/*"] },
+        ["blocking"]
+    );
 }
 
 // Establish native messaging port with FocusGram Android host
 let nativePort = null;
+const pendingNativeMessages = [];
+
+function sendToNative(msg) {
+    if (!msg) return;
+    if (nativePort) {
+        try {
+            nativePort.postMessage(msg);
+            console.log('[FocusGram Background] Forwarded to native host:', JSON.stringify(msg));
+            return;
+        } catch (e) {
+            console.warn('[FocusGram Background] postMessage failed, queueing message:', e);
+            nativePort = null;
+        }
+    }
+    pendingNativeMessages.push(msg);
+    if (pendingNativeMessages.length > 50) pendingNativeMessages.shift();
+    connectNativePort();
+}
+
+function flushPendingMessages() {
+    if (!nativePort) return;
+    while (pendingNativeMessages.length > 0) {
+        const msg = pendingNativeMessages.shift();
+        try {
+            nativePort.postMessage(msg);
+            console.log('[FocusGram Background] Flushed queued message to native host:', JSON.stringify(msg));
+        } catch (e) {
+            console.error('[FocusGram Background] Error flushing queued message:', e);
+            pendingNativeMessages.unshift(msg);
+            break;
+        }
+    }
+}
 
 function connectNativePort() {
     try {
         if (typeof browser !== 'undefined' && browser.runtime && browser.runtime.connectNative) {
+            if (nativePort) return;
             nativePort = browser.runtime.connectNative("focusgram");
             console.log('[FocusGram Background] Connected to native host "focusgram"');
 
@@ -136,12 +274,14 @@ function connectNativePort() {
             nativePort.onDisconnect.addListener((p) => {
                 console.warn('[FocusGram Background] Native port disconnected, will retry...');
                 nativePort = null;
-                setTimeout(connectNativePort, 5000);
+                setTimeout(connectNativePort, 3000);
             });
+
+            flushPendingMessages();
         }
     } catch (e) {
         console.error('[FocusGram Background] Error connecting native port:', e);
-        setTimeout(connectNativePort, 5000);
+        setTimeout(connectNativePort, 3000);
     }
 }
 
@@ -175,33 +315,37 @@ if (typeof browser !== 'undefined' && browser.runtime && browser.runtime.onMessa
             return true;
         }
 
-        if (!nativePort) {
-            connectNativePort();
+        if (message.action === 'getStoryViewers') {
+            const mediaId = message.mediaId;
+            const viewers = mediaId ? (storyViewersCache.get(mediaId) || []) : [];
+            sendResponse({ viewers: viewers });
+            return true;
         }
 
-        if (nativePort) {
-            try {
-                if (message.type === 'ReelMetadata' || message.action === 'reelViewed' || message.action === 'reelWatched') {
-                    const payload = message.payload || message.data || message.reel || message;
-                    nativePort.postMessage({
-                        action: 'reelViewed',
-                        type: message.type || 'reelViewed',
-                        code: payload.code || message.code || '',
-                        url: payload.url || message.url || '',
-                        title: payload.caption || payload.title || message.caption || message.title || '',
-                        caption: payload.caption || message.caption || '',
-                        author: payload.author || message.author || '',
-                        thumbnailUrl: payload.thumbnailUrl || message.thumbnailUrl || ''
-                    });
-                } else {
-                    nativePort.postMessage(message);
-                }
-                console.log('[FocusGram Background] Forwarded to native host:', JSON.stringify(message));
-            } catch (e) {
-                console.error('[FocusGram Background] Failed to forward message to native host:', e);
-            }
+        if (message.action === 'broadcastToTabs' && message.payload) {
+            broadcastToTabs(message.payload);
+            sendResponse({ status: 'broadcasted' });
+            return true;
         }
+
+        if (message.type === 'ReelMetadata' || message.action === 'reelViewed' || message.action === 'reelWatched') {
+            const payload = message.payload || message.data || message.reel || message;
+            sendToNative({
+                action: 'reelViewed',
+                type: message.type || 'reelViewed',
+                code: payload.code || message.code || '',
+                url: payload.url || message.url || '',
+                title: payload.caption || payload.title || message.caption || message.title || '',
+                caption: payload.caption || message.caption || '',
+                author: payload.author || message.author || '',
+                thumbnailUrl: payload.thumbnailUrl || message.thumbnailUrl || ''
+            });
+        } else {
+            sendToNative(message);
+        }
+
         sendResponse({ status: 'forwarded' });
         return true;
     });
 }
+

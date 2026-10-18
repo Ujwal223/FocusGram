@@ -30,6 +30,8 @@ class UserScriptManager(private val context: Context) {
      * and broadcasts updates to active scripts.
      */
     fun injectConfig(session: GeckoSession, settings: FocusSettings) {
+        val lockedIdsJson = org.json.JSONArray(settings.lockedChatIds.map { it.lowercase().trim().removePrefix("@") }).toString()
+        val lockedUsersJson = org.json.JSONObject(settings.lockedChatUsernames).toString()
         val configJs = """
             (function() {
                 window.__FOCUSGRAM_CONFIG__ = {
@@ -59,6 +61,24 @@ class UserScriptManager(private val context: Context) {
                     igSeen: ${settings.ghostHideDirectSeen},
                     igTyping: ${settings.ghostHideTypingIndicator}
                 };
+                window.__fgChatLockMode = '${settings.chatLockMode}';
+                window.__fgChatLockAll = ${settings.chatLockAll || settings.chatLockMode == "whole_dm"};
+                window.__fgLockedChatIds = $lockedIdsJson;
+                window.__fgLockedChatUsernames = $lockedUsersJson;
+                window.__fgThreadUsernameMap = $lockedUsersJson;
+
+                const syncDetail = {
+                    chatLockMode: '${settings.chatLockMode}',
+                    chatLockAll: ${settings.chatLockAll || settings.chatLockMode == "whole_dm"},
+                    lockedChatIds: $lockedIdsJson,
+                    lockedChatUsernames: $lockedUsersJson,
+                    threadUsernameMap: $lockedUsersJson
+                };
+                try {
+                    window.dispatchEvent(new CustomEvent('focusgram:chat-lock-sync', { detail: syncDetail }));
+                    document.dispatchEvent(new CustomEvent('focusgram:chat-lock-sync', { detail: syncDetail }));
+                } catch(_) {}
+
                 if (window.__focusgramUpdateStyles) {
                     window.__focusgramUpdateStyles();
                 }

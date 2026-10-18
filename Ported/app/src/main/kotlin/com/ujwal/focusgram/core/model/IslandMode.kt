@@ -44,7 +44,7 @@ enum class IslandMode {
             val path = extractPath(url)
 
             return when {
-                path.startsWith("/accounts/") || path.startsWith("/login") || path.startsWith("/signup") -> HIDDEN
+                (path.startsWith("/accounts/") && !path.startsWith("/accounts/edit")) || path.startsWith("/login") || path.startsWith("/signup") -> HIDDEN
                 path.startsWith("/direct") -> HIDDEN
                 path.contains("/comments") -> HIDDEN
                 path.startsWith("/stories/") -> HIDDEN

@@ -35,6 +35,7 @@ import com.ujwal.focusgram.core.utils.MediaDownloadHelper
 import com.ujwal.focusgram.feature.screentime.ScreenTimeService
 import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -42,9 +43,28 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Text
+import android.widget.Toast
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -61,6 +81,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -89,6 +110,7 @@ import com.ujwal.focusgram.core.ui.theme.PureBlack
 import com.ujwal.focusgram.feature.applock.AppLockScreen
 import com.ujwal.focusgram.feature.applock.AppLockSettingsPage
 import com.ujwal.focusgram.feature.applock.AppLockSetupScreen
+import com.ujwal.focusgram.feature.applock.ChatLockScreen
 import com.ujwal.focusgram.feature.diagnostics.DebugMenuScreen
 import com.ujwal.focusgram.feature.history.ReelsHistoryRepository
 import com.ujwal.focusgram.feature.history.ReelsHistoryScreen
@@ -119,9 +141,16 @@ enum class AppDestination {
     GUARDRAILS,
     APP_LOCK_SETUP,
     APP_LOCK_SETTINGS,
+    CHAT_LOCK_SETUP,
     DEBUG_MENU,
     ADSTERRA_REWARDED
 }
+
+data class PendingChatUnlock(
+    val threadId: String,
+    val username: String?,
+    val targetUrl: String?
+)
 
 /**
  * FocusGramApp
@@ -165,16 +194,111 @@ fun FocusGramApp() {
     val settings by settingsRepository.settingsFlow.collectAsState(initial = initialSettings)
     val currentUrl by sessionManager.currentUrl.collectAsState()
     var isAppInForeground by remember { mutableStateOf(true) }
-    var destination by remember { mutableStateOf(AppDestination.MAIN_WEBVIEW) }
+    var destination by rememberSaveable { mutableStateOf(AppDestination.MAIN_WEBVIEW) }
     val isViewingReels = destination == AppDestination.MAIN_WEBVIEW && currentUrl.lowercase().contains("/reel")
     val hasPin = remember { encryptedStorage.hasPin() }
-    var isAppUnlocked by remember { mutableStateOf(false) }
+    var isAppUnlocked by rememberSaveable { mutableStateOf(false) }
     val shouldShowLock = settings.appLockEnabled && hasPin && !isAppUnlocked
-    var hasPassedSessionPicker by remember { mutableStateOf(false) }
-    var hasPassedBreathGate by remember { mutableStateOf(!initialSettings.showBreathGate || initialSettings.breathGateSeconds <= 0) }
-    var hasPassedEffortFriction by remember { mutableStateOf(!initialSettings.effortFrictionEnabled || initialSettings.wordChallengeCount <= 0) }
+
+    // Direct Messages & Chat Lock Evaluation
+    val threadToUsernameMap = remember { androidx.compose.runtime.mutableStateMapOf<String, Set<String>>() }
+    var unlockedChatThreadIds by remember { mutableStateOf(emptySet<String>()) }
+    var isDirectAllUnlocked by remember { mutableStateOf(false) }
+    var pendingUnlockChat by remember { mutableStateOf<PendingChatUnlock?>(null) }
+
+    LaunchedEffect(extensionManager) {
+        extensionManager.onThreadUsernameMapped = { threadId, usernames ->
+            val cleanThreadId = threadId.lowercase().trim()
+            val existing = threadToUsernameMap[cleanThreadId] ?: emptySet()
+            threadToUsernameMap[cleanThreadId] = existing + usernames.map { it.lowercase().trim().removePrefix("@") }
+            scope.launch {
+                usernames.firstOrNull()?.let { user ->
+                    settingsRepository.mapThreadUsername(threadId, user)
+                }
+            }
+        }
+        extensionManager.onRequestUnlockChat = { threadId, username, targetUrl ->
+            val cleanThreadId = threadId.lowercase().trim()
+            val cleanUser = username?.lowercase()?.trim()?.removePrefix("@")
+                ?: threadToUsernameMap[cleanThreadId]?.firstOrNull()
+                ?: settings.lockedChatUsernames[cleanThreadId]
+            pendingUnlockChat = PendingChatUnlock(cleanThreadId, cleanUser, targetUrl)
+        }
+        extensionManager.onToggleChatLock = { threadId, username ->
+            scope.launch {
+                val isNowLocked = settingsRepository.toggleLockedChat(threadId, username)
+                val label = if (!username.isNullOrBlank()) "@$username" else "Conversation"
+                val msg = if (isNowLocked) "Locked $label" else "Unlocked $label"
+                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    val currentUri = remember(currentUrl) { try { Uri.parse(currentUrl) } catch (_: Exception) { null } }
+    val currentPath = currentUri?.path?.lowercase() ?: ""
+    val isDirectRoute = currentPath.startsWith("/direct")
+    val currentThreadId = remember(currentPath) {
+        if (currentPath.startsWith("/direct/t/")) {
+            currentPath.removePrefix("/direct/t/").trim('/').split('/').firstOrNull()?.trim()
+        } else null
+    }
+
+    var activeThreadId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(currentThreadId) {
+        if (activeThreadId != null && activeThreadId != currentThreadId) {
+            val closedThreadId = activeThreadId!!
+            unlockedChatThreadIds = unlockedChatThreadIds - closedThreadId
+            extensionManager.notifyChatLocked(closedThreadId)
+            sessionManager.userScriptManager?.evaluate(sessionManager.session, """
+                if (window.__fgUnlockedThreads && Array.isArray(window.__fgUnlockedThreads)) {
+                    window.__fgUnlockedThreads = window.__fgUnlockedThreads.filter(function(id) { return id !== '${closedThreadId.lowercase().trim()}'; });
+                }
+                window.dispatchEvent(new CustomEvent('focusgram:chat-lock-sync', {
+                    detail: { unlockedThreads: window.__fgUnlockedThreads || [] }
+                }));
+            """)
+        }
+        activeThreadId = currentThreadId
+    }
+
+    val isChatLockActive = remember(
+        currentUrl,
+        currentPath,
+        currentThreadId,
+        settings,
+        unlockedChatThreadIds,
+        isDirectAllUnlocked,
+        threadToUsernameMap.size,
+        pendingUnlockChat,
+        settings.lockedChatUsernames.size
+    ) {
+        if (pendingUnlockChat != null) return@remember true
+        if (!isDirectRoute) return@remember false
+        if (settings.chatLockMode == "off") return@remember false
+        if (settings.chatLockMode == "whole_dm" || settings.chatLockAll) {
+            if (isDirectAllUnlocked) return@remember false
+            return@remember true
+        }
+        if (currentThreadId != null) {
+            if (unlockedChatThreadIds.contains(currentThreadId)) return@remember false
+            val associatedUsers = threadToUsernameMap[currentThreadId] ?: emptySet()
+            val mappedName = settings.lockedChatUsernames[currentThreadId]
+            val isLocked = settings.lockedChatIds.any { lockedId ->
+                val clean = lockedId.trim().lowercase().removePrefix("@")
+                clean.equals(currentThreadId, ignoreCase = true) ||
+                currentUrl.contains(clean, ignoreCase = true) ||
+                associatedUsers.any { it.equals(clean, ignoreCase = true) } ||
+                (!mappedName.isNullOrBlank() && clean.equals(mappedName.lowercase().trim().removePrefix("@"), ignoreCase = true))
+            }
+            return@remember isLocked
+        }
+        false
+    }
+    var hasPassedSessionPicker by rememberSaveable { mutableStateOf(false) }
+    var hasPassedBreathGate by rememberSaveable { mutableStateOf(!initialSettings.showBreathGate || initialSettings.breathGateSeconds <= 0) }
+    var hasPassedEffortFriction by rememberSaveable { mutableStateOf(!initialSettings.effortFrictionEnabled || initialSettings.wordChallengeCount <= 0) }
     val lastSessionEndTimestamp by settingsRepository.lastSessionEndTimestampFlow.collectAsState(initial = 0L)
-    var hasPassedCooldownGate by remember { mutableStateOf(false) }
+    var hasPassedCooldownGate by rememberSaveable { mutableStateOf(false) }
 
     val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US) }
     val today = remember { dateFormat.format(Date()) }
@@ -193,6 +317,8 @@ fun FocusGramApp() {
     }
 
     var isWebInputFocused by remember { mutableStateOf(false) }
+    var isBioFocused by remember { mutableStateOf(false) }
+    var selectedBioStyle by remember { mutableStateOf("bold") }
     var isModalActive by remember { mutableStateOf(false) }
     var isUserAuthenticated by remember { mutableStateOf(false) }
     var isAuthPage by remember { mutableStateOf(false) }
@@ -207,12 +333,14 @@ fun FocusGramApp() {
     var settingsSubpage by rememberSaveable { mutableStateOf(com.ujwal.focusgram.feature.settings.SettingsSubpage.MAIN) }
 
     // Evaluates whether any barrier, lock, breath pause, effort friction, cooldown, or intention picker is active
-    val isGateActive = shouldShowLock ||
-            ((isDailyLimitExhausted || isSessionExhausted) && destination != AppDestination.ADSTERRA_REWARDED) ||
+    val isGateActive = destination != AppDestination.ADSTERRA_REWARDED && (
+            shouldShowLock ||
+            isDailyLimitExhausted || isSessionExhausted ||
             (remainingCooldownSeconds > 0 && !hasPassedCooldownGate) ||
             (settings.showBreathGate && settings.breathGateSeconds > 0 && !hasPassedBreathGate) ||
             (settings.effortFrictionEnabled && settings.wordChallengeCount > 0 && !hasPassedEffortFriction) ||
             !hasPassedSessionPicker
+    )
 
     // System File Chooser / Camera / Gallery Launchers for Story, Post, DMs & Profile Uploads
     val pendingFilePickerCallback = remember { AtomicReference<((List<Uri>) -> Unit)?>(null) }
@@ -562,21 +690,32 @@ fun FocusGramApp() {
         }
     }
 
+    val currentDestination by rememberUpdatedState(destination)
+    val currentHasPassedSessionPicker by rememberUpdatedState(hasPassedSessionPicker)
+    val currentTotalElapsedSeconds by rememberUpdatedState(totalElapsedSeconds)
+
     // Lifecycle observer for foreground/background state, media pausing, and auto-lock
     DisposableEffect(lifecycleOwner, settings.appLockEnabled, settings.autoLockOnBackground) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) {
                 isAppInForeground = false
                 sessionManager.pauseMedia()
-                if (hasPassedSessionPicker && totalElapsedSeconds >= 15) {
+                if (currentHasPassedSessionPicker && currentTotalElapsedSeconds >= 15) {
                     scope.launch { settingsRepository.recordSessionEnd() }
                 }
-                if (settings.appLockEnabled && (settings.autoLockOnBackground || !hasPassedSessionPicker)) {
-                    isAppUnlocked = false
+                // Do not lock the app if the user is currently on the rewarded ad screen (e.g. clicking out to view an ad in browser)
+                if (currentDestination != AppDestination.ADSTERRA_REWARDED) {
+                    if (settings.appLockEnabled && (settings.autoLockOnBackground || !currentHasPassedSessionPicker)) {
+                        isAppUnlocked = false
+                    }
+                    if (settings.autoLockOnBackground) {
+                        unlockedChatThreadIds = emptySet()
+                        isDirectAllUnlocked = false
+                    }
                 }
             } else if (event == Lifecycle.Event.ON_START) {
                 isAppInForeground = true
-                if (destination == AppDestination.MAIN_WEBVIEW && !isGateActive) {
+                if (currentDestination == AppDestination.MAIN_WEBVIEW && !isGateActive) {
                     sessionManager.resumeMedia()
                 }
             }
@@ -595,12 +734,22 @@ fun FocusGramApp() {
         extensionManager.onInputFocused = { focused ->
             isWebInputFocused = focused
         }
+        extensionManager.onBioInputFocused = { focused ->
+            isBioFocused = focused
+        }
         extensionManager.onUrlChanged = { newUrl ->
             val mode = IslandMode.fromUrl(newUrl)
+            val lower = newUrl.lowercase()
+            val isAuthRoute = (lower.contains("/accounts") && !lower.contains("/accounts/edit")) || lower.contains("/login") || lower.contains("/signup")
+            isAuthPage = isAuthRoute
+            if (!isAuthRoute) {
+                isUserAuthenticated = true
+            }
             sessionManager.updateCurrentUrl(newUrl)
             sessionManager.updateIslandMode(mode)
             extensionManager.setIslandMode(mode)
             isWebInputFocused = false
+            isBioFocused = false
             isModalActive = mode == IslandMode.HIDDEN
         }
         extensionManager.onModalOrChatActive = { active ->
@@ -680,13 +829,16 @@ fun FocusGramApp() {
             onRouteChanged = { newUrl ->
                 val mode = IslandMode.fromUrl(newUrl)
                 val lower = newUrl.lowercase()
-                if (lower.contains("/accounts") || lower.contains("/login") || lower.contains("/signup")) {
-                    isAuthPage = true
+                val isAuthRoute = (lower.contains("/accounts") && !lower.contains("/accounts/edit")) || lower.contains("/login") || lower.contains("/signup")
+                isAuthPage = isAuthRoute
+                if (!isAuthRoute) {
+                    isUserAuthenticated = true
                 }
                 sessionManager.updateCurrentUrl(newUrl)
                 sessionManager.updateIslandMode(mode)
                 extensionManager.setIslandMode(mode)
                 isWebInputFocused = false
+                isBioFocused = false
                 isModalActive = mode == IslandMode.HIDDEN
             }
         )
@@ -873,6 +1025,82 @@ fun FocusGramApp() {
                 modifier = Modifier.align(Alignment.TopCenter)
             )
 
+            // Native DM Chat Header Lock Overlay Button (positioned adjacent to Instagram's Info button)
+            if (!isGateActive && destination == AppDestination.MAIN_WEBVIEW && currentThreadId != null && settings.chatLockMode == "individual") {
+                val isChatExplicitlyLocked = remember(currentThreadId, settings.lockedChatIds, threadToUsernameMap.size, settings.lockedChatUsernames.size) {
+                    val associatedUsers = threadToUsernameMap[currentThreadId] ?: emptySet()
+                    val mappedName = settings.lockedChatUsernames[currentThreadId]
+                    settings.lockedChatIds.any { lockedId ->
+                        val clean = lockedId.trim().lowercase().removePrefix("@")
+                        clean.equals(currentThreadId, ignoreCase = true) ||
+                        associatedUsers.any { it.equals(clean, ignoreCase = true) } ||
+                        (!mappedName.isNullOrBlank() && clean.equals(mappedName.lowercase().trim().removePrefix("@"), ignoreCase = true))
+                    }
+                }
+                val isCurrentlyLocked = isChatExplicitlyLocked
+
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(end = 52.dp, top = 2.dp)
+                        .size(44.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val iconTint = if (isCurrentlyLocked) {
+                        Color(0xFFFF3B30)
+                    } else if (isAppLight) {
+                        Color(0xFF262626)
+                    } else {
+                        Color.White.copy(alpha = 0.9f)
+                    }
+
+                    IconButton(
+                        onClick = {
+                            var username = threadToUsernameMap[currentThreadId]?.firstOrNull()
+                                ?: settings.lockedChatUsernames[currentThreadId]
+                            scope.launch {
+                                if (username.isNullOrBlank()) {
+                                    try {
+                                        sessionManager.userScriptManager?.evaluate(
+                                            sessionManager.session,
+                                            "if (typeof window.__fgGetThreadParticipant === 'function') { window.__fgGetThreadParticipant(); }"
+                                        )
+                                    } catch (_: Exception) {}
+                                    username = threadToUsernameMap[currentThreadId]?.firstOrNull()
+                                        ?: settings.lockedChatUsernames[currentThreadId]
+                                }
+                                val isNowLocked = settingsRepository.toggleLockedChat(currentThreadId, username)
+                                if (isNowLocked) {
+                                    // Conversation is now locked: engage lock immediately
+                                    unlockedChatThreadIds = unlockedChatThreadIds - currentThreadId
+                                    extensionManager.notifyChatLocked(currentThreadId)
+                                } else {
+                                    // Conversation is now unlocked: keep unlocked in current session
+                                    unlockedChatThreadIds = unlockedChatThreadIds + currentThreadId
+                                    extensionManager.notifyChatUnlocked(currentThreadId, isAll = false)
+                                }
+                                val label = if (!username.isNullOrBlank()) "@$username" else "Conversation"
+                                val msg = if (isNowLocked) "Locked $label" else "Unlocked $label"
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                HapticHelper.performClick(context)
+                            }
+                        },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(
+                            painter = androidx.compose.ui.res.painterResource(
+                                if (isCurrentlyLocked) com.ujwal.focusgram.R.drawable.ic_chat_lock_closed
+                                else com.ujwal.focusgram.R.drawable.ic_chat_lock_open
+                            ),
+                            contentDescription = if (isCurrentlyLocked) "Unlock conversation" else "Lock conversation",
+                            tint = iconTint,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+            }
+
             // Ambient background behind the floating nav bar on Reels (seamless gradient, no harsh border line)
             if (!isGateActive && destination == AppDestination.MAIN_WEBVIEW && islandMode == IslandMode.FLOATING && !isKeyboardOrInputActive) {
                 Box(
@@ -941,6 +1169,64 @@ fun FocusGramApp() {
                 )
             }
 
+            // Native Floating Bio Font Stylist (Anchored directly above the Soft Keyboard via imePadding)
+            if (isBioFocused && !isGateActive && destination == AppDestination.MAIN_WEBVIEW) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .imePadding()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color(0xFA181820),
+                    border = BorderStroke(1.dp, Color(0x33FFFFFF)),
+                    shadowElevation = 8.dp
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        listOf(
+                            "normal" to "Normal",
+                            "bold" to "Bold",
+                            "sans" to "Sans",
+                            "sans_italic" to "Italic",
+                            "mono" to "Mono",
+                            "gothic" to "Gothic",
+                            "script" to "Script"
+                        ).forEach { (id, label) ->
+                            val isSelected = selectedBioStyle == id
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(if (isSelected) Color.White else Color(0xFF262626))
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (isSelected) Color.White else Color(0x33FFFFFF),
+                                        shape = RoundedCornerShape(14.dp)
+                                    )
+                                    .clickable {
+                                        selectedBioStyle = id
+                                        extensionManager.setBioStyle(id)
+                                        HapticHelper.performClick(context)
+                                        sessionManager.session.loadUri("javascript:(function(){window.__fgSetBioStyle&&window.__fgSetBioStyle('$id');})()")
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = label,
+                                    color = if (isSelected) Color.Black else Color(0xFFD1D5DB),
+                                    fontSize = 13.sp,
+                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             // Sub-screen Animated Overlay (Settings, Reels History, App Lock, etc.)
             AnimatedVisibility(
                 visible = !isGateActive && destination != AppDestination.MAIN_WEBVIEW,
@@ -971,6 +1257,7 @@ fun FocusGramApp() {
                         AppDestination.SETTINGS -> {
                             com.ujwal.focusgram.feature.settings.SettingsScreen(
                                 repository = settingsRepository,
+                                inputSettings = settings,
                                 onBack = { destination = AppDestination.MAIN_WEBVIEW },
                                 onNavigateReelsHistory = { destination = AppDestination.REELS_HISTORY },
                                 onNavigateScreenTime = { destination = AppDestination.SCREEN_TIME },
@@ -987,7 +1274,9 @@ fun FocusGramApp() {
                                 screenTimeDao = database.screenTimeDao(),
                                 reelHistory = reelHistory,
                                 currentSubpage = settingsSubpage,
-                                onSubpageChange = { settingsSubpage = it }
+                                onSubpageChange = { settingsSubpage = it },
+                                encryptedStorage = encryptedStorage,
+                                onNavigateChatPinSetup = { destination = AppDestination.CHAT_LOCK_SETUP }
                             )
                         }
 
@@ -1043,7 +1332,20 @@ fun FocusGramApp() {
                                 repository = settingsRepository,
                                 encryptedStorage = encryptedStorage,
                                 onBack = { destination = AppDestination.SETTINGS },
-                                onChangePin = { destination = AppDestination.APP_LOCK_SETUP }
+                                onChangePin = { destination = AppDestination.APP_LOCK_SETUP },
+                                onChangeChatPin = { destination = AppDestination.CHAT_LOCK_SETUP }
+                            )
+                        }
+
+                        AppDestination.CHAT_LOCK_SETUP -> {
+                            AppLockSetupScreen(
+                                encryptedStorage = encryptedStorage,
+                                settingsRepository = settingsRepository,
+                                onBack = { destination = AppDestination.APP_LOCK_SETTINGS },
+                                onSuccess = { destination = AppDestination.APP_LOCK_SETTINGS },
+                                title = "Set Chat Lock PIN",
+                                subtitle = "Used to unlock protected Direct Messages and conversations.",
+                                isChatPinSetup = true
                             )
                         }
 
@@ -1061,8 +1363,15 @@ fun FocusGramApp() {
                                     val pendingAction = adRewardAction
                                     adRewardAction = null
                                     if (pendingAction != null) {
-                                        scope.launch { pendingAction.invoke() }
-                                        destination = AppDestination.SETTINGS
+                                        scope.launch {
+                                            try {
+                                                pendingAction.invoke()
+                                            } catch (e: Exception) {
+                                                Log.e("FocusGramApp", "Failed to apply rewarded setting action", e)
+                                            } finally {
+                                                destination = AppDestination.SETTINGS
+                                            }
+                                        }
                                     } else if (isDailyLimitExhausted) {
                                         scope.launch { settingsRepository.extendDailyLimit5Minutes(today) }
                                         sessionRemainingSeconds += 5 * 60
@@ -1164,6 +1473,117 @@ fun FocusGramApp() {
                             }
                         )
                     }
+                }
+            }
+
+            // Chat Lock Privacy Screen (Instant Black Cover + Hardware Biometric / PIN Gate)
+            if (destination == AppDestination.MAIN_WEBVIEW && !isGateActive && isChatLockActive) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(PureBlack)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {}
+                ) {
+                    val activeThread = pendingUnlockChat?.threadId ?: currentThreadId
+                    val lockedUsername = pendingUnlockChat?.username
+                        ?: activeThread?.let { settings.lockedChatUsernames[it] }
+                        ?: activeThread?.let { threadToUsernameMap[it]?.firstOrNull() }
+                    val chatTitle = when {
+                        settings.chatLockAll && activeThread == null -> "Direct Messages"
+                        !lockedUsername.isNullOrBlank() -> "@$lockedUsername"
+                        else -> "Locked Conversation"
+                    }
+                    ChatLockScreen(
+                        encryptedStorage = encryptedStorage,
+                        isBiometricAllowed = settings.chatBiometricEnabled,
+                        title = chatTitle,
+                        subtitle = "Enter 4-digit PIN to view conversation",
+                        customVerifyPin = if (settings.useSeparateChatPin && encryptedStorage.hasChatPin()) {
+                            { pin -> encryptedStorage.verifyChatPin(pin) }
+                        } else null,
+                        onCancel = {
+                            val pending = pendingUnlockChat
+                            pendingUnlockChat = null
+                            if (currentThreadId != null) {
+                                unlockedChatThreadIds = unlockedChatThreadIds - currentThreadId
+                            }
+                            sessionManager.userScriptManager?.evaluate(sessionManager.session, """
+                                if (typeof window.__fgRemovePrivacyVeil === 'function') {
+                                    window.__fgRemovePrivacyVeil();
+                                }
+                            """)
+                            if (settings.chatLockMode == "whole_dm" || settings.chatLockAll) {
+                                sessionManager.navigateTo("https://www.instagram.com/")
+                            } else {
+                                sessionManager.navigateTo("https://www.instagram.com/direct/inbox/")
+                            }
+                        },
+                        onUnlockSuccess = {
+                            val pending = pendingUnlockChat
+                            if (pending != null) {
+                                pendingUnlockChat = null
+                                unlockedChatThreadIds = unlockedChatThreadIds + pending.threadId
+                                extensionManager.notifyChatUnlocked(pending.threadId, isAll = false)
+
+                                val cleanId = pending.threadId.lowercase().trim()
+                                sessionManager.userScriptManager?.evaluate(sessionManager.session, """
+                                    window.__fgUnlockedThreads = window.__fgUnlockedThreads || [];
+                                    if (!window.__fgUnlockedThreads.includes('$cleanId')) {
+                                        window.__fgUnlockedThreads.push('$cleanId');
+                                    }
+                                    if (typeof window.__fgRemovePrivacyVeil === 'function') {
+                                        window.__fgRemovePrivacyVeil();
+                                    }
+                                    window.dispatchEvent(new CustomEvent('focusgram:chat-lock-sync', {
+                                        detail: { unlockedThreads: window.__fgUnlockedThreads }
+                                    }));
+                                """)
+
+                                val dest = pending.targetUrl ?: "https://www.instagram.com/direct/t/${pending.threadId}/"
+                                val current = sessionManager.currentUrl.value
+                                if (current.contains(pending.threadId)) {
+                                    sessionManager.session.reload()
+                                } else {
+                                    sessionManager.navigateTo(dest)
+                                }
+                            } else if ((settings.chatLockMode == "whole_dm" || settings.chatLockAll) && currentThreadId == null) {
+                                isDirectAllUnlocked = true
+                                extensionManager.notifyChatUnlocked("", isAll = true)
+                                sessionManager.userScriptManager?.evaluate(sessionManager.session, """
+                                    window.__fgUnlockedThreads = window.__fgUnlockedThreads || [];
+                                    if (!window.__fgUnlockedThreads.includes('__all__')) {
+                                        window.__fgUnlockedThreads.push('__all__');
+                                    }
+                                    if (typeof window.__fgRemovePrivacyVeil === 'function') {
+                                        window.__fgRemovePrivacyVeil();
+                                    }
+                                    window.dispatchEvent(new CustomEvent('focusgram:chat-lock-sync', {
+                                        detail: { unlockedThreads: window.__fgUnlockedThreads }
+                                    }));
+                                """)
+                            } else if (currentThreadId != null) {
+                                val cleanId = currentThreadId.lowercase().trim()
+                                unlockedChatThreadIds = unlockedChatThreadIds + currentThreadId
+                                extensionManager.notifyChatUnlocked(currentThreadId, isAll = false)
+                                sessionManager.userScriptManager?.evaluate(sessionManager.session, """
+                                    window.__fgUnlockedThreads = window.__fgUnlockedThreads || [];
+                                    if (!window.__fgUnlockedThreads.includes('$cleanId')) {
+                                        window.__fgUnlockedThreads.push('$cleanId');
+                                    }
+                                    if (typeof window.__fgRemovePrivacyVeil === 'function') {
+                                        window.__fgRemovePrivacyVeil();
+                                    }
+                                    window.dispatchEvent(new CustomEvent('focusgram:chat-lock-sync', {
+                                        detail: { unlockedThreads: window.__fgUnlockedThreads }
+                                    }));
+                                """)
+                                sessionManager.session.reload()
+                            }
+                        }
+                    )
                 }
             }
         }

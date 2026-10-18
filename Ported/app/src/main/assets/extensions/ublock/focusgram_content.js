@@ -33,6 +33,9 @@
     function isAuthPage() {
         try {
             const path = (window.location.pathname || '').toLowerCase();
+            if (path.includes('/accounts/edit')) {
+                return false;
+            }
             if (path.startsWith('/accounts') || path.startsWith('/login') || path.startsWith('/signup')) {
                 return true;
             }
@@ -557,19 +560,41 @@
 
                 const response = await originalFetch.apply(this, arguments);
 
-                // Main-World GraphQL, Clips, & Feed Ad Filtering & Reel Meta Harvesting
-                if (url.includes('/graphql') || url.includes('/api/v1/feed') || url.includes('/api/v1/clips/') || url.includes('/clips/')) {
+                // Main-World GraphQL, Clips, & Feed Ad Filtering & Reel Meta Harvesting & DM Masking
+                if (url.includes('/graphql') || url.includes('/api/v1/feed') || url.includes('/api/v1/clips/') || url.includes('/clips/') || url.includes('/direct/')) {
                     try {
                         const contentType = response.headers.get('content-type') || '';
-                        if (contentType.includes('application/json')) {
+                        if (contentType.includes('json') || contentType.includes('javascript')) {
                             const cloned = response.clone();
-                            const data = await cloned.json();
-                            walkAndFilter(data);
+                            let data;
+                            try {
+                                data = await cloned.json();
+                            } catch (_) {
+                                try {
+                                    let text = await cloned.text();
+                                    text = text.replace(/^for\s*\(\s*;\s*;\s*\)\s*;\s*/, '');
+                                    data = JSON.parse(text);
+                                } catch (e) {
+                                    return response;
+                                }
+                            }
+
+                            let directModified = false;
+                            if (typeof window.__fgProcessDirectMessagesPayload === 'function') {
+                                directModified = window.__fgProcessDirectMessagesPayload(data);
+                            }
+
+                            let adModified = false;
                             if (window.__fgFilterConfig && window.__fgFilterConfig.blockAds !== false) {
+                                walkAndFilter(data);
+                                adModified = true;
+                            }
+
+                            if (directModified || adModified) {
                                 const newHeaders = new Headers(response.headers);
                                 newHeaders.delete('content-length');
                                 newHeaders.delete('content-encoding');
-                                newHeaders.set('content-type', 'application/json; charset=utf-8');
+                                newHeaders.set('content-type', contentType || 'application/json; charset=utf-8');
                                 return new Response(JSON.stringify(data), {
                                     status: response.status,
                                     statusText: response.statusText,
@@ -2176,6 +2201,9 @@
 
     function isAnyModalOpen() {
         const path = window.location.pathname.toLowerCase();
+        if (path.includes('/accounts/edit')) {
+            return false;
+        }
 
         // 1. Route-based detection (DM chats, stories, auth, create)
         if (isAuthRoute(path) || path.includes('/comments') || path.startsWith('/direct/t/') || path.startsWith('/stories/') || path.startsWith('/create')) {
@@ -2276,7 +2304,580 @@
         return mode;
     }
 
+    /* ==========================================================================
+       CHAT PRIVACY VEIL & INBOX PREVIEW MASKING
+       Zero-latency pure black cover over locked chat threads + snippet redaction.
+       ========================================================================== */
+    let chatLockMode = 'individual';
+    let chatLockAll = false;
+    let lockedChatIds = new Set();
+    const unlockedThreads = new Set();
+    const threadUsernameMap = new Map();
+
+    function syncGlobalsToWindow() {
+        const targets = [window];
+        if (typeof window.wrappedJSObject !== 'undefined' && window.wrappedJSObject) {
+            targets.push(window.wrappedJSObject);
+        }
+        const lockedArray = Array.from(lockedChatIds);
+        const unlockedArray = Array.from(unlockedThreads);
+        const userMapObj = {};
+        for (const [k, v] of threadUsernameMap.entries()) {
+            userMapObj[k] = v;
+        }
+
+        for (const target of targets) {
+            try {
+                target.__fgChatLockMode = chatLockMode;
+                target.__fgChatLockAll = chatLockAll;
+                target.__fgLockedChatIds = lockedArray;
+                target.__fgUnlockedThreads = unlockedArray;
+                target.__fgThreadUsernameMap = userMapObj;
+            } catch (_) {}
+        }
+
+        const syncDetail = {
+            chatLockMode: chatLockMode,
+            chatLockAll: chatLockAll,
+            lockedChatIds: lockedArray,
+            unlockedThreads: unlockedArray,
+            threadUsernameMap: userMapObj
+        };
+        try {
+            window.dispatchEvent(new CustomEvent('focusgram:chat-lock-sync', { detail: syncDetail }));
+            document.dispatchEvent(new CustomEvent('focusgram:chat-lock-sync', { detail: syncDetail }));
+        } catch (_) {}
+    }
+
+    function syncChatLockSettings(settings) {
+        if (!settings) return;
+        if (typeof settings.chatLockMode !== 'undefined') {
+            chatLockMode = String(settings.chatLockMode).toLowerCase();
+        }
+        if (typeof settings.chatLockAll !== 'undefined') {
+            chatLockAll = !!settings.chatLockAll;
+            if (chatLockMode === 'whole_dm') {
+                chatLockAll = true;
+            } else if (chatLockMode === 'off') {
+                chatLockAll = false;
+            }
+        } else if (chatLockMode === 'whole_dm') {
+            chatLockAll = true;
+        } else if (chatLockMode === 'off') {
+            chatLockAll = false;
+        }
+        if (Array.isArray(settings.lockedChatIds)) {
+            lockedChatIds = new Set(settings.lockedChatIds.map(id => String(id).toLowerCase().trim().replace(/^@/, '')));
+        }
+        if (settings.lockedChatUsernames && typeof settings.lockedChatUsernames === 'object') {
+            for (const [tid, uname] of Object.entries(settings.lockedChatUsernames)) {
+                const cleanTid = String(tid).toLowerCase().trim();
+                const cleanUname = String(uname).toLowerCase().trim().replace(/^@/, '');
+                if (cleanTid && cleanUname) {
+                    threadUsernameMap.set(cleanTid, cleanUname);
+                    threadUsernameMap.set(cleanUname, cleanTid);
+                    if (lockedChatIds.has(cleanTid)) lockedChatIds.add(cleanUname);
+                    if (lockedChatIds.has(cleanUname)) lockedChatIds.add(cleanTid);
+                }
+            }
+        }
+
+        syncGlobalsToWindow();
+        evaluateChatLockState();
+        maskInboxChatPreviews();
+    }
+
+    const handleThreadMatched = (e) => {
+        const detail = e.detail;
+        if (detail && detail.threadId) {
+            const cleanTid = String(detail.threadId).toLowerCase().trim();
+            const cleanKey = detail.threadKey ? String(detail.threadKey).toLowerCase().trim() : '';
+            if (detail.isLocked) {
+                lockedChatIds.add(cleanTid);
+                if (cleanKey) lockedChatIds.add(cleanKey);
+            }
+            if (Array.isArray(detail.usernames)) {
+                for (const u of detail.usernames) {
+                    const cleanUser = String(u).toLowerCase().trim().replace(/^@/, '');
+                    if (cleanUser) {
+                        threadUsernameMap.set(cleanTid, cleanUser);
+                        threadUsernameMap.set(cleanUser, cleanTid);
+                        if (cleanKey) {
+                            threadUsernameMap.set(cleanKey, cleanUser);
+                            threadUsernameMap.set(cleanUser, cleanKey);
+                        }
+                        if (lockedChatIds.has(cleanUser)) {
+                            lockedChatIds.add(cleanTid);
+                            if (cleanKey) lockedChatIds.add(cleanKey);
+                        }
+                        if (lockedChatIds.has(cleanTid) || (cleanKey && lockedChatIds.has(cleanKey))) {
+                            lockedChatIds.add(cleanUser);
+                        }
+                    }
+                }
+            }
+            postToNative({
+                action: 'threadUsernameMapped',
+                threadId: cleanTid,
+                threadKey: cleanKey,
+                username: (detail.usernames && detail.usernames[0]) || '',
+                usernames: detail.usernames || [],
+                displayName: detail.displayName || '',
+                isLocked: !!detail.isLocked
+            });
+            syncGlobalsToWindow();
+            evaluateChatLockState();
+            maskInboxChatPreviews();
+        }
+    };
+    window.addEventListener('focusgram:thread-matched', handleThreadMatched);
+    document.addEventListener('focusgram:thread-matched', handleThreadMatched);
+
+    function handleUnlockChat(threadId, isAll) {
+        if (isAll) {
+            unlockedThreads.add('__all__');
+        }
+        if (threadId) {
+            const clean = String(threadId).toLowerCase().trim();
+            unlockedThreads.add(clean);
+            const mapped = threadUsernameMap.get(clean);
+            if (mapped) unlockedThreads.add(mapped);
+        }
+        syncGlobalsToWindow();
+        removePrivacyVeil();
+        evaluateChatLockState();
+        maskInboxChatPreviews();
+    }
+
+    function handleLockChat(threadId) {
+        if (threadId) {
+            const clean = String(threadId).toLowerCase().trim();
+            unlockedThreads.delete(clean);
+            const mapped = threadUsernameMap.get(clean);
+            if (mapped) unlockedThreads.delete(mapped);
+            lockedChatIds.add(clean);
+            if (mapped) lockedChatIds.add(mapped);
+        }
+        syncGlobalsToWindow();
+        evaluateChatLockState();
+        maskInboxChatPreviews();
+    }
+
+    function extractCurrentThreadId() {
+        const path = window.location.pathname.toLowerCase();
+        if (!path.startsWith('/direct/t/')) return null;
+        const parts = path.replace('/direct/t/', '').split('/').filter(Boolean);
+        return parts[0] ? parts[0].trim() : null;
+    }
+
+    function isCurrentThreadExplicitlyLocked(threadId) {
+        if (!threadId) return false;
+        const cleanId = String(threadId).toLowerCase().trim();
+        if (lockedChatIds.has(cleanId)) return true;
+        const mappedUser = threadUsernameMap.get(cleanId);
+        if (mappedUser && lockedChatIds.has(mappedUser)) return true;
+        for (const lockedId of lockedChatIds) {
+            if (window.location.href.toLowerCase().includes(lockedId)) return true;
+        }
+        return false;
+    }
+
+    function extractThreadParticipants() {
+        const currentThreadId = extractCurrentThreadId();
+        if (!currentThreadId) return null;
+
+        let username = '';
+        let displayName = '';
+
+        // 1. Inspect document.title
+        const docTitle = document.title || '';
+        const titleMatch = docTitle.match(/@([a-zA-Z0-9_\.]+)/);
+        if (titleMatch && titleMatch[1]) {
+            username = titleMatch[1].trim();
+        } else if (docTitle.includes('•')) {
+            const candidate = docTitle.split('•')[0].trim();
+            if (candidate && !['direct', 'messages', 'instagram'].includes(candidate.toLowerCase())) {
+                displayName = candidate;
+            }
+        }
+
+        // 2. Inspect header avatar image alt text
+        if (!username) {
+            const headerImgs = document.querySelectorAll('header img[alt], [role="banner"] img[alt], [role="main"] header img[alt]');
+            for (const img of headerImgs) {
+                const alt = img.getAttribute('alt') || '';
+                const m = alt.match(/(.+?)'s profile picture/i) || alt.match(/profile picture of (.+)/i);
+                if (m && m[1]) {
+                    username = m[1].trim().replace(/^@/, '');
+                    break;
+                }
+            }
+        }
+
+        // 3. Instagram header profile link inspection
+        if (!username) {
+            const profileLinks = document.querySelectorAll(
+                'header a[aria-label*="profile page of" i], [role="banner"] a[aria-label*="profile page of" i], ' +
+                '[role="main"] header a[aria-label*="profile page of" i], a[aria-label*="Open the profile page of" i], ' +
+                'header a[href^="/"], [role="banner"] a[href^="/"], [role="main"] header a[href^="/"]'
+            );
+
+            for (const link of profileLinks) {
+                const aria = link.getAttribute('aria-label') || '';
+                const matchAria = aria.match(/profile page of (.+)/i);
+                if (matchAria && matchAria[1]) {
+                    username = matchAria[1].trim().replace(/^@/, '');
+                    break;
+                }
+                const href = link.getAttribute('href') || '';
+                const cleanHref = href.replace(/^https?:\/\/[^\/]+/, '');
+                const matchHref = cleanHref.match(/^\/([a-zA-Z0-9_\.]+)\/?(?:\?.*)?$/);
+                if (matchHref && matchHref[1]) {
+                    const candidate = matchHref[1].trim();
+                    const ignored = ['direct', 'explore', 'reels', 'reel', 'stories', 'home', 'accounts', 'p', 'tv'];
+                    if (!ignored.includes(candidate.toLowerCase())) {
+                        username = candidate;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // 4. Header heading / title elements
+        const headingEl = document.querySelector(
+            'header [role="heading"], [role="banner"] [role="heading"], ' +
+            'header h1, header h2, header h3, [role="banner"] h1, [role="banner"] h2, ' +
+            'header a span, [role="banner"] a span'
+        );
+        if (headingEl) {
+            const hText = headingEl.textContent.trim().replace(/^@/, '');
+            if (!displayName) displayName = hText;
+            if (!username && hText && !hText.includes(' ') && hText.length < 32) {
+                username = hText;
+            }
+        }
+
+        // 5. In-page bio banner at top of message scroller (View profile button)
+        if (!username) {
+            const viewProfileLink = document.querySelector('a[href^="/"][role="link"]:not([href*="/direct/"])');
+            if (viewProfileLink && viewProfileLink.textContent.toLowerCase().includes('profile')) {
+                const href = (viewProfileLink.getAttribute('href') || '').replace(/^https?:\/\/[^\/]+/, '');
+                const m = href.match(/^\/([a-zA-Z0-9_\.]+)\/?/);
+                if (m && m[1]) {
+                    username = m[1].trim();
+                }
+            }
+        }
+
+        const cleanUser = username ? username.toLowerCase().trim().replace(/^@/, '') : '';
+        const effectiveUser = cleanUser || (displayName ? displayName.toLowerCase().trim().replace(/^@/, '') : '');
+
+        if (effectiveUser) {
+            threadUsernameMap.set(currentThreadId, effectiveUser);
+            threadUsernameMap.set(effectiveUser, currentThreadId);
+            postToNative({
+                action: 'threadUsernameMapped',
+                threadId: currentThreadId,
+                username: effectiveUser,
+                usernames: [effectiveUser],
+                displayName: displayName || effectiveUser
+            });
+            window.__fgActiveThread = { threadId: currentThreadId, username: effectiveUser, displayName: displayName || effectiveUser };
+            return { username: effectiveUser, displayName: displayName || effectiveUser };
+        }
+        return null;
+    }
+    window.__fgGetThreadParticipant = extractThreadParticipants;
+
+    function isCurrentChatLocked() {
+        const path = window.location.pathname.toLowerCase();
+        if (!path.startsWith('/direct')) return false;
+        if (chatLockMode === 'off') return false;
+        if (unlockedThreads.has('__all__')) return false;
+
+        const currentThreadId = extractCurrentThreadId();
+        if (currentThreadId) {
+            if (unlockedThreads.has(currentThreadId)) return false;
+            const mappedUser = threadUsernameMap.get(currentThreadId);
+            if (mappedUser && unlockedThreads.has(mappedUser)) return false;
+
+            if (chatLockMode === 'whole_dm' || chatLockAll) return true;
+            if (isCurrentThreadExplicitlyLocked(currentThreadId)) return true;
+
+            // Search header text as additional safeguard
+            const header = document.querySelector('header, [role="banner"], [role="main"] header');
+            if (header) {
+                const headerText = header.textContent.toLowerCase();
+                for (const lockedId of lockedChatIds) {
+                    if (headerText.includes(lockedId)) {
+                        lockedChatIds.add(currentThreadId);
+                        threadUsernameMap.set(currentThreadId, lockedId);
+                        postToNative({ action: 'threadUsernameMapped', threadId: currentThreadId, usernames: [lockedId], isLocked: true });
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        if ((chatLockMode === 'whole_dm' || chatLockAll) && (path === '/direct' || path === '/direct/' || path.startsWith('/direct/inbox'))) {
+            return !unlockedThreads.has('__all__');
+        }
+
+        return false;
+    }
+
+    function applyPrivacyVeil() {
+        let veil = document.getElementById('focusgram-chat-privacy-veil');
+        if (!veil) {
+            veil = document.createElement('div');
+            veil.id = 'focusgram-chat-privacy-veil';
+            veil.style.cssText = 'position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100vh!important;background:#000000!important;z-index:2147483647!important;pointer-events:all!important;display:block!important;';
+            (document.body || document.documentElement).appendChild(veil);
+        }
+        veil.style.display = 'block';
+    }
+    window.__fgApplyPrivacyVeil = applyPrivacyVeil;
+
+    function removePrivacyVeil() {
+        const veil = document.getElementById('focusgram-chat-privacy-veil');
+        if (veil) {
+            veil.style.display = 'none';
+        }
+    }
+    window.__fgRemovePrivacyVeil = removePrivacyVeil;
+
+    function evaluateChatLockState() {
+        if (isCurrentChatLocked()) {
+            try {
+                document.body?.setAttribute('data-fg-chat-locked', 'true');
+                document.documentElement?.setAttribute('data-fg-chat-locked', 'true');
+            } catch (_) {}
+            applyPrivacyVeil();
+        } else {
+            try {
+                document.body?.removeAttribute('data-fg-chat-locked');
+                document.documentElement?.removeAttribute('data-fg-chat-locked');
+            } catch (_) {}
+            removePrivacyVeil();
+        }
+    }
+
+    // Capture-phase link click interception for instant pre-render black cover & blocking server queries
+    document.addEventListener('click', (e) => {
+        if (chatLockMode === 'off') return;
+        const link = e.target.closest('a[href*="/direct/t/"]');
+        if (!link) return;
+        const href = (link.getAttribute('href') || '').toLowerCase();
+        const match = href.match(/\/direct\/t\/([^\/\?]+)/);
+        const targetThreadId = match ? match[1].trim() : '';
+        if (!targetThreadId) return;
+
+        let shouldLock = (chatLockMode === 'whole_dm' || chatLockAll);
+        const mapped = threadUsernameMap.get(targetThreadId);
+        if (!shouldLock) {
+            if (lockedChatIds.has(targetThreadId)) shouldLock = true;
+            if (mapped && lockedChatIds.has(mapped)) shouldLock = true;
+            if (!shouldLock) {
+                const row = link.closest('[role="listitem"], [role="button"], li') || link;
+                const rowText = row.textContent.toLowerCase();
+                for (const lockedId of lockedChatIds) {
+                    if (rowText.includes(lockedId) || href.includes(lockedId)) {
+                        shouldLock = true;
+                        lockedChatIds.add(targetThreadId);
+                        break;
+                    }
+                }
+            }
+        }
+
+        const isUnlocked = unlockedThreads.has('__all__') ||
+                           unlockedThreads.has(targetThreadId) ||
+                           (mapped && unlockedThreads.has(mapped));
+
+        if (shouldLock && !isUnlocked) {
+            // Immediately BLOCK the browser and React router from querying the server or rendering the locked chat!
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+
+            applyPrivacyVeil();
+
+            const mappedUser = mapped || '';
+            postToNative({
+                action: 'requestUnlockChat',
+                threadId: targetThreadId,
+                username: mappedUser,
+                targetUrl: link.href || ('https://www.instagram.com/direct/t/' + targetThreadId + '/')
+            });
+        }
+    }, true);
+
+    function updateChatMaskCSS() {
+        let style = document.getElementById('focusgram-chat-mask-style');
+        if (!style) {
+            style = document.createElement('style');
+            style.id = 'focusgram-chat-mask-style';
+            (document.head || document.documentElement).appendChild(style);
+        }
+
+        const css = `
+            /* FocusGram Chat Lock Veil */
+            body[data-fg-chat-locked="true"] [role="list"] [role="row"],
+            body[data-fg-chat-locked="true"] div[dir="auto"],
+            body[data-fg-chat-locked="true"] [data-message-id] {
+                filter: blur(14px) !important;
+                user-select: none !important;
+                pointer-events: none !important;
+            }
+        `;
+        style.textContent = css;
+    }
+
+    function maskInboxChatPreviews() {
+        updateChatMaskCSS();
+
+        const path = window.location.pathname.toLowerCase();
+        if (!path.startsWith('/direct')) return;
+
+        const isLockOff = (chatLockMode === 'off');
+
+        const chatLinks = document.querySelectorAll('a[href*="/direct/t/"]');
+        for (const link of chatLinks) {
+            const href = (link.getAttribute('href') || '').toLowerCase();
+            const match = href.match(/\/direct\/t\/([^\/\?]+)/);
+            const threadId = match ? match[1].trim() : '';
+            if (!threadId) continue;
+
+            const rowContainer = link.closest('[role="listitem"], [role="button"], li') || link;
+
+            // Strategy A: Avatar image alt inspection
+            let detectedUser = '';
+            let displayName = '';
+            const avatarImg = rowContainer.querySelector('img[alt]');
+            if (avatarImg) {
+                const alt = (avatarImg.getAttribute('alt') || '').trim();
+                const m = alt.match(/(.+?)'s profile picture/i) || alt.match(/profile picture of (.+)/i);
+                if (m && m[1]) {
+                    detectedUser = m[1].trim().replace(/^@/, '').toLowerCase();
+                    displayName = m[1].trim();
+                }
+            }
+
+            // Strategy B: TreeWalker text node for title element
+            const walker = document.createTreeWalker(
+                rowContainer,
+                NodeFilter.SHOW_TEXT,
+                {
+                    acceptNode: function(node) {
+                        const val = (node.nodeValue || '').trim();
+                        if (!val || val === '🔒' || val === '•' || val === '·') {
+                            return NodeFilter.FILTER_REJECT;
+                        }
+                        return NodeFilter.FILTER_ACCEPT;
+                    }
+                }
+            );
+
+            let candidateTitleEl = null;
+            const firstNode = walker.nextNode();
+            if (firstNode) {
+                candidateTitleEl = firstNode.parentElement;
+                if (!detectedUser) {
+                    const txt = (firstNode.nodeValue || '').trim();
+                    detectedUser = txt.replace(/^@/, '').trim().toLowerCase();
+                    displayName = txt;
+                }
+            }
+
+            if (detectedUser && !threadUsernameMap.has(threadId)) {
+                threadUsernameMap.set(threadId, detectedUser);
+                threadUsernameMap.set(detectedUser, threadId);
+                postToNative({
+                    action: 'threadUsernameMapped',
+                    threadId: threadId,
+                    username: detectedUser,
+                    usernames: [detectedUser],
+                    displayName: displayName || detectedUser
+                });
+            }
+
+            let isLocked = false;
+            if (!isLockOff) {
+                if (chatLockMode === 'whole_dm' || chatLockAll) {
+                    isLocked = !unlockedThreads.has('__all__');
+                } else {
+                    if (unlockedThreads.has(threadId)) {
+                        isLocked = false;
+                    } else {
+                        if (lockedChatIds.has(threadId)) isLocked = true;
+                        const mappedUser = threadUsernameMap.get(threadId);
+                        if (mappedUser && lockedChatIds.has(mappedUser)) isLocked = true;
+                        if (detectedUser && lockedChatIds.has(detectedUser)) isLocked = true;
+                        if (!isLocked) {
+                            const rowText = rowContainer.textContent.toLowerCase();
+                            for (const lockedId of lockedChatIds) {
+                                if (rowText.includes(lockedId) || href.includes(lockedId)) {
+                                    isLocked = true;
+                                    lockedChatIds.add(threadId);
+                                    break;
+                                }
+                            }
+                        }
+                        if (mappedUser && unlockedThreads.has(mappedUser)) isLocked = false;
+                        if (detectedUser && unlockedThreads.has(detectedUser)) isLocked = false;
+                    }
+                }
+            }
+
+            // Clean up any legacy preview masking classes or attributes
+            const legacyMasked = rowContainer.querySelectorAll('.fg-masked-snippet-text, [data-fg-mask-preview]');
+            for (const el of legacyMasked) {
+                el.classList.remove('fg-masked-snippet-text');
+                el.removeAttribute('data-fg-mask-preview');
+            }
+
+            if (isLocked) {
+                link.setAttribute('data-fg-locked-chat', 'true');
+                rowContainer.setAttribute('data-fg-locked-chat', 'true');
+
+                const titleTarget = candidateTitleEl || rowContainer.querySelector('[role="heading"], h2, h3, span');
+                if (titleTarget && !rowContainer.querySelector('.fg-chat-lock-badge')) {
+                    const badge = document.createElement('span');
+                    badge.className = 'fg-chat-lock-badge';
+                    badge.style.cssText = 'margin-left: 6px; font-size: 11px; opacity: 0.85; vertical-align: middle; display: inline-block;';
+                    badge.textContent = '🔒';
+                    titleTarget.appendChild(badge);
+                }
+            } else {
+                link.removeAttribute('data-fg-locked-chat');
+                rowContainer.removeAttribute('data-fg-locked-chat');
+                const badge = rowContainer.querySelector('.fg-chat-lock-badge');
+                if (badge) badge.remove();
+            }
+        }
+    }
+
+    // Attach dynamic MutationObserver on direct messaging container to ensure previews are masked in real time
+    if (!window.__fgInboxObserverInstalled) {
+        window.__fgInboxObserverInstalled = true;
+        const inboxObserver = new MutationObserver(() => {
+            const path = window.location.pathname.toLowerCase();
+            if (path.startsWith('/direct')) {
+                maskInboxChatPreviews();
+            }
+        });
+        inboxObserver.observe(document.body || document.documentElement, {
+            childList: true,
+            subtree: true
+        });
+    }
+
     function checkStateAndNotify() {
+        evaluateChatLockState();
+        extractThreadParticipants();
+        maskInboxChatPreviews();
+
         const currentUrl = window.location.href;
         if (currentUrl !== lastReportedUrl) {
             lastReportedUrl = currentUrl;
@@ -2328,6 +2929,9 @@
     }
 
     window.addEventListener('focusgram:urlchange', () => {
+        lastInputFocused = false;
+        postToNative({ action: 'inputFocused', focused: false });
+        postToNative({ action: 'bioInputFocused', focused: false });
         checkStateAndNotify();
         setTimeout(checkStateAndNotify, 100);
         setTimeout(checkStateAndNotify, 300);
@@ -2335,6 +2939,9 @@
     });
 
     window.addEventListener('popstate', () => {
+        lastInputFocused = false;
+        postToNative({ action: 'inputFocused', focused: false });
+        postToNative({ action: 'bioInputFocused', focused: false });
         checkStateAndNotify();
         setTimeout(checkStateAndNotify, 100);
         setTimeout(checkStateAndNotify, 300);
@@ -2342,6 +2949,9 @@
     });
 
     window.addEventListener('hashchange', () => {
+        lastInputFocused = false;
+        postToNative({ action: 'inputFocused', focused: false });
+        postToNative({ action: 'bioInputFocused', focused: false });
         checkStateAndNotify();
         setTimeout(checkStateAndNotify, 100);
         hideNav();
@@ -2849,6 +3459,13 @@
             }
             updateGuardrailsCSS();
             syncGhostSettings();
+            syncChatLockSettings(msg.settings);
+            return;
+        } else if (msg.action === 'unlockChat') {
+            handleUnlockChat(msg.threadId, msg.all);
+            return;
+        } else if (msg.action === 'lockChat') {
+            handleLockChat(msg.threadId);
             return;
         } else if (msg.action === 'navigateSpa' && msg.path) {
             performNavClick(msg.path);
@@ -3038,6 +3655,7 @@
                 }
                 updateGuardrailsCSS();
                 syncGhostSettings();
+                syncChatLockSettings(response.settings);
             }
         });
     }
@@ -3139,5 +3757,553 @@
         }
     } catch (_) {}
 
+    /* ==========================================================================
+       8. LIVE BIO FONT STYLIST (KEYBOARD ACCESSORY BAR & REAL-TIME INPUT)
+       ========================================================================== */
+    const BIO_FONT_MAPS = {
+        normal: null,
+        bold: { u: 0x1D400, l: 0x1D41A, d: 0x1D7CE },           // Mathematical Bold (Zero gaps)
+        sans: { u: 0x1D5D4, l: 0x1D5EE, d: 0x1D7EC },           // Sans-Serif Bold (Zero gaps)
+        sans_italic: { u: 0x1D608, l: 0x1D622, d: null },       // Sans-Serif Italic (Zero gaps)
+        mono: { u: 0x1D670, l: 0x1D68A, d: 0x1D7F6 },           // Monospace (Zero gaps)
+        gothic: { u: 0x1D56C, l: 0x1D586, d: null },            // Bold Fraktur/Gothic (Zero gaps)
+        script: { u: 0x1D4D0, l: 0x1D4EA, d: null }             // Bold Script/Cursive (Zero gaps)
+    };
+
+    let activeBioStyle = 'bold';
+    let bioToolbarEl = null;
+    let bioCounterEl = null;
+    let activeBioTarget = null;
+
+    function normalizeChar(char) {
+        if (!char) return '';
+        const cp = char.codePointAt(0);
+        for (const [key, map] of Object.entries(BIO_FONT_MAPS)) {
+            if (!map) continue;
+            if (cp >= map.u && cp <= map.u + 25) {
+                return String.fromCharCode(65 + (cp - map.u));
+            }
+            if (cp >= map.l && cp <= map.l + 25) {
+                return String.fromCharCode(97 + (cp - map.l));
+            }
+            if (map.d && cp >= map.d && cp <= map.d + 9) {
+                return String.fromCharCode(48 + (cp - map.d));
+            }
+        }
+        return char;
+    }
+
+    function convertCharToStyle(char, styleKey) {
+        const map = BIO_FONT_MAPS[styleKey];
+        if (!map || styleKey === 'normal') return normalizeChar(char);
+        const norm = normalizeChar(char);
+        const cp = norm.codePointAt(0);
+        if (cp >= 65 && cp <= 90) { // A-Z
+            return String.fromCodePoint(map.u + (cp - 65));
+        }
+        if (cp >= 97 && cp <= 122) { // a-z
+            return String.fromCodePoint(map.l + (cp - 97));
+        }
+        if (map.d && cp >= 48 && cp <= 57) { // 0-9
+            return String.fromCodePoint(map.d + (cp - 48));
+        }
+        return norm;
+    }
+
+    function convertStringToStyle(text, styleKey) {
+        if (!text) return '';
+        return Array.from(text).map(ch => convertCharToStyle(ch, styleKey)).join('');
+    }
+
+    function isBioTarget(el) {
+        if (!el) return false;
+        if (el.id === 'pepBio') return true;
+        const name = (el.name || '').toLowerCase();
+        const id = (el.id || '').toLowerCase();
+        const placeholder = (el.placeholder || '').toLowerCase();
+        const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+        if (name === 'biography' || name.includes('bio') || id.includes('bio') || placeholder.includes('bio') || aria.includes('bio')) return true;
+        const path = (window.location.pathname || '').toLowerCase();
+        if (path.includes('/accounts/edit') && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT')) return true;
+        return false;
+    }
+
+    function updateBioCharCounter() {
+        if (!bioCounterEl || !activeBioTarget) return;
+        const text = activeBioTarget.value || activeBioTarget.textContent || '';
+        const codePoints = Array.from(text).length;
+        const utf16Length = text.length;
+
+        bioCounterEl.textContent = `${codePoints} / 150`;
+        if (codePoints > 140 || utf16Length > 140) {
+            bioCounterEl.style.color = '#ef4444';
+        } else if (codePoints > 120) {
+            bioCounterEl.style.color = '#f59e0b';
+        } else {
+            bioCounterEl.style.color = '#8e8e8e';
+        }
+    }
+
+    function updateBioToolbarPosition() {
+        if (!bioToolbarEl) return;
+        if (window.visualViewport) {
+            const kbHeight = window.innerHeight - (window.visualViewport.offsetTop + window.visualViewport.height);
+            bioToolbarEl.style.bottom = Math.max(0, Math.round(kbHeight)) + 'px';
+        } else {
+            bioToolbarEl.style.bottom = '0px';
+        }
+    }
+
+    function createBioFontToolbar() {
+        if (document.getElementById('fg-bio-font-toolbar')) {
+            return document.getElementById('fg-bio-font-toolbar');
+        }
+
+        const toolbar = document.createElement('div');
+        toolbar.id = 'fg-bio-font-toolbar';
+        toolbar.style.cssText = `
+            position: fixed !important;
+            bottom: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            z-index: 2147483647 !important;
+            background: rgba(18, 18, 18, 0.96) !important;
+            backdrop-filter: blur(24px) !important;
+            -webkit-backdrop-filter: blur(24px) !important;
+            border-top: 1px solid rgba(255, 255, 255, 0.15) !important;
+            padding: 8px 12px !important;
+            display: none !important;
+            align-items: center !important;
+            justify-content: space-between !important;
+            gap: 8px !important;
+            box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.7) !important;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+            user-select: none !important;
+            -webkit-user-select: none !important;
+            transition: bottom 0.15s ease-out !important;
+        `;
+
+        const chipsScroll = document.createElement('div');
+        chipsScroll.style.cssText = `
+            display: flex !important;
+            align-items: center !important;
+            gap: 6px !important;
+            overflow-x: auto !important;
+            scrollbar-width: none !important;
+            -webkit-overflow-scrolling: touch !important;
+            flex: 1 !important;
+            padding: 2px 0 !important;
+        `;
+
+        const STYLES = [
+            { id: 'normal', label: 'Normal' },
+            { id: 'bold', label: 'Bold' },
+            { id: 'sans', label: 'Sans' },
+            { id: 'sans_italic', label: 'Italic' },
+            { id: 'mono', label: 'Mono' },
+            { id: 'gothic', label: 'Gothic' },
+            { id: 'script', label: 'Script' }
+        ];
+
+        STYLES.forEach(style => {
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'fg-font-chip';
+            chip.dataset.styleId = style.id;
+            chip.textContent = style.label;
+            const isSelected = style.id === activeBioStyle;
+            chip.style.cssText = `
+                padding: 6px 14px !important;
+                border-radius: 16px !important;
+                border: 1px solid ${isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.15)'} !important;
+                background: ${isSelected ? '#ffffff' : '#262626'} !important;
+                color: ${isSelected ? '#000000' : '#d1d5db'} !important;
+                font-size: 13px !important;
+                font-weight: ${isSelected ? '600' : '500'} !important;
+                white-space: nowrap !important;
+                cursor: pointer !important;
+                outline: none !important;
+                transition: background 0.15s ease, color 0.15s ease !important;
+            `;
+
+            chip.addEventListener('click', (e) => {
+                e.preventDefault();
+                setBioActiveStyle(style.id);
+            });
+
+            chipsScroll.appendChild(chip);
+        });
+
+        const counter = document.createElement('span');
+        counter.id = 'fg-bio-counter';
+        counter.style.cssText = `
+            font-size: 11px !important;
+            font-weight: 600 !important;
+            color: #8e8e8e !important;
+            white-space: nowrap !important;
+            padding: 4px 8px !important;
+            border-radius: 12px !important;
+            background: rgba(255, 255, 255, 0.05) !important;
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        `;
+        counter.textContent = '0 / 150';
+
+        toolbar.appendChild(chipsScroll);
+        toolbar.appendChild(counter);
+        (document.body || document.documentElement).appendChild(toolbar);
+
+        bioToolbarEl = toolbar;
+        bioCounterEl = counter;
+        return toolbar;
+    }
+
+    function setBioActiveStyle(styleId) {
+        activeBioStyle = styleId;
+        if (bioToolbarEl) {
+            bioToolbarEl.querySelectorAll('.fg-font-chip').forEach(c => {
+                const isActive = c.dataset.styleId === activeBioStyle;
+                c.style.border = `1px solid ${isActive ? '#ffffff' : 'rgba(255, 255, 255, 0.15)'}`;
+                c.style.background = isActive ? '#ffffff' : '#262626';
+                c.style.color = isActive ? '#000000' : '#d1d5db';
+                c.style.fontWeight = isActive ? '600' : '500';
+            });
+        }
+
+        const target = activeBioTarget || document.getElementById('pepBio') || document.querySelector('textarea[aria-label="Bio"]');
+        if (target) {
+            const val = target.value || '';
+            if (val && target.selectionStart !== undefined && target.selectionEnd !== undefined && target.selectionStart !== target.selectionEnd) {
+                const start = target.selectionStart;
+                const end = target.selectionEnd;
+                const before = val.substring(0, start);
+                const selectedText = val.substring(start, end);
+                const after = val.substring(end);
+                const converted = convertStringToStyle(selectedText, activeBioStyle);
+                try {
+                    const proto = window.HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : Object.getPrototypeOf(target);
+                    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+                    if (setter) setter.call(target, before + converted + after);
+                    else target.value = before + converted + after;
+                    target.dispatchEvent(new Event('input', { bubbles: true }));
+                } catch (_) {
+                    target.value = before + converted + after;
+                }
+                target.setSelectionRange(start, start + converted.length);
+            }
+            // If no text selected, do NOT alter existing text!
+            updateBioCharCounter();
+        }
+    }
+
+    window.__fgSetBioStyle = setBioActiveStyle;
+
+    function showBioFontToolbar(target) {
+        activeBioTarget = target;
+        createBioFontToolbar();
+        if (bioToolbarEl) {
+            updateBioToolbarPosition();
+            bioToolbarEl.style.display = 'flex';
+            updateBioCharCounter();
+        }
+    }
+
+    function hideBioFontToolbar() {
+        if (bioToolbarEl) {
+            bioToolbarEl.style.display = 'none';
+        }
+    }
+
+    // Intercept keystrokes on document capture level for instant Unicode glyph conversion
+    document.addEventListener('beforeinput', (e) => {
+        if (!activeBioTarget || activeBioStyle === 'normal') return;
+        if (e.data && e.inputType === 'insertText') {
+            e.preventDefault();
+            const converted = convertStringToStyle(e.data, activeBioStyle);
+            document.execCommand('insertText', false, converted);
+            updateBioCharCounter();
+        }
+    }, true);
+
+    document.addEventListener('input', (e) => {
+        if (activeBioTarget && (e.target === activeBioTarget || isBioTarget(e.target))) {
+            updateBioCharCounter();
+        }
+    }, true);
+
+    // Dynamic focusin detection across document
+    document.addEventListener('focusin', (e) => {
+        if (isBioTarget(e.target)) {
+            showBioFontToolbar(e.target);
+            postToNative({ action: 'bioInputFocused', focused: true });
+        }
+    }, true);
+
+    document.addEventListener('focusout', () => {
+        setTimeout(() => {
+            const active = document.activeElement;
+            if (!isBioTarget(active) && (!bioToolbarEl || !bioToolbarEl.contains(active))) {
+                hideBioFontToolbar();
+                postToNative({ action: 'bioInputFocused', focused: false });
+            }
+        }, 250);
+    }, true);
+
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', updateBioToolbarPosition);
+        window.visualViewport.addEventListener('scroll', updateBioToolbarPosition);
+    }
+
+    // Listen for font style changes from background or native host
+    if (typeof browser !== 'undefined' && browser.runtime && browser.runtime.onMessage) {
+        browser.runtime.onMessage.addListener((msg) => {
+            if (msg.action === 'setBioStyle' && msg.style) {
+                setBioActiveStyle(msg.style);
+            }
+        });
+    }
+
+    /* ==========================================================================
+       9. NETWORK-TRIGGERED STORY VIEWER SEARCH
+       - Directly displays the search bar when the /list_reel_media_viewer/
+         network request is sent or received.
+       ========================================================================== */
+    let storySearchCardEl = null;
+    let storyViewersData = [];
+
+    function findViewersDialog() {
+        const dialogs = document.querySelectorAll('div[aria-modal="true"][role="dialog"], div[role="dialog"]');
+        for (const d of dialogs) {
+            const headings = Array.from(d.querySelectorAll('h2, [role="heading"], div'));
+            const h2 = headings.find(el => el.textContent.trim().toLowerCase() === 'viewers' && el.children.length === 0);
+            if (h2) {
+                const headerRow = h2.parentElement;
+                const scrollContainer = d.querySelector('div[style*="overflow"]') || 
+                                        d.querySelector('div[style*="height"]') ||
+                                        (headerRow ? headerRow.nextElementSibling : null);
+                return { dialog: d, header: headerRow, scrollContainer: scrollContainer, h2: h2 };
+            }
+        }
+        return null;
+    }
+
+    function ensureStorySearchCard() {
+        if (document.getElementById('fg-story-search-card')) {
+            return document.getElementById('fg-story-search-card');
+        }
+
+        const card = document.createElement('div');
+        card.id = 'fg-story-search-card';
+        card.style.cssText = `
+            margin: 6px 16px 10px 16px !important;
+            padding: 0 12px !important;
+            height: 38px !important;
+            background: #262626 !important;
+            border: 1px solid rgba(255, 255, 255, 0.12) !important;
+            border-radius: 8px !important;
+            display: flex !important;
+            align-items: center !important;
+            gap: 10px !important;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+            color: #FAFAFA !important;
+            box-sizing: border-box !important;
+            flex-shrink: 0 !important;
+        `;
+
+        const searchIcon = document.createElement('span');
+        searchIcon.style.cssText = 'display: flex; align-items: center; color: #8e8e8e;';
+        searchIcon.innerHTML = `<svg aria-label="Search" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" height="15" viewBox="0 0 24 24" width="15"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>`;
+
+        const searchInput = document.createElement('input');
+        searchInput.id = 'fg-story-search-input';
+        searchInput.type = 'text';
+        searchInput.placeholder = 'Search viewers';
+        searchInput.autocomplete = 'off';
+        searchInput.style.cssText = `
+            flex: 1 !important;
+            background: transparent !important;
+            border: none !important;
+            color: #FAFAFA !important;
+            font-size: 14px !important;
+            outline: none !important;
+            padding: 0 !important;
+            height: 100% !important;
+            font-family: inherit !important;
+        `;
+
+        const clearBtn = document.createElement('button');
+        clearBtn.type = 'button';
+        clearBtn.textContent = '✕';
+        clearBtn.style.cssText = `
+            background: transparent !important;
+            border: none !important;
+            color: #8e8e8e !important;
+            font-size: 13px !important;
+            cursor: pointer !important;
+            padding: 4px !important;
+            display: none !important;
+            line-height: 1 !important;
+        `;
+
+        clearBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            searchInput.value = '';
+            clearBtn.style.display = 'none';
+            filterViewers('');
+            searchInput.focus();
+        });
+
+        searchInput.addEventListener('input', () => {
+            const val = searchInput.value;
+            clearBtn.style.display = val.length > 0 ? 'block' : 'none';
+            filterViewers(val.trim().toLowerCase());
+        });
+
+        card.appendChild(searchIcon);
+        card.appendChild(searchInput);
+        card.appendChild(clearBtn);
+
+        const info = findViewersDialog();
+        if (info && info.header) {
+            info.header.after(card);
+        }
+
+        storySearchCardEl = card;
+        return card;
+    }
+
+    function filterViewers(query) {
+        const info = findViewersDialog();
+        if (!info || !info.dialog) return;
+
+        const scrollContainer = info.scrollContainer || 
+                                info.dialog.querySelector('div[style*="overflow"]') || 
+                                info.dialog.querySelector('div[style*="height"]') ||
+                                info.dialog;
+
+        const rows = scrollContainer.querySelectorAll('.x1qnrgzn, div[style*="display: flex"] > div:has(a[href^="/"]), div[style*="padding"] > div:has(a[href^="/"])');
+        let matchedCount = 0;
+        let totalCount = 0;
+
+        rows.forEach(row => {
+            if (row.id === 'fg-story-search-card' || row.contains(document.getElementById('fg-story-search-card'))) return;
+            const links = row.querySelectorAll('a[href^="/"]');
+            if (links.length === 0) return;
+
+            totalCount++;
+            if (!query) {
+                row.style.display = '';
+                matchedCount++;
+                return;
+            }
+
+            const text = (row.textContent || '').toLowerCase();
+            let matched = text.includes(query);
+            for (let i = 0; i < links.length; i++) {
+                const href = (links[i].getAttribute('href') || '').toLowerCase().replace(/\//g, '');
+                if (href.includes(query)) {
+                    matched = true;
+                    break;
+                }
+            }
+
+            row.style.display = matched ? '' : 'none';
+            if (matched) matchedCount++;
+        });
+
+        let noResultsEl = scrollContainer.querySelector('#fg-no-viewer-results');
+        if (query && matchedCount === 0 && totalCount > 0) {
+            if (!noResultsEl) {
+                noResultsEl = document.createElement('div');
+                noResultsEl.id = 'fg-no-viewer-results';
+                noResultsEl.style.cssText = 'padding: 24px; text-align: center; color: #8e8e8e; font-size: 14px;';
+                noResultsEl.textContent = 'No viewers found';
+                scrollContainer.appendChild(noResultsEl);
+            }
+            noResultsEl.style.display = 'block';
+        } else if (noResultsEl) {
+            noResultsEl.style.display = 'none';
+        }
+    }
+
+    function checkAndMountStorySearch() {
+        const info = findViewersDialog();
+        if (!info || !info.header) {
+            const existing = document.getElementById('fg-story-search-card');
+            if (existing && !document.querySelector('div[aria-modal="true"][role="dialog"]')) {
+                existing.remove();
+                storySearchCardEl = null;
+            }
+            return;
+        }
+
+        if (info.dialog.querySelector('#fg-story-search-card')) {
+            return;
+        }
+
+        ensureStorySearchCard();
+    }
+
+    function handleStoryViewersDetected(detail) {
+        if (!detail) return;
+        checkAndMountStorySearch();
+
+        if (detail.phase === 'ready' && detail.data) {
+            const data = detail.data;
+            const users = data.users || [];
+            const viewers = data.viewers || [];
+            const userMap = new Map();
+            users.forEach(u => {
+                const pk = String(u.pk || u.id || '');
+                if (pk) userMap.set(pk, { username: u.username || '', fullName: u.full_name || '' });
+            });
+            viewers.forEach(v => {
+                const u = v.user || v;
+                const pk = String(u.pk || u.id || '');
+                if (pk) userMap.set(pk, { username: u.username || '', fullName: u.full_name || '' });
+            });
+            storyViewersData = Array.from(userMap.values());
+            const input = document.getElementById('fg-story-search-input');
+            if (input && input.value.trim()) {
+                filterViewers(input.value.trim().toLowerCase());
+            }
+        }
+    }
+
+    // Listen to main-world fetch interceptor custom events
+    window.addEventListener('focusgram:story-viewers-detected', (e) => {
+        handleStoryViewersDetected(e.detail);
+    });
+    document.addEventListener('focusgram:story-viewers-detected', (e) => {
+        handleStoryViewersDetected(e.detail);
+    });
+
+    // Listen to WebExtension background script messages
+    if (typeof browser !== 'undefined' && browser.runtime && browser.runtime.onMessage) {
+        browser.runtime.onMessage.addListener((msg) => {
+            if (msg.action === 'storyViewersDetected') {
+                handleStoryViewersDetected(msg);
+            }
+        });
+    }
+
+    // Continuous autonomous observer for Viewers modal
+    const viewersObserver = new MutationObserver(() => {
+        checkAndMountStorySearch();
+    });
+    viewersObserver.observe(document.documentElement, { childList: true, subtree: true });
+    setInterval(checkAndMountStorySearch, 400);
+
+    // Dismiss search bar on route change away from stories
+    window.addEventListener('focusgram:urlchange', (e) => {
+        const url = (e.detail || window.location.href).toLowerCase();
+        if (!url.includes('/stories/')) {
+            if (storySearchCardEl) {
+                storySearchCardEl.remove();
+                storySearchCardEl = null;
+            }
+        }
+    });
+
 })();
+
 

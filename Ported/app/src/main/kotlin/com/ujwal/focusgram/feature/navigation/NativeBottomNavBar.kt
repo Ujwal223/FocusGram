@@ -149,7 +149,8 @@ fun NativeBottomNavBar(
     } else {
         isInDirect
     }
-    val isAuth = isAuthPage || !isAuthenticated || lowerUrl.contains("/accounts") || lowerUrl.contains("/login") || lowerUrl.contains("/signup")
+    val isExplicitAuthRoute = (lowerUrl.contains("/accounts") && !lowerUrl.contains("/accounts/edit")) || lowerUrl.contains("/login") || lowerUrl.contains("/signup")
+    val isAuth = isAuthPage || isExplicitAuthRoute
     val isVisible = !isAuth && !isImeVisible && !shouldHideInDirect && !isWebInputFocused && !isModalActive && islandMode != IslandMode.HIDDEN
 
     // Real-time animated color palette matching Instagram's web theme

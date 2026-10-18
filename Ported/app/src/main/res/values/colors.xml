@@ -6,4 +6,19 @@
     <color name="card_dark">#121212</color>
     <color name="accent_blue">#3797EF</color>
     <color name="accent_gold">#FFD700</color>
+    <color name="ic_launcher_bg_default">#000000</color>
+    <color name="ic_launcher_bg_oled">#000000</color>
+    <color name="ic_launcher_bg_classic">#1C0E18</color>
+    <color name="ic_launcher_bg_mono">#121212</color>
+    <color name="ic_launcher_bg_discreet">#1C1C1E</color>
+    <color name="ic_launcher_bg_redesign">#462220</color>
+    <color name="ic_launcher_bg_abstract">#1C1D25</color>
+    <color name="ic_launcher_bg_forest">#6A6151</color>
+    <color name="ic_launcher_bg_golden">#141519</color>
+    <color name="ic_launcher_bg_metal">#313744</color>
+    <color name="ic_launcher_bg_scribble">#1F2227</color>
+    <color name="ic_launcher_bg_polaroid">#121212</color>
+    <color name="ic_launcher_bg_viewfinder">#1A1410</color>
+    <color name="ic_launcher_bg_minimalist">#000000</color>
+    <color name="ic_launcher_bg_vibrant">#000000</color>
 </resources>

@@ -52,7 +52,7 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
         isAuthenticated = auth
         if (auth && changed) {
             val url = _currentUrl.value.lowercase()
-            val isAuth = url.contains("/accounts") || url.contains("/login") || url.contains("/signup")
+            val isAuth = (url.contains("/accounts") && !url.contains("/accounts/edit")) || url.contains("/login") || url.contains("/signup")
             if (!isAuth) {
                 injectBottomBarTrimmer()
                 userScriptManager?.injectAll(session, currentSettings)
@@ -91,7 +91,7 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
                 _progress.value = 100
                 if (success) {
                     val url = _currentUrl.value.lowercase()
-                    val isAuth = url.contains("/accounts") || url.contains("/login") || url.contains("/signup")
+                    val isAuth = (url.contains("/accounts") && !url.contains("/accounts/edit")) || url.contains("/login") || url.contains("/signup")
                     if (isAuthenticated && !isAuth) {
                         injectBottomBarTrimmer()
                         userScriptManager?.injectAll(session, currentSettings)
@@ -212,11 +212,15 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
                     target = document.querySelector('svg[aria-label="Reels"]')?.closest('a') ||
                              document.querySelector('a[href*="/reels"]') ||
                              document.querySelector('a[href*="/reel/"]');
-                } else if (p.indexOf('direct') !== -1) {
+                } else if (p == "/direct" || p == "/direct/" || p == "/direct/inbox" || p == "/direct/inbox/") {
                     target = document.querySelector('svg[aria-label="Messages"]')?.closest('a') ||
                              document.querySelector('svg[aria-label="Direct"]')?.closest('a') ||
-                             document.querySelector('a[href*="/direct/inbox"]') ||
-                             document.querySelector('a[href*="/direct"]');
+                             document.querySelector('a[href="/direct/inbox/"]') ||
+                             document.querySelector('a[href="/direct/inbox"]') ||
+                             document.querySelector('a[href="/direct/"]');
+                } else if (p.indexOf('/direct/t/') !== -1) {
+                    target = document.querySelector('a[href*="' + p + '"]') ||
+                             document.querySelector('a[href*="' + p.replace(/\/$/, '') + '"]');
                 }
                 if (!target) {
                     target = document.querySelector('a[href="' + p + '"]') ||
@@ -300,7 +304,7 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
         val js = """javascript:(function() {
             try {
                 var p = (window.location.pathname || '').toLowerCase();
-                if (p.startsWith('/direct') || p.startsWith('/accounts') || p.startsWith('/login') || p.startsWith('/signup')) return;
+                if (p.startsWith('/direct') || (p.startsWith('/accounts') && !p.startsWith('/accounts/edit')) || p.startsWith('/login') || p.startsWith('/signup')) return;
                 var c = document.cookie || '';
                 if ((p === '/' || p === '') && !c.includes('sessionid=') && !c.includes('ds_user_id=')) return;
                 if (document.getElementById('loginForm') || document.querySelector('form[action*="login"], input[name="password"]')) return;

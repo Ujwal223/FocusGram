@@ -1,0 +1,41 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Notepad / Document Outline -->
+    <path
+        android:pathData="M40,32 L60,32 L70,42 L70,74 A6,6 0 0,1 64,80 L40,80 A6,6 0 0,1 34,74 L34,38 A6,6 0 0,1 40,32 Z"
+        android:strokeWidth="3.2"
+        android:strokeColor="#E0E0E0"
+        android:fillColor="#00000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"/>
+    <!-- Folded Corner -->
+    <path
+        android:pathData="M60,32 L60,42 L70,42"
+        android:strokeWidth="3.2"
+        android:strokeColor="#E0E0E0"
+        android:fillColor="#00000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"/>
+    <!-- Note Content Lines -->
+    <path
+        android:pathData="M42,50 L62,50"
+        android:strokeWidth="3"
+        android:strokeColor="#B0B0B0"
+        android:fillColor="#00000000"
+        android:strokeLineCap="round"/>
+    <path
+        android:pathData="M42,58 L62,58"
+        android:strokeWidth="3"
+        android:strokeColor="#B0B0B0"
+        android:fillColor="#00000000"
+        android:strokeLineCap="round"/>
+    <path
+        android:pathData="M42,66 L54,66"
+        android:strokeWidth="3"
+        android:strokeColor="#B0B0B0"
+        android:fillColor="#00000000"
+        android:strokeLineCap="round"/>
+</vector>

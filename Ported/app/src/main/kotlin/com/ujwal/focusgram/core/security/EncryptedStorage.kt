@@ -82,6 +82,46 @@ class EncryptedStorage(context: Context) {
         Log.i(TAG, "App Lock PIN removed from vault.")
     }
 
+    // --- Chat Lock PIN Management ---
+
+    fun saveChatPin(pin: String) {
+        val hashedPin = hashPin("chat_$pin")
+        securePrefs.edit()
+            .putString(KEY_CHAT_PIN_HASH, hashedPin)
+            .putBoolean(KEY_HAS_CHAT_PIN, true)
+            .apply()
+        resetFailedAttempts()
+        Log.i(TAG, "Chat Lock PIN securely stored in MasterKey AES-GCM vault.")
+    }
+
+    fun verifyChatPin(enteredPin: String): Boolean {
+        if (isLockedOut()) {
+            Log.w(TAG, "Chat PIN verification rejected: Vault is currently locked out.")
+            return false
+        }
+        val storedHash = securePrefs.getString(KEY_CHAT_PIN_HASH, null) ?: return false
+        val enteredHash = hashPin("chat_$enteredPin")
+        val isValid = storedHash == enteredHash
+        if (isValid) {
+            resetFailedAttempts()
+        } else {
+            recordFailedAttempt()
+        }
+        return isValid
+    }
+
+    fun hasChatPin(): Boolean {
+        return securePrefs.getBoolean(KEY_HAS_CHAT_PIN, false) && securePrefs.getString(KEY_CHAT_PIN_HASH, null) != null
+    }
+
+    fun clearChatPin() {
+        securePrefs.edit()
+            .remove(KEY_CHAT_PIN_HASH)
+            .putBoolean(KEY_HAS_CHAT_PIN, false)
+            .apply()
+        Log.i(TAG, "Chat Lock PIN removed from vault.")
+    }
+
     // --- Brute Force Protection ---
 
     fun isLockedOut(): Boolean {
@@ -138,6 +178,8 @@ class EncryptedStorage(context: Context) {
 
         private const val KEY_PIN_HASH = "vault_pin_hash"
         private const val KEY_HAS_PIN = "vault_has_pin"
+        private const val KEY_CHAT_PIN_HASH = "vault_chat_pin_hash"
+        private const val KEY_HAS_CHAT_PIN = "vault_has_chat_pin"
         private const val KEY_FAILED_ATTEMPTS = "vault_failed_attempts"
         private const val KEY_LOCKOUT_UNTIL = "vault_lockout_until"
 
