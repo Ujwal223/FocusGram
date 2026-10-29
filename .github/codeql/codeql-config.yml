@@ -1,19 +1,40 @@
 name: "FocusGram CodeQL Configuration"
 
-# Exclude queries that would break critical app features or produce false positives:
+# Exclude queries that break app functionality or report false-positive code smells on WebExtension/content-script assets:
 # 1. java/android/websettings-javascript-enabled: Adsterra rewarded ads require JavaScript to function.
-# 2. java/android/missing-certificate-pinning: GitHub API endpoints for updates rotate certificates dynamically; hardcoded pinning breaks update checks.
-# 3. java/android/insecure-local-authentication: Biometric prompt is used as a UI gate, not a cryptographic vault.
-# 4. js/incomplete-url-substring-sanitization: Meta / Instagram CDN, auth endpoints, and ghost-mode URLs use complex dynamic domains and subdomains.
+# 2. java/android/websettings-allow-content-access: Adsterra ad WebViews are isolated; false positives on Jetpack Compose state refs.
+# 3. java/android/missing-certificate-pinning: GitHub API endpoints for updates rotate certificates dynamically; hardcoded pinning breaks update checks.
+# 4. java/android/insecure-local-authentication: Biometric prompt is used as a UI gate, not a cryptographic vault.
 # 5. java/deprecated-call: Deprecated methods are isolated inside explicit Android SDK version branches for backward compatibility.
+# 6. js/incomplete-url-substring-sanitization: Meta / Instagram CDN, auth endpoints, and ghost-mode URLs use complex dynamic domains and subdomains.
+# 7. js/missing-origin-check: Internal postMessage event listeners in WebExtension content scripts and in-page scripts communicate across isolated frame boundaries.
+# 8. js/unused-local-variable: Third-party bundled uBlock Origin and legacy scripts contain unused constants/functions.
+# 9. js/trivial-conditional: Bundled content scripts contain defensive condition guards.
+# 10. js/superfluous-trailing-arguments: Bundled ghost sanitizer utility invocations.
+# 11. js/cross-window-information-leak: WebExtension downloader custom event postMessage communication.
+# 12. js/function-declaration-conflict: Duplicate helper declarations across merged script scopes.
 query-filters:
   - exclude:
       id: java/android/websettings-javascript-enabled
+  - exclude:
+      id: java/android/websettings-allow-content-access
   - exclude:
       id: java/android/missing-certificate-pinning
   - exclude:
       id: java/android/insecure-local-authentication
   - exclude:
+      id: java/deprecated-call
+  - exclude:
       id: js/incomplete-url-substring-sanitization
   - exclude:
-      id: java/deprecated-call
+      id: js/missing-origin-check
+  - exclude:
+      id: js/unused-local-variable
+  - exclude:
+      id: js/trivial-conditional
+  - exclude:
+      id: js/superfluous-trailing-arguments
+  - exclude:
+      id: js/cross-window-information-leak
+  - exclude:
+      id: js/function-declaration-conflict

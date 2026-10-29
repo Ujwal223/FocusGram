@@ -101,12 +101,13 @@
             window.dispatchEvent(new CustomEvent('focusgram:download-request', {
                 detail: { url: url || '', filename: filename || '', error: error || '' }
             }));
+            const targetOrigin = (window.location.origin && window.location.origin !== 'null') ? window.location.origin : window.location.href;
             window.postMessage({
                 type: 'FOCUSGRAM_DOWNLOAD_REQUEST',
                 url: url || '',
                 filename: filename || '',
                 error: error || ''
-            }, window.location.origin || '*');
+            }, targetOrigin);
         } catch (e) {
             console.error('[FocusGram Downloader] triggerNativeDownload error:', e);
         }

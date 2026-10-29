@@ -3907,21 +3907,6 @@
         }
     });
 
-    function postToNative(message) {
-        if (!message) return;
-        try {
-            if (typeof browser !== 'undefined' && browser.runtime) {
-                if (browser.runtime.sendNativeMessage) {
-                    browser.runtime.sendNativeMessage("focusgram", message).catch(() => {});
-                }
-                if (browser.runtime.sendMessage) {
-                    browser.runtime.sendMessage(message).catch(() => {});
-                }
-            }
-        } catch (e) {
-            console.warn('[FocusGram] postToNative error:', e);
-        }
-    }
 
     // Bridge window events from external/page scripts to WebExtension native IPC
     window.addEventListener('focusgram:download-request', (e) => {
