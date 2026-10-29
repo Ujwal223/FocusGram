@@ -1,4 +1,4 @@
-## FocusGram 2.1.0
+## FocusGram 0.1.0
 
 ### What's new
 
