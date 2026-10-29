@@ -1,22 +1,44 @@
-## FocusGram 0.1.0
+## FocusGram 3.0.0
 
 ### What's new
 
-- NEW: Startup Page - choose which page to launch on app launch.
-- NEW: App lock and DM Lock.
-- NEW: Bait me button in Focus Control.
-- NEW: Interactive Level based system for unlocking features. 
-- NEW: Effort Friction Mode.
-- NEW: Strict and fully working Ghost Mode. 
+- NEW: AD BLOCKER!!
+- NEW: Custom App Icons.
+- NEW: Lock Specific Chats.
+- NEW: Block Reels Scrolling in DM Feed.
+- NEW: Block Video Autoplay.
+- NEW: Search Story Viewer List.
+- NEW: Custom Fonts in Bio. 
+- NEW: Floating bottom Navigation Bar.
+- NEW: Remove Stories Tray.
+- NEW: Improved Ghost Mode. 
+- NEW: Compelete UI Revamp.
+- NEW: Fingerprint Support
+- NEW: Live Notifications That shows session timer.
+- NEW: Reels Counter (Track how many and how long have you been watching Reels).
+- NEW: Reels History. 
+  and more....
 
 
 ### Bug fixes
 
-- Fixed: Greyscale mode used to turn off when app was restarted. 
-- Fixed: Images in posts containing multiple images werent getting unblurred when tapped.
-- Fixed: You could send message as "Ghost" in GHost mode (Ghost's cant talk with real people 🤪).
-- Fixed: Reduced duplicate/spam notifications by improving notification bridge IDs.
-- Fixed: Download media button (rarely) opened random media rather than desired one.
-- Fixed: Reel Session could be started despite quota being finished.
-- Perfomance Optimizations
-- A lof of other Minor fixes.
+- Removed: Leveling System, Credits, Baitme etc. 
+- Removed: Top bar with Focusgram Logo.
+- Fixed: You couldn't send messages when in Ghost mode.
+- Fixed: Captions & Audio Banner were Cutted off.
+- Fixed: Blur state of the homepage and reels couldn't be changed once set.
+- Fixed: Story tray wasn't being hidden after enabling the option (feature didn't exist but its reference did in some descriptions)
+- Fixed: App felt Laggy
+- Fixed: A lot of other bugs & added few more to fix later.
+
+### Uncloned Instagram Package Edition
+
+Looking to replace the official Instagram app directly on your phone? Download the uncloned edition (`com.instagram.android` package name) directly from our distribution channel:
+- 🔗 **Download Uncloned Edition (`com.instagram.android`):** [https://focusgram.blogspot.com/](https://focusgram.blogspot.com/)
+
+[Note: this webpage contains ads]
+
+FEW CHANGES IN USER INTERACTION: 
+1. Long Press the Profile Icon to open Focusgram Settings (The app looks a LOT CLeaner)
+2. Double tap any icon on nav bar to refresh the page.
+If more Confusions, Don't hesitate to create an Issue.

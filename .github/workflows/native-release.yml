@@ -1,0 +1,72 @@
+name: Build Native Android Release APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g., 2.0.0). Leave empty to use default."
+        required: false
+        type: string
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android Platform & Build Tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: wrapper
+          cache-read-only: false
+
+      - name: Grant execute permission for gradlew
+        shell: bash
+        run: chmod +x gradlew
+
+      - name: Run Unit Tests
+        run: ./gradlew :app:testDebugUnitTest --no-daemon
+
+      - name: Assemble Release APKs
+        run: ./gradlew :app:assembleRelease --no-daemon
+
+      - name: Display APK Sizes
+        shell: bash
+        run: |
+          echo "=== Built Release APKs ==="
+          ls -lh app/build/outputs/apk/release/*.apk
+
+      - name: Upload Release APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: focusgram-native-release-apks
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error

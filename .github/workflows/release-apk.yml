@@ -4,9 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version without leading v. Example: 1.0.0. Leave empty to read the top CHANGELOG heading."
+        description: "Release version without leading v. Example: 2.1.0. Leave empty to read the top CHANGELOG heading."
         required: false
         type: string
+  push:
+    tags:
+      - "v*.*.*"
 
 permissions:
   contents: write
@@ -14,27 +17,20 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set up Java 17
-        uses: actions/setup-java@v5
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
 
       - name: Install required Android SDK packages
         shell: bash
@@ -43,24 +39,34 @@ jobs:
           sdkmanager \
             "platform-tools" \
             "platforms;android-35" \
-            "build-tools;34.0.0" \
             "build-tools;35.0.0"
 
-      - name: Get dependencies
-        run: flutter pub get
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: wrapper
+          cache-read-only: false
+
+      - name: Grant execute permission for gradlew
+        shell: bash
+        run: chmod +x gradlew
 
       - name: Resolve version and tag
         id: meta
         shell: bash
         run: |
           set -euo pipefail
-          INPUT_VERSION="${{ github.event.inputs.version }}"
-          if [[ -n "${INPUT_VERSION}" ]]; then
-            VERSION="${INPUT_VERSION#v}"
+          if [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            VERSION="${TAG#v}"
+          elif [[ -n "${{ github.event.inputs.version }}" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+            VERSION="${VERSION#v}"
+            TAG="v${VERSION}"
           else
             VERSION="$(python3 .github/scripts/get_version.py)"
+            TAG="v${VERSION}"
           fi
-          TAG="v${VERSION}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
@@ -70,86 +76,40 @@ jobs:
           VERSION: ${{ steps.meta.outputs.version }}
         run: python3 .github/scripts/get_notes.py
 
-      - name: Decode Android keystore
+      - name: Run Unit Tests
+        run: ./gradlew :app:testDebugUnitTest --no-daemon
+
+      - name: Build release APKs (with ABI splits)
+        run: ./gradlew :app:assembleRelease --no-daemon
+
+      - name: Display Generated APKs
         shell: bash
         run: |
-          set -euo pipefail
-          mkdir -p android/app
-          # tr -d strips any newlines/spaces introduced when the secret was stored
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" \
-            | tr -d '[:space:]' \
-            | base64 --decode > android/app/upload-keystore.jks
-          chmod 600 android/app/upload-keystore.jks
-          echo "Keystore written: $(wc -c < android/app/upload-keystore.jks) bytes"
+          echo "=== Built Release APKs ==="
+          ls -lh app/build/outputs/apk/release/*.apk
 
-      - name: Create Android key.properties
-        shell: bash
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        run: |
-          set -euo pipefail
-          # Trim any accidental whitespace/newlines from secret values
-          KS_PASS="$(printf '%s' "${KEYSTORE_PASSWORD}" | tr -d '[:space:]')"
-          K_PASS="$(printf '%s'  "${KEY_PASSWORD}"      | tr -d '[:space:]')"
-          K_ALIAS="$(printf '%s' "${KEY_ALIAS}"          | tr -d '[:space:]')"
-          # Absolute path prevents Gradle from misresolving a relative storeFile
-          KEYSTORE_PATH="${GITHUB_WORKSPACE}/android/app/upload-keystore.jks"
-          {
-            printf 'storePassword=%s\n' "${KS_PASS}"
-            printf 'keyPassword=%s\n'   "${K_PASS}"
-            printf 'keyAlias=%s\n'      "${K_ALIAS}"
-            printf 'storeFile=%s\n'     "${KEYSTORE_PATH}"
-          } > android/key.properties
-
-      - name: Verify keystore
-        shell: bash
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-        run: |
-          set -euo pipefail
-          KS_PASS="$(printf '%s' "${KEYSTORE_PASSWORD}" | tr -d '[:space:]')"
-          echo "=== Keystore file ==="
-          ls -lh android/app/upload-keystore.jks
-          file android/app/upload-keystore.jks
-          echo ""
-          echo "=== key.properties keys (values hidden) ==="
-          cut -d'=' -f1 android/key.properties
-          echo ""
-          echo "=== Keystore verification via keytool ==="
-          keytool -list \
-            -keystore android/app/upload-keystore.jks \
-            -storepass "${KS_PASS}" \
-            2>&1 | grep -vE "^(Warning|$)"
-
-      - name: Build release APK
-        run: flutter build apk --release
-
-      - name: Rename APK
-        run: mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/focusgram-release.apk
-
-      - name: Upload APK artifact
+      - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
           name: focusgram-apk-${{ steps.meta.outputs.tag }}
-          path: build/app/outputs/flutter-apk/focusgram-release.apk
+          path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
-      - name: Create Git tag
+      - name: Create Git tag (workflow_dispatch only)
         shell: bash
+        if: github.event_name == 'workflow_dispatch'
         env:
           TAG: ${{ steps.meta.outputs.tag }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
-            echo "Tag already exists on remote: ${TAG}"
-            exit 1
+          if ! git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            git tag -a "${TAG}" -m "Release ${TAG}"
+            git push origin "${TAG}"
+          else
+            echo "Tag ${TAG} already exists on remote."
           fi
-          git tag -a "${TAG}" -m "Release ${TAG}"
-          git push origin "${TAG}"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
@@ -157,7 +117,7 @@ jobs:
           tag_name: ${{ steps.meta.outputs.tag }}
           name: FocusGram ${{ steps.meta.outputs.tag }}
           body_path: release_notes.md
-          files: build/app/outputs/flutter-apk/focusgram-release.apk
+          files: app/build/outputs/apk/release/*.apk
           draft: false
           prerelease: false
         env:

@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">FocusGram</string>
+    <string name="screen_time_notification_channel_name">FocusGram Active Session</string>
+    <string name="screen_time_notification_channel_desc">Shows active Instagram focus session time and limits.</string>
+</resources>
