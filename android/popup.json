@@ -1,5 +1,5 @@
 {
-  "show": true,
+  "show": false,
   "id": "popup_006",
   "header": "App Update Notice!",
   "body": "New App Update is available,  Please update to the latest version to enjoy new features and improvements.",

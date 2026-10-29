@@ -7,9 +7,7 @@
 
 # FocusGram
 
-**Digital wellness & intentionality layer for Instagram on Android**
-
-An open-source Android application built with 100% native Kotlin and Jetpack Compose that loads Instagram inside Mozilla GeckoView with embedded WebExtensions (uBlock Origin), client-side content filters, and hardware-backed wellness controls.
+**Use Instagram on your terms**
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_3.0-blue.svg?style=for-the-badge)](LICENSE)
 [![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84.svg?style=for-the-badge&logo=android&logoColor=white)](https://developer.android.com)
@@ -21,7 +19,6 @@ An open-source Android application built with 100% native Kotlin and Jetpack Com
 <br/>
 </div>
 
-
 ---
 
 ## The Problem & The Solution
@@ -30,29 +27,25 @@ An open-source Android application built with 100% native Kotlin and Jetpack Com
   <img src="assets/images/app-demo.png" alt="FocusGram App Demo" width="100%" />
 </p>
 
-Modern social platforms are engineered around algorithmic feedback loops, autoplaying short-form videos, and recommendation feeds designed to maximize screen time at the expense of intentionality. Most users do not want to quit Instagram entirely—they want to message friends, reply to stories, or share moments without losing hours to an endless Reel rabbit hole.
+Instagram is designed to hook your attention with autoplay videos, endless feeds, and nonstop recommendations. Most people do not want to quit Instagram entirely. You just want to chat with friends, check stories, and share photos without losing hours down an endless Reels rabbit hole.
 
-**FocusGram solves this at the browser engine level:**
-Instead of modifying Instagram's proprietary binary or relying on unofficial reverse-engineered APIs, FocusGram embeds a sandboxed **Mozilla GeckoView browser engine** (`org.mozilla.geckoview:geckoview-omni`) paired with an embedded **uBlock Origin** WebExtension. All ad-blocking, element suppression, and session guardrails operate strictly client-side on the rendered web DOM.
+FocusGram fixes this without modifying Instagram's app or using private APIs. It loads the clean mobile web version of Instagram inside a private, secure browser with built-in uBlock Origin. Ads get blocked, distractions stay hidden, and healthy timers keep you in control. Everything runs directly on your device, so your data and login stay completely private.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    FocusGram Android Shell                      │
-├─────────────────┬───────────────────────────────┬───────────────┤
-│    Wellness     │         Guardrails            │   App Lock    │
-│  [Screen Time]  │     [Timed Reel Session]      │ [Biometrics]  │
-├─────────────────┴───────────────────────────────┴───────────────┤
-│                 Jetpack Compose Native UI Shell                 │
-├─────────────────────────────────────────────────────────────────┤
-│            Mozilla GeckoView Sandboxed Browser Engine           │
-│   ┌─────────────────────────────────────────────────────────┐   │
-│   │  Embedded uBlock Origin Extension + Content UserScripts │   │
-│   │  (Ad blocking, Autoplay suppression, Element blurring) │   │
-│   └─────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
-                                ▲
-                 Meta Official Web Servers (HTTPS)
-```
+---
+
+## FocusGram vs Official Instagram
+
+| Feature | Official Instagram | FocusGram |
+| :--- | :---: | :---: |
+| **Ads & Sponsored Content** | Everywhere in feeds & stories | Completely blocked (uBlock Origin) |
+| **Reels** | Endless scrolling trap | Block entirely or set timed sessions (1-30 min) |
+| **Feed & Explore** | Constant recommendations | Option to blur or hide feeds until tapped |
+| **Video Autoplay** | Plays automatically | Blocked, videos only play when you tap them |
+| **Screen Time Limits** | Basic reminders | Strict daily limits and habit insights |
+| **Mindfulness Gates** | None | Optional reflection pause, cooldowns, or typing challenge |
+| **App & Chat Lock** | None | Lock the entire app or specific chats with PIN / Fingerprint |
+| **Link Tracking** | Appends tracking tags (`igsh`, `fbclid`) | Automatically stripped before opening or sharing |
+| **Data Privacy** | Telemetry and tracking | Zero tracking, zero analytics, 100% on-device |
 
 ---
 
@@ -63,9 +56,9 @@ Instead of modifying Instagram's proprietary binary or relying on unofficial rev
     <td width="50%">
       <h3>Focus Guardrails</h3>
       <ul>
-        <li><b>Timed Reel Sessions</b>: Watch Reels in structured blocks (1–30 min) before a gentle pause.</li>
+        <li><b>Timed Reel Sessions</b>: Watch Reels in structured blocks (1-30 min) before a gentle pause.</li>
         <li><b>Daily Screen Time Limits</b>: Set strict daily quotas for overall usage.</li>
-        <li><b>Mindfulness Breath Gate</b>: A 10-second reflection pause before entering the app.</li>
+        <li><b>Mindfulness Breath Gate</b>: A reflection pause before entering the app.</li>
         <li><b>Cooldown Periods</b>: Enforce mandatory break intervals between sessions.</li>
       </ul>
     </td>
@@ -92,7 +85,7 @@ Instead of modifying Instagram's proprietary binary or relying on unofficial rev
     <td width="50%">
       <h3>Native Android Experience</h3>
       <ul>
-        <li><b>Modern Apple-Style Onboarding</b>: Elegant guided setup explaining permissions and boundaries.</li>
+        <li><b>Modern Onboarding</b>: Clear guided setup explaining permissions and boundaries.</li>
         <li><b>Update Checker</b>: In-app GitHub release notifications with one-tap downloads.</li>
         <li><b>Dynamic Launcher Icons</b>: Custom app icons including OLED Pitch Black, Abstract, and Classic.</li>
         <li><b>Reel History & Local Snapshots</b>: Save and revisit content stored completely offline in Room DB.</li>
@@ -103,28 +96,13 @@ Instead of modifying Instagram's proprietary binary or relying on unofficial rev
 
 ---
 
-## Architecture
-
-FocusGram is built natively for Android using standard FOSS components:
-
-| Layer | Implementation | Purpose |
-| :--- | :--- | :--- |
-| **User Interface** | Jetpack Compose (Material 3) | Declarative UI, Cupertino-style controls, OLED black styling |
-| **Web Engine** | Mozilla GeckoView Omni (`MPL-2.0`) | Full web standards compliance, standards-isolated browsing sandbox |
-| **Ad Blocking** | Bundled uBlock Origin WebExtension | Hardware-accelerated cosmetic and network ad filtering |
-| **Local Storage** | AndroidX Room & DataStore | Relational database for screen time & DataStore preferences |
-| **Security** | AndroidX Security Crypto & Biometrics | Keystore-backed AES-256 MasterKey and fingerprint authentication |
-| **Concurrency** | Kotlin Coroutines & Flow | Asynchronous I/O and reactive state pipelines |
-
----
-
 ## Quick Start
 
 ### Installation
 
 - **Direct APK**: Download the latest release from [GitHub Releases](https://github.com/Ujwal223/FocusGram/releases). Available in architecture splits (`arm64-v8a`, `armeabi-v7a`, `x86_64`) and Universal APK.
 - **Uptodown**: Download verified builds on [FocusGram on Uptodown](https://focusgram.en.uptodown.com/android).
-- **Uncloned Edition (`com.instagram.android`)**: Replace the official Instagram app directly on your device via our [Uncloned Distribution Channel](https://ujwal223.github.io/FocusGram/uncloned/).
+- **Uncloned Edition (`com.instagram.android`)**: Replace the official Instagram app directly on your device via our [Uncloned Distribution Channel](https://focusgram.blogspot.com/).
 
 ---
 
@@ -185,9 +163,26 @@ Yes! The default release uses package name `com.ujwal.focusgram` so it installs 
 
 ---
 
+## Legal Disclaimer
+
+FocusGram is an independent, free, and open-source productivity tool licensed under AGPL-3.0. It is not affiliated with, endorsed by, or associated with Meta Platforms, Inc. or Instagram in any way.
+
+- **How it works**: FocusGram embeds a sandboxed browser engine (Mozilla GeckoView) that loads `instagram.com`, the same website accessible in any mobile browser. All user-facing features operate exclusively via client-side modifications and are never transmitted to or processed by Meta's servers.
+- **What we do not do**:
+  - Use or alter Instagram's or Meta's private APIs
+  - Intercept, read, log, or store user credentials, session data, or sensitive content
+  - Modify any server-side Meta or Instagram services
+  - Scrape, harvest, or collect any user data
+  - Claim ownership of any Meta or Instagram trademarks, logos, or intellectual property
+- **Terms**: Using FocusGram is functionally equivalent to accessing Instagram through a mobile web browser with a content blocker extension. By using FocusGram, you acknowledge that you remain bound by Instagram's Terms of Service.
+
+For legal concerns, contact `notujwal@proton.me` before taking any other action.
+
+---
+
 ## License & Support
 
-Copyright © 2025–2026 [Ujwal Chapagain](https://github.com/Ujwal223).  
+Copyright (c) 2025-2026 [Ujwal Chapagain](https://github.com/Ujwal223).  
 Licensed under the [GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE).
 
 If FocusGram has helped you regain control of your attention, support continuous open-source development:

@@ -34,7 +34,7 @@
 ### Uncloned Instagram Package Edition
 
 Looking to replace the official Instagram app directly on your phone? Download the uncloned edition (`com.instagram.android` package name) directly from our distribution channel:
-- 🔗 **Download Uncloned Edition (`com.instagram.android`):** [https://focusgram-app.netlify.app/](https://focusgram-app.netlify.app/)
+- 🔗 **Download Uncloned Edition (`com.instagram.android`):** [https://focusgram.blogspot.com/](https://focusgram.blogspot.com/)
 
 [Note: this webpage contains ads]
 
