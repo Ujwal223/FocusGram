@@ -50,25 +50,23 @@ jobs:
 
       - name: Grant execute permission for gradlew
         shell: bash
-        run: chmod +x Ported/gradlew
+        run: chmod +x gradlew
 
       - name: Run Unit Tests
-        working-directory: Ported
         run: ./gradlew :app:testDebugUnitTest --no-daemon
 
       - name: Assemble Release APKs
-        working-directory: Ported
         run: ./gradlew :app:assembleRelease --no-daemon
 
       - name: Display APK Sizes
         shell: bash
         run: |
           echo "=== Built Release APKs ==="
-          ls -lh Ported/app/build/outputs/apk/release/*.apk
+          ls -lh app/build/outputs/apk/release/*.apk
 
       - name: Upload Release APKs
         uses: actions/upload-artifact@v4
         with:
           name: focusgram-native-release-apks
-          path: Ported/app/build/outputs/apk/release/*.apk
+          path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error

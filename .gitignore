@@ -1,6 +1,5 @@
 # ==============================================================================
-# FocusGram Root .gitignore
-# Covers both Flutter Legacy app and Native Kotlin app in Ported/
+# FocusGram Native Android (Kotlin + GeckoView + Jetpack Compose) .gitignore
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -29,7 +28,7 @@ Thumbs.db
 .atom/
 .history
 .svn/
-.swiftpm/
+.navigation/
 
 # ------------------------------------------------------------------------------
 # 2. Secrets, Environment, and Keystores
@@ -42,11 +41,10 @@ Thumbs.db
 *.key
 key.properties
 **/key.properties
-android/key.properties
 upload-keystore.jks
 
 # ------------------------------------------------------------------------------
-# 3. Android & Gradle Build Artifacts (Root and Ported/)
+# 3. Android & Gradle Build Artifacts
 # ------------------------------------------------------------------------------
 # Gradle & Android user cache files
 .gradle/
@@ -66,12 +64,7 @@ local.properties
 # Build directories & outputs
 build/
 **/build/
-/build/
-/android/app/debug
-/android/app/profile
-/android/app/release
-Ported/build/
-Ported/app/build/
+app/build/
 *.apk
 *.aab
 *.ap_
@@ -86,31 +79,8 @@ captures/
 .buildlog/
 
 # ------------------------------------------------------------------------------
-# 4. Flutter & Dart Artifacts (Preserved Legacy App)
+# 4. Multi-Agent Governance & Documentation (Keep untracked from Git if needed)
 # ------------------------------------------------------------------------------
-.dart_tool/
-.flutter-plugins
-.flutter-plugins-dependencies
-.pub/
-.pub-cache/
-/coverage/
-.flutter/
-**/doc/api/
-**/ios/Flutter/.last_build_id
-app.*.symbols
-app.*.map.json
-
-# ------------------------------------------------------------------------------
-# 5. Project Migration & Local Tools (Internal / Scratch)
-# ------------------------------------------------------------------------------
-migrate_working_dir/
-PRD.md
-.reasonix/
 .agents/
 system/
 Documents/
-Ghostify/
-Ghostify
-inspo/
-Instagram-Downloader/
-

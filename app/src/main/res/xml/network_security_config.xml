@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Strict HTTPS Only: Zero cleartext traffic -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+    <!-- Strictly scoped domains for Instagram session & Adsterra rewarded ads -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">instagram.com</domain>
+        <domain includeSubdomains="true">cdninstagram.com</domain>
+        <domain includeSubdomains="true">fbcdn.net</domain>
+        <domain includeSubdomains="true">github.com</domain>
+        <!-- Adsterra Rewarded Ad Slots (Used only in isolated AdsterraAdScreen container) -->
+        <domain includeSubdomains="true">adsterra.com</domain>
+        <domain includeSubdomains="true">effectivecpmnetwork.com</domain>
+        <domain includeSubdomains="true">highperformanceformat.com</domain>
+        <domain includeSubdomains="true">effectivegatecpm.com</domain>
+        <domain includeSubdomains="true">profitableratecpm.com</domain>
+        <domain includeSubdomains="true">profitablecpmratenetwork.com</domain>
+        <domain includeSubdomains="true">profitableratecpmnetwork.com</domain>
+        <domain includeSubdomains="true">aqml.org</domain>
+        <domain includeSubdomains="true">afders.org</domain>
+        <domain includeSubdomains="true">bicea.org</domain>
+        <domain includeSubdomains="true">arwf.org</domain>
+        <domain includeSubdomains="true">cdn.show-sb.com</domain>
+        <domain includeSubdomains="true">api3.adsterratools.com</domain>
+    </domain-config>
+</network-security-config>
