@@ -106,7 +106,7 @@
                 url: url || '',
                 filename: filename || '',
                 error: error || ''
-            }, '*');
+            }, window.location.origin || '*');
         } catch (e) {
             console.error('[FocusGram Downloader] triggerNativeDownload error:', e);
         }
