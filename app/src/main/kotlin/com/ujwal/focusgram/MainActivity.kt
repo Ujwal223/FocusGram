@@ -1,5 +1,6 @@
 package com.ujwal.focusgram
 
+import android.content.Context
 import android.content.pm.ActivityInfo
 import android.os.Build
 import android.os.Bundle
@@ -63,8 +64,8 @@ class MainActivity : FragmentActivity() {
                     window.attributes = params
                 }
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                @Suppress("DEPRECATION")
-                val modes = window.windowManager.defaultDisplay.supportedModes
+                val dm = getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
+                val modes = dm?.getDisplay(android.view.Display.DEFAULT_DISPLAY)?.supportedModes ?: emptyArray()
                 val maxMode = modes.maxByOrNull { it.refreshRate }
                 if (maxMode != null) {
                     val params = window.attributes

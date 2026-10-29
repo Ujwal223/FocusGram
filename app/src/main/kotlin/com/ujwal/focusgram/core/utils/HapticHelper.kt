@@ -47,13 +47,8 @@ object HapticHelper {
         val vibrator = getVibrator(context)
         if (vibrator != null && vibrator.hasVibrator()) {
             try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    val effect = VibrationEffect.createOneShot(35L, VibrationEffect.DEFAULT_AMPLITUDE)
-                    vibrator.vibrate(effect)
-                } else {
-                    @Suppress("DEPRECATION")
-                    vibrator.vibrate(35L)
-                }
+                val effect = VibrationEffect.createOneShot(35L, VibrationEffect.DEFAULT_AMPLITUDE)
+                vibrator.vibrate(effect)
             } catch (e: Exception) {
                 Log.w(TAG, "Hardware wheel tick failed: ${e.message}")
             }
@@ -79,13 +74,8 @@ object HapticHelper {
 
         try {
             val pattern = longArrayOf(0, 280, 140, 280)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val effect = VibrationEffect.createWaveform(pattern, -1)
-                vibrator.vibrate(effect)
-            } else {
-                @Suppress("DEPRECATION")
-                vibrator.vibrate(pattern, -1)
-            }
+            val effect = VibrationEffect.createWaveform(pattern, -1)
+            vibrator.vibrate(effect)
             Log.d(TAG, "Session completion vibration triggered successfully")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to vibrate for session completion: ${e.message}", e)
@@ -101,13 +91,8 @@ object HapticHelper {
         val vibrator = getVibrator(context)
         if (vibrator != null && vibrator.hasVibrator()) {
             try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    val effect = VibrationEffect.createOneShot(25L, VibrationEffect.DEFAULT_AMPLITUDE)
-                    vibrator.vibrate(effect)
-                } else {
-                    @Suppress("DEPRECATION")
-                    vibrator.vibrate(25L)
-                }
+                val effect = VibrationEffect.createOneShot(25L, VibrationEffect.DEFAULT_AMPLITUDE)
+                vibrator.vibrate(effect)
             } catch (e: Exception) {
                 Log.w(TAG, "Hardware click vibration failed: ${e.message}")
             }
@@ -127,13 +112,8 @@ object HapticHelper {
         val vibrator = getVibrator(context)
         if (vibrator != null && vibrator.hasVibrator()) {
             try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    val effect = VibrationEffect.createOneShot(60L, VibrationEffect.DEFAULT_AMPLITUDE)
-                    vibrator.vibrate(effect)
-                } else {
-                    @Suppress("DEPRECATION")
-                    vibrator.vibrate(60L)
-                }
+                val effect = VibrationEffect.createOneShot(60L, VibrationEffect.DEFAULT_AMPLITUDE)
+                vibrator.vibrate(effect)
             } catch (e: Exception) {
                 Log.w(TAG, "Hardware long-press vibration failed: ${e.message}")
             }
@@ -155,13 +135,8 @@ object HapticHelper {
         if (!vibrator.hasVibrator()) return
 
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val effect = VibrationEffect.createOneShot(60L, VibrationEffect.DEFAULT_AMPLITUDE)
-                vibrator.vibrate(effect)
-            } else {
-                @Suppress("DEPRECATION")
-                vibrator.vibrate(60L)
-            }
+            val effect = VibrationEffect.createOneShot(60L, VibrationEffect.DEFAULT_AMPLITUDE)
+            vibrator.vibrate(effect)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to vibrate success pulse: ${e.message}", e)
         }

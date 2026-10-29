@@ -132,12 +132,7 @@ class ScreenTimeService : Service() {
             ACTION_STOP -> {
                 stopTracking()
                 try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                        stopForeground(STOP_FOREGROUND_REMOVE)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        stopForeground(true)
-                    }
+                    stopForeground(STOP_FOREGROUND_REMOVE)
                 } catch (_: Exception) {}
                 try {
                     val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
@@ -153,12 +148,7 @@ class ScreenTimeService : Service() {
         super.onDestroy()
         stopTracking()
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-            } else {
-                @Suppress("DEPRECATION")
-                stopForeground(true)
-            }
+            stopForeground(STOP_FOREGROUND_REMOVE)
         } catch (_: Exception) {}
         try {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager

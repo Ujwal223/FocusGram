@@ -15,24 +15,36 @@ permissions:
 
 jobs:
   analyze:
-    name: Analyze (Kotlin & Java)
+    name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
     timeout-minutes: 120
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: java-kotlin
+            build: true
+          - language: javascript-typescript
+            build: false
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Java 21
+        if: matrix.build
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
 
       - name: Set up Android SDK
+        if: matrix.build
         uses: android-actions/setup-android@v4
 
       - name: Install Android Platform & Build Tools
+        if: matrix.build
         shell: bash
         run: |
           set -euo pipefail
@@ -42,6 +54,7 @@ jobs:
             "build-tools;35.0.0"
 
       - name: Setup Gradle
+        if: matrix.build
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: wrapper
@@ -50,10 +63,12 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
-          languages: 'java-kotlin'
+          languages: ${{ matrix.language }}
           queries: +security-extended,security-and-quality
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Build Application for Analysis
+        if: matrix.build
         shell: bash
         run: |
           chmod +x gradlew
@@ -63,4 +78,4 @@ jobs:
         uses: github/codeql-action/analyze@v4
         continue-on-error: true
         with:
-          category: "/language:java-kotlin"
+          category: "/language:${{ matrix.language }}"

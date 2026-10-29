@@ -102,7 +102,6 @@ fun OnboardingScreen(
     onComplete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
     val view = LocalView.current
     val scope = rememberCoroutineScope()
     val totalPages = 6

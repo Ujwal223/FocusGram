@@ -363,7 +363,7 @@ fun FocusGramApp() {
 
     val targetExpiryMillis = remember(lastSessionEndTimestamp, settings.cooldownMinutes) {
         if (settings.cooldownMinutes > 0 && lastSessionEndTimestamp > 0L) {
-            lastSessionEndTimestamp + (settings.cooldownMinutes * 60 * 1000L)
+            lastSessionEndTimestamp + (settings.cooldownMinutes.toLong() * 60L * 1000L)
         } else {
             0L
         }
@@ -1747,7 +1747,6 @@ fun FocusGramApp() {
                             { pin -> encryptedStorage.verifyChatPin(pin) }
                         } else null,
                         onCancel = {
-                            val pending = pendingUnlockChat
                             pendingUnlockChat = null
                             if (currentThreadId != null) {
                                 unlockedChatThreadIds = unlockedChatThreadIds - currentThreadId

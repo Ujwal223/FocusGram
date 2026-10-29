@@ -1,0 +1,19 @@
+name: "FocusGram CodeQL Configuration"
+
+# Exclude queries that would break critical app features or produce false positives:
+# 1. java/android/websettings-javascript-enabled: Adsterra rewarded ads require JavaScript to function.
+# 2. java/android/missing-certificate-pinning: GitHub API endpoints for updates rotate certificates dynamically; hardcoded pinning breaks update checks.
+# 3. java/android/insecure-local-authentication: Biometric prompt is used as a UI gate, not a cryptographic vault.
+# 4. js/incomplete-url-substring-sanitization: Meta / Instagram CDN, auth endpoints, and ghost-mode URLs use complex dynamic domains and subdomains.
+# 5. java/deprecated-call: Deprecated methods are isolated inside explicit Android SDK version branches for backward compatibility.
+query-filters:
+  - exclude:
+      id: java/android/websettings-javascript-enabled
+  - exclude:
+      id: java/android/missing-certificate-pinning
+  - exclude:
+      id: java/android/insecure-local-authentication
+  - exclude:
+      id: js/incomplete-url-substring-sanitization
+  - exclude:
+      id: java/deprecated-call

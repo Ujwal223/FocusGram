@@ -188,7 +188,6 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
      * Executes client-side Single Page Application (SPA) navigation without triggering a full page reload.
      */
     fun navigateSpa(path: String) {
-        val sanitized = path.replace("'", "\\'")
         val fullUrl = if (path.startsWith("http")) path else "https://www.instagram.com$path"
         val relativePath = if (path.startsWith("http")) {
             path.removePrefix("https://www.instagram.com").removePrefix("http://www.instagram.com")

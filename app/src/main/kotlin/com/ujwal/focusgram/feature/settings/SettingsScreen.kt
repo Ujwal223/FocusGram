@@ -1254,7 +1254,7 @@ private fun GuardrailsSubpage(
 
     val lastSessionEndTimestamp by repository.lastSessionEndTimestampFlow.collectAsState(initial = 0L)
     val isCooldownActive = settings.cooldownMinutes > 0 && lastSessionEndTimestamp > 0L &&
-            (System.currentTimeMillis() - lastSessionEndTimestamp < settings.cooldownMinutes * 60 * 1000L)
+            (System.currentTimeMillis() - lastSessionEndTimestamp < settings.cooldownMinutes.toLong() * 60L * 1000L)
 
     var showDailyLimitModal by remember { mutableStateOf(false) }
     var showCooldownModal by remember { mutableStateOf(false) }

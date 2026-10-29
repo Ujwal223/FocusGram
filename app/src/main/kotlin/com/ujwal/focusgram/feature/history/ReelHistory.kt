@@ -336,7 +336,13 @@ class ReelHistory(private val file: File) {
             // Writes to a temporary file before renaming to prevent corruption if killed mid-write
             val tmp = File(file.parentFile, file.name + ".tmp")
             tmp.writeText(arr.toString())
-            tmp.renameTo(file)
+            if (!tmp.renameTo(file)) {
+                if (file.exists()) file.delete()
+                if (!tmp.renameTo(file)) {
+                    tmp.copyTo(file, overwrite = true)
+                    tmp.delete()
+                }
+            }
         } catch (_: Exception) {}
     }
 

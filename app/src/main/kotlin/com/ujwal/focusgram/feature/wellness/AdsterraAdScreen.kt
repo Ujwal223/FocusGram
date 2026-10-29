@@ -184,7 +184,6 @@ fun AdsterraAdScreen(
     val isSettingToggle = sessionType == "setting_toggle"
     val isVoluntarySupport = sessionType == "voluntary"
     val isEffortFriction = sessionType == "effort_friction"
-    val isSessionExtend = sessionType == "session_extend"
 
     val timerDone = elapsedSeconds >= requiredSeconds
     val bothClicked = adsClicked >= 2
@@ -340,6 +339,8 @@ fun AdsterraAdScreen(
                             settings.apply {
                                 javaScriptEnabled = true
                                 domStorageEnabled = true
+                                allowContentAccess = false
+                                allowFileAccess = false
                                 loadWithOverviewMode = true
                                 useWideViewPort = true
                                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
@@ -405,6 +406,8 @@ fun AdsterraAdScreen(
                                     val tempWebView = WebView(ctx).apply {
                                         settings.javaScriptEnabled = true
                                         settings.domStorageEnabled = true
+                                        settings.allowContentAccess = false
+                                        settings.allowFileAccess = false
                                         settings.setSupportMultipleWindows(true)
                                         webViewClient = object : WebViewClient() {
                                             override fun shouldOverrideUrlLoading(
@@ -553,6 +556,8 @@ object AdPreloader {
                     prewarmView.settings.apply {
                         javaScriptEnabled = true
                         domStorageEnabled = true
+                        allowContentAccess = false
+                        allowFileAccess = false
                     }
                     prewarmView.loadUrl("about:blank")
                 } catch (_: Exception) {}

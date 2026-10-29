@@ -13,6 +13,6 @@ data class UpdateInfo(
 
 sealed interface UpdateCheckResult {
     data class Available(val updateInfo: UpdateInfo) : UpdateCheckResult
-    data object UpToDate : UpdateCheckResult
+    object UpToDate : UpdateCheckResult
     data class Failed(val reason: String) : UpdateCheckResult
 }
