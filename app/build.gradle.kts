@@ -160,7 +160,7 @@ android {
         outputs.all {
             val output = this as? com.android.build.gradle.internal.api.BaseVariantOutputImpl
             if (output != null) {
-                val abi = output.getFilter(com.android.build.OutputFile.ABI) ?: "universal"
+                val abi = output.getFilter("ABI") ?: "universal"
                 output.outputFileName = "$apkPrefix-v${variant.versionName}-$abi-${variant.buildType.name}.apk"
             }
         }
