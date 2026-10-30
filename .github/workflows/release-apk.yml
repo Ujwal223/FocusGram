@@ -79,6 +79,34 @@ jobs:
       - name: Run Unit Tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon
 
+      - name: Setup Android release signing keystore
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          if [ -n "${KEYSTORE_BASE64:-}" ]; then
+            echo "Decoding Android release keystore from secrets..."
+            echo "${KEYSTORE_BASE64}" | tr -d '[:space:]' | base64 --decode > upload-keystore.jks
+            chmod 600 upload-keystore.jks
+            KS_PASS="$(printf '%s' "${KEYSTORE_PASSWORD:-}" | tr -d '[:space:]')"
+            K_PASS="$(printf '%s'  "${KEY_PASSWORD:-}"      | tr -d '[:space:]')"
+            K_ALIAS="$(printf '%s' "${KEY_ALIAS:-}"         | tr -d '[:space:]')"
+            KEYSTORE_PATH="${GITHUB_WORKSPACE}/upload-keystore.jks"
+            {
+              printf 'storePassword=%s\n' "${KS_PASS}"
+              printf 'keyPassword=%s\n'   "${K_PASS}"
+              printf 'keyAlias=%s\n'      "${K_ALIAS}"
+              printf 'storeFile=%s\n'     "${KEYSTORE_PATH}"
+            } > key.properties
+            echo "Release keystore configured: $(wc -c < upload-keystore.jks) bytes"
+          else
+            echo "::warning::ANDROID_KEYSTORE_BASE64 secret not found. Release build will fall back to debug signing."
+          fi
+
       - name: Build release APKs (with ABI splits)
         run: ./gradlew :app:assembleRelease --no-daemon
 

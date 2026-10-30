@@ -59,6 +59,31 @@ android {
     }
 
 
+    val keystorePropertiesFile = rootProject.file("key.properties")
+    val keystoreProperties = Properties()
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
+    }
+
+    val hasReleaseSigning = keystorePropertiesFile.exists() &&
+            keystoreProperties.containsKey("storeFile") &&
+            keystoreProperties.containsKey("storePassword") &&
+            keystoreProperties.containsKey("keyAlias") &&
+            keystoreProperties.containsKey("keyPassword")
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                val storePath = keystoreProperties.getProperty("storeFile")
+                val storeF = File(storePath)
+                storeFile = if (storeF.isAbsolute) storeF else (rootProject.file(storePath).takeIf { it.exists() } ?: project.file(storePath))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     splits {
         abi {
             isEnable = true
@@ -72,7 +97,11 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
