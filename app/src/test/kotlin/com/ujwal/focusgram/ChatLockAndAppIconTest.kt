@@ -73,21 +73,6 @@ class ChatLockAndAppIconTest {
     }
 
     @Test
-    fun testHistoricalIconsCompleteness() {
-        val icons = com.ujwal.focusgram.core.utils.HistoricalIconManager.ORIGINAL_ICONS
-        assertEquals(4, icons.size)
-        val ids = icons.map { it.id }.toSet()
-        assertTrue(ids.contains("polaroid_camera"))
-        assertTrue(ids.contains("viewfinder"))
-        assertTrue(ids.contains("minimalist_colors"))
-        assertTrue(ids.contains("vibrant_version"))
-        icons.forEach {
-            assertTrue(it.downloadUrl.startsWith("https://"))
-            assertTrue(it.title.isNotBlank())
-        }
-    }
-
-    @Test
     fun testChatLockRouteEvaluation() {
         fun isRouteLocked(url: String, settings: FocusSettings, unlockedThreads: Set<String>, isAllUnlocked: Boolean): Boolean {
             val path = url.removePrefix("https://www.instagram.com").removePrefix("https://instagram.com").lowercase()

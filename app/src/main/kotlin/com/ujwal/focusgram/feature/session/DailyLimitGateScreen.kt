@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ujwal.focusgram.core.ui.theme.AlertRed
 import com.ujwal.focusgram.core.ui.theme.PureBlack
+import com.ujwal.focusgram.core.ui.theme.PureWhite
 import com.ujwal.focusgram.core.utils.HapticHelper
 import com.ujwal.focusgram.core.utils.TimeFormatters
 
@@ -56,8 +58,8 @@ fun DailyLimitGateScreen(
     extensionsRemaining: Int,
     onExit: () -> Unit,
     onWatchAdToExtend: () -> Unit,
-    onDebugBypass: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onDebugBypass: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
 
@@ -71,11 +73,12 @@ fun DailyLimitGateScreen(
     }
 
     val isBlockedForToday = extensionsRemaining <= 0
+    val isDark = isSystemInDarkTheme()
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(PureBlack)
+            .background(if (isDark) PureBlack else PureWhite)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
@@ -94,14 +97,18 @@ fun DailyLimitGateScreen(
                 modifier = Modifier
                     .size(68.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF1C1C1E))
-                    .border(1.dp, if (isBlockedForToday) AlertRed.copy(alpha = 0.5f) else Color(0xFF2C2C2E), CircleShape),
+                    .background(if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
+                    .border(
+                        1.dp,
+                        if (isBlockedForToday) AlertRed.copy(alpha = 0.5f) else (if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)),
+                        CircleShape
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = if (isBlockedForToday) Icons.Default.Lock else Icons.Default.HourglassBottom,
                     contentDescription = null,
-                    tint = if (isBlockedForToday) AlertRed else Color.White,
+                    tint = if (isBlockedForToday) AlertRed else (if (isDark) Color.White else PureBlack),
                     modifier = Modifier.size(32.dp)
                 )
             }
@@ -110,7 +117,7 @@ fun DailyLimitGateScreen(
 
             Text(
                 text = if (isBlockedForToday) "Daily Limit Reached" else "Daily Limit Reached",
-                color = Color.White,
+                color = if (isDark) Color.White else Color(0xFF111115),
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = (-0.5).sp
@@ -124,7 +131,7 @@ fun DailyLimitGateScreen(
                 } else {
                     "You have reached your planned daily Instagram limit of ${TimeFormatters.formatMinutes(dailyLimitMinutes)}. Take a break or extend."
                 },
-                color = Color(0xFF8E8E93),
+                color = if (isDark) Color(0xFF8E8E93) else Color(0xFF6C6C70),
                 fontSize = 15.sp,
                 textAlign = TextAlign.Center,
                 lineHeight = 21.sp,
@@ -151,8 +158,8 @@ fun DailyLimitGateScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xFF1C1C1E))
-                    .border(0.5.dp, Color(0xFF2C2C2E), RoundedCornerShape(16.dp))
+                    .background(if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
+                    .border(0.5.dp, if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA), RoundedCornerShape(16.dp))
                     .padding(horizontal = 16.dp, vertical = 14.dp)
             ) {
                 Column {
@@ -163,19 +170,19 @@ fun DailyLimitGateScreen(
                     ) {
                         Text(
                             text = "Today's Usage",
-                            color = Color(0xFF8E8E93),
+                            color = if (isDark) Color(0xFF8E8E93) else Color(0xFF6C6C70),
                             fontSize = 14.sp
                         )
                         Text(
                             text = TimeFormatters.formatMinutes(todayMinutesUsed),
-                            color = Color.White,
+                            color = if (isDark) Color.White else Color(0xFF111115),
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
 
                     HorizontalDivider(
-                        color = Color(0xFF2C2C2E),
+                        color = if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA),
                         thickness = 0.5.dp,
                         modifier = Modifier.padding(vertical = 12.dp)
                     )
@@ -187,19 +194,19 @@ fun DailyLimitGateScreen(
                     ) {
                         Text(
                             text = "Daily Limit Set",
-                            color = Color(0xFF8E8E93),
+                            color = if (isDark) Color(0xFF8E8E93) else Color(0xFF6C6C70),
                             fontSize = 14.sp
                         )
                         Text(
                             text = TimeFormatters.formatMinutes(dailyLimitMinutes),
-                            color = Color.White,
+                            color = if (isDark) Color.White else Color(0xFF111115),
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
 
                     HorizontalDivider(
-                        color = Color(0xFF2C2C2E),
+                        color = if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA),
                         thickness = 0.5.dp,
                         modifier = Modifier.padding(vertical = 12.dp)
                     )
@@ -211,12 +218,12 @@ fun DailyLimitGateScreen(
                     ) {
                         Text(
                             text = "Daily Extensions",
-                            color = Color(0xFF8E8E93),
+                            color = if (isDark) Color(0xFF8E8E93) else Color(0xFF6C6C70),
                             fontSize = 14.sp
                         )
                         Text(
                             text = if (isBlockedForToday) "0 / 2 remaining (Locked)" else "$extensionsRemaining / 2 remaining",
-                            color = if (extensionsRemaining > 0) Color.White else AlertRed,
+                            color = if (extensionsRemaining > 0) (if (isDark) Color.White else Color(0xFF111115)) else AlertRed,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -233,13 +240,13 @@ fun DailyLimitGateScreen(
                     .height(52.dp),
                 shape = RoundedCornerShape(26.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.White,
-                    contentColor = Color.Black
+                    containerColor = if (isDark) Color.White else PureBlack,
+                    contentColor = if (isDark) Color.Black else PureWhite
                 )
             ) {
                 Text(
                     text = "Close Instagram",
-                    color = Color.Black,
+                    color = if (isDark) Color.Black else PureWhite,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -254,10 +261,10 @@ fun DailyLimitGateScreen(
                         .fillMaxWidth()
                         .height(52.dp),
                     shape = RoundedCornerShape(26.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF2C2C2E)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)),
                     colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = Color(0xFF1C1C1E),
-                        contentColor = Color.White
+                        containerColor = if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7),
+                        contentColor = if (isDark) Color.White else PureBlack
                     )
                 ) {
                     Row(
@@ -267,13 +274,13 @@ fun DailyLimitGateScreen(
                         Icon(
                             imageVector = Icons.Default.PlayArrow,
                             contentDescription = null,
-                            tint = Color.White,
+                            tint = if (isDark) Color.White else PureBlack,
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "Watch Ad to Extend (+5m)",
-                            color = Color.White,
+                            color = if (isDark) Color.White else PureBlack,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold
                         )

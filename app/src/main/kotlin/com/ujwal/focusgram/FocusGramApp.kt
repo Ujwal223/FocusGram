@@ -3,7 +3,6 @@ package com.ujwal.focusgram
 import android.app.Application
 import android.util.Log
 import com.ujwal.focusgram.core.database.FocusGramDatabase
-import com.ujwal.focusgram.core.datastore.LegacyFlutterDataMigrator
 import com.ujwal.focusgram.core.datastore.SettingsRepository
 import com.ujwal.focusgram.core.engine.GeckoRuntimeManager
 import com.ujwal.focusgram.core.security.EncryptedStorage
@@ -45,15 +44,17 @@ class FocusGramApp : Application() {
         settingsRepository = SettingsRepository(this)
         encryptedStorage = EncryptedStorage(this)
 
+        // Do not start the DM foreground service from Application startup. When
+        // this process was launched for the visible activity, onResume would
+        // immediately stop that just-started service, violating Android's
+        // startForegroundService contract and crashing the whole process.
+        // The listener is started on app backgrounding (and by DmBootReceiver
+        // after boot) instead.
+
         // Pre-warming GeckoRuntime and mounting uBlock on Main avoids cold-start frame drops
         // when the primary WebView composable binds to the session manager.
         applicationScope.launch(Dispatchers.Main) {
             try {
-                kotlinx.coroutines.withContext(Dispatchers.IO) {
-                    val migrator = LegacyFlutterDataMigrator(this@FocusGramApp, settingsRepository, database)
-                    migrator.checkAndMigrate()
-                }
-
                 val manager = GeckoRuntimeManager.getInstance(this@FocusGramApp)
                 manager.extensionManager.initializeUBlockOrigin()
                 Log.i(TAG, "GeckoRuntime & Content Blocker initialized successfully.")

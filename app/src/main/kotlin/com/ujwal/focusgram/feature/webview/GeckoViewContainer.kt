@@ -29,6 +29,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.ujwal.focusgram.core.engine.GeckoSessionManager
+import com.ujwal.focusgram.core.engine.findActivity
+import com.ujwal.focusgram.core.ui.components.NoInternetScreen
 import com.ujwal.focusgram.core.ui.components.SkeletonScreen
 import com.ujwal.focusgram.core.ui.components.getSkeletonTypeFromUrl
 import com.ujwal.focusgram.core.ui.theme.DarkCardElevated
@@ -50,6 +52,7 @@ fun GeckoViewContainer(
     val isLoading by sessionManager.isLoading.collectAsState()
     val progress by sessionManager.progress.collectAsState()
     val currentUrl by sessionManager.currentUrl.collectAsState()
+    val hasNetworkError by sessionManager.hasNetworkError.collectAsState()
 
     var initialLoadCompleted by remember { mutableStateOf(false) }
 
@@ -81,6 +84,7 @@ fun GeckoViewContainer(
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
+                sessionManager.attachActivity(context.findActivity())
                 GeckoView(context).apply {
                     layoutParams = FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
@@ -90,6 +94,7 @@ fun GeckoViewContainer(
                 }
             },
             update = { geckoView ->
+                sessionManager.attachActivity(geckoView.context.findActivity())
                 if (geckoView.session != sessionManager.session) {
                     geckoView.setSession(sessionManager.session)
                 }
@@ -124,6 +129,18 @@ fun GeckoViewContainer(
                 color = InstagramBlue,
                 trackColor = DarkCardElevated,
                 strokeCap = StrokeCap.Round
+            )
+        }
+
+        AnimatedVisibility(
+            visible = hasNetworkError,
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            NoInternetScreen(
+                onRetry = {
+                    sessionManager.reload()
+                }
             )
         }
     }

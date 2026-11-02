@@ -3,6 +3,7 @@ package com.ujwal.focusgram.feature.session
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ujwal.focusgram.core.ui.components.CupertinoWheelPicker
 import com.ujwal.focusgram.core.ui.theme.PureBlack
+import com.ujwal.focusgram.core.ui.theme.PureWhite
 
 /**
  * Intention timer modal for configuring planned Instagram session duration (1 to 60 minutes).
@@ -45,17 +47,19 @@ import com.ujwal.focusgram.core.ui.theme.PureBlack
 @Composable
 fun AppSessionPicker(
     onSessionSelected: (Int) -> Unit,
-    onDismiss: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onDismiss: (() -> Unit)? = null
 ) {
     val minutesList = remember { (1..60).toList() }
     var selectedMinuteIndex by remember { mutableIntStateOf(14) } // Default: 15 min
     val selectedMinutes = minutesList.getOrElse(selectedMinuteIndex) { 15 }
 
+    val isDark = isSystemInDarkTheme()
+
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(PureBlack)
+            .background(if (isDark) PureBlack else PureWhite)
             .padding(horizontal = 24.dp, vertical = 24.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -73,13 +77,13 @@ fun AppSessionPicker(
                         modifier = Modifier
                             .size(36.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF1C1C1E))
-                            .border(0.5.dp, Color(0xFF2C2C2E), CircleShape)
+                            .background(if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
+                            .border(0.5.dp, if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA), CircleShape)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Close",
-                            tint = Color.White,
+                            tint = if (isDark) Color.White else PureBlack,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -94,14 +98,14 @@ fun AppSessionPicker(
                 modifier = Modifier
                     .size(64.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF1C1C1E))
-                    .border(1.dp, Color(0xFF2C2C2E), CircleShape),
+                    .background(if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
+                    .border(1.dp, if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.Timer,
                     contentDescription = "Timer",
-                    tint = Color.White,
+                    tint = if (isDark) Color.White else PureBlack,
                     modifier = Modifier.size(30.dp)
                 )
             }
@@ -110,7 +114,7 @@ fun AppSessionPicker(
 
             Text(
                 text = "Set Your Intention",
-                color = Color.White,
+                color = if (isDark) Color.White else Color(0xFF111115),
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = (-0.5).sp
@@ -120,7 +124,7 @@ fun AppSessionPicker(
 
             Text(
                 text = "How long do you plan to use\nInstagram right now?",
-                color = Color(0xFF8E8E93),
+                color = if (isDark) Color(0xFF8E8E93) else Color(0xFF6C6C70),
                 fontSize = 15.sp,
                 textAlign = TextAlign.Center,
                 lineHeight = 20.sp,
@@ -150,13 +154,13 @@ fun AppSessionPicker(
                     .height(52.dp),
                 shape = RoundedCornerShape(26.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.White,
-                    contentColor = Color.Black
+                    containerColor = if (isDark) Color.White else PureBlack,
+                    contentColor = if (isDark) Color.Black else PureWhite
                 )
             ) {
                 Text(
                     text = "Start $selectedMinutes-Minute Session",
-                    color = Color.Black,
+                    color = if (isDark) Color.Black else PureWhite,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -166,7 +170,7 @@ fun AppSessionPicker(
 
             Text(
                 text = "FocusGram will pause your session when time expires.",
-                color = Color(0xFF636366),
+                color = if (isDark) Color(0xFF636366) else Color(0xFF8E8E93),
                 fontSize = 12.sp,
                 textAlign = TextAlign.Center
             )

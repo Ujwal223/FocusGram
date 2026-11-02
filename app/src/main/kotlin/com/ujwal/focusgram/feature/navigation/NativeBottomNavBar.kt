@@ -20,6 +20,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.draw.blur
@@ -46,6 +48,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -66,7 +69,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.saveable.rememberSaveable
 import com.ujwal.focusgram.core.model.FocusSettings
 import com.ujwal.focusgram.core.model.IslandMode
 import com.ujwal.focusgram.core.utils.HapticHelper
@@ -100,6 +105,10 @@ enum class NavTab(
 fun NativeBottomNavBar(
     currentUrl: String,
     settings: FocusSettings,
+    onNavigate: (String) -> Unit,
+    onOpenProfile: () -> Unit,
+    onOpenSettings: () -> Unit,
+    modifier: Modifier = Modifier,
     islandMode: IslandMode = IslandMode.NORMAL,
     instagramTheme: String = "auto",
     isWebInputFocused: Boolean = false,
@@ -112,12 +121,11 @@ fun NativeBottomNavBar(
     isAuthenticated: Boolean = false,
     isAuthPage: Boolean = false,
     onNavClick: ((String) -> Unit)? = null,
-    onNavigate: (String) -> Unit,
-    onOpenProfile: () -> Unit,
-    onOpenSettings: () -> Unit,
     onRefreshHome: () -> Unit = {},
     onRefreshReels: () -> Unit = {},
-    modifier: Modifier = Modifier
+    onRefreshPage: () -> Unit = {},
+    onDoubleTapTab: ((NavTab) -> Unit)? = null,
+    onProfileLongPress: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val view = LocalView.current
@@ -213,8 +221,8 @@ fun NativeBottomNavBar(
     )
 
     // Double-click timestamp trackers
-    var lastHomeClickTime by remember { mutableLongStateOf(0L) }
-    var lastReelsClickTime by remember { mutableLongStateOf(0L) }
+    var lastTabClickTime by rememberSaveable { mutableLongStateOf(0L) }
+    var lastClickedTab by rememberSaveable { mutableStateOf<String?>(null) }
 
     // Long press perimeter progress animation state
     val longPressProgressAnim = remember { Animatable(0f) }
@@ -382,7 +390,7 @@ fun NativeBottomNavBar(
                     modifier = Modifier
                         .fillMaxHeight()
                         .width(tabWidthDp)
-                        .offset(x = animatedPillOffset)
+                        .offset { IntOffset(x = animatedPillOffset.roundToPx(), y = 0) }
                         .padding(horizontal = 6.dp, vertical = 6.dp)
                         .clip(RoundedCornerShape(22.dp))
                         .background(selectedTabBackground)
@@ -414,84 +422,103 @@ fun NativeBottomNavBar(
                             Modifier
                                 .weight(1f)
                                 .fillMaxHeight()
-                                .pointerInput(Unit) {
-                                    detectTapGestures(
-                                        onPress = {
-                                            var settingsOpened = false
-                                            val animJob = scope.launch {
-                                                try {
-                                                    // Must hold for 400ms before starting settings open process/animation
-                                                    delay(400L)
-                                                    longPressProgressAnim.animateTo(
-                                                        targetValue = 1f,
-                                                        animationSpec = tween(
-                                                            durationMillis = 800,
-                                                            easing = LinearEasing
-                                                        )
+                                .pointerInput(tab) {
+                                    awaitEachGesture {
+                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                        var settingsOpened = false
+                                        val animJob = scope.launch {
+                                            try {
+                                                // Must hold for 120ms before starting settings sweep
+                                                delay(120L)
+                                                longPressProgressAnim.animateTo(
+                                                    targetValue = 1f,
+                                                    animationSpec = tween(
+                                                        durationMillis = 480,
+                                                        easing = LinearEasing
                                                     )
-                                                    settingsOpened = true
-                                                    HapticHelper.performLongPress(context, view)
-                                                    longPressProgressAnim.snapTo(0f)
-                                                    onOpenSettings()
-                                                } catch (_: CancellationException) {
-                                                    longPressProgressAnim.snapTo(0f)
-                                                } finally {
-                                                    longPressProgressAnim.snapTo(0f)
-                                                }
+                                                )
+                                                settingsOpened = true
+                                                HapticHelper.performLongPress(context, view)
+                                                longPressProgressAnim.snapTo(0f)
+                                                onOpenSettings()
+                                                onProfileLongPress?.invoke()
+                                            } catch (_: CancellationException) {
+                                                longPressProgressAnim.snapTo(0f)
+                                            } finally {
+                                                longPressProgressAnim.snapTo(0f)
                                             }
+                                        }
 
-                                            val released = tryAwaitRelease()
-                                            if (!settingsOpened) {
-                                                animJob.cancel()
-                                                scope.launch { longPressProgressAnim.snapTo(0f) }
-                                                if (released) {
-                                                    HapticHelper.performClick(context, view)
+                                        // Allow thumb drift up to 24dp before cancelling long press hold
+                                        val slopPx = 24.dp.toPx()
+                                        val downPos = down.position
+                                        var released = false
+
+                                        while (true) {
+                                            val event = awaitPointerEvent()
+                                            val change = event.changes.firstOrNull { it.id == down.id }
+                                            if (change == null || !change.pressed) {
+                                                released = true
+                                                break
+                                            }
+                                            if ((change.position - downPos).getDistance() > slopPx) {
+                                                break
+                                            }
+                                        }
+
+                                        if (!settingsOpened) {
+                                            animJob.cancel()
+                                            scope.launch { longPressProgressAnim.snapTo(0f) }
+                                            if (released) {
+                                                val now = SystemClock.uptimeMillis()
+                                                HapticHelper.performClick(context, view)
+                                                val isDoubleTap = (lastClickedTab == NavTab.PROFILE.name) && (now - lastTabClickTime < 350L)
+                                                if (isDoubleTap) {
+                                                    lastTabClickTime = 0L
+                                                    lastClickedTab = null
+                                                    onRefreshPage()
+                                                    onDoubleTapTab?.invoke(NavTab.PROFILE)
+                                                } else {
+                                                    lastTabClickTime = now
+                                                    lastClickedTab = NavTab.PROFILE.name
                                                     onOpenProfile()
                                                     onNavClick?.invoke("profile")
                                                 }
                                             }
                                         }
-                                    )
+                                    }
                                 }
                         } else {
                             Modifier
                                 .weight(1f)
                                 .fillMaxHeight()
-                                .pointerInput(isSelected) {
+                                .pointerInput(tab) {
                                     detectTapGestures(
                                         onTap = {
                                             val now = SystemClock.uptimeMillis()
                                             HapticHelper.performClick(context, view)
 
-                                            when (tab) {
-                                                NavTab.HOME -> {
-                                                    if (isSelected && (now - lastHomeClickTime < 400L)) {
-                                                        onRefreshHome()
-                                                        lastHomeClickTime = 0L
-                                                    } else {
-                                                        lastHomeClickTime = now
+                                            val isDoubleTap = (lastClickedTab == tab.name) && (now - lastTabClickTime < 350L)
+                                            if (isDoubleTap) {
+                                                lastTabClickTime = 0L
+                                                lastClickedTab = null
+                                                when (tab) {
+                                                    NavTab.HOME -> onRefreshHome()
+                                                    NavTab.REELS -> onRefreshReels()
+                                                    else -> onRefreshPage()
+                                                }
+                                                onDoubleTapTab?.invoke(tab)
+                                            } else {
+                                                lastTabClickTime = now
+                                                lastClickedTab = tab.name
+                                                when (tab) {
+                                                    NavTab.SETTINGS -> onOpenSettings()
+                                                    else -> {
                                                         if (!isSelected) {
                                                             onNavigate(tab.targetPath)
                                                             onNavClick?.invoke(tab.targetKey)
                                                         }
                                                     }
-                                                }
-                                                NavTab.REELS -> {
-                                                    if (isSelected && (now - lastReelsClickTime < 400L)) {
-                                                        onRefreshReels()
-                                                        lastReelsClickTime = 0L
-                                                    } else {
-                                                        lastReelsClickTime = now
-                                                        if (!isSelected) {
-                                                            onNavigate(tab.targetPath)
-                                                            onNavClick?.invoke(tab.targetKey)
-                                                        }
-                                                    }
-                                                }
-                                                NavTab.SETTINGS -> onOpenSettings()
-                                                else -> {
-                                                    onNavigate(tab.targetPath)
-                                                    onNavClick?.invoke(tab.targetKey)
                                                 }
                                             }
                                         }

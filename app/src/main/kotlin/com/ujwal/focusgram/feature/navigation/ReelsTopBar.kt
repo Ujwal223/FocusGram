@@ -40,11 +40,11 @@ import com.ujwal.focusgram.R
 @Composable
 fun ReelsTopBar(
     isVisible: Boolean,
-    watchedCount: Int = 0,
-    isDownloadEnabled: Boolean = false,
     onReelsClick: () -> Unit,
     onDownloadClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    watchedCount: Int = 0,
+    isDownloadEnabled: Boolean = false
 ) {
     AnimatedVisibility(
         visible = isVisible,

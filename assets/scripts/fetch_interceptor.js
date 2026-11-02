@@ -1,6 +1,6 @@
 /**
  * FocusGram Unified Feed Filter via Fetch Interception
- * Injected at DOCUMENT_START — before Instagram's JS loads.
+ * Injected at DOCUMENT_START : before Instagram's JS loads.
  * 
  * This script intercepts GraphQL fetch calls and filters feed content based on:
  * - Ads (is_ad, ad_action_link, product_type, ad_id, ad_header_style)

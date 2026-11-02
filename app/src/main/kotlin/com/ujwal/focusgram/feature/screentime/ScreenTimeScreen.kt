@@ -4,6 +4,10 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.isSystemInDarkTheme
+import com.ujwal.focusgram.core.ui.components.IOSDivider
+import com.ujwal.focusgram.core.ui.components.IOSGroupBg
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -94,10 +98,10 @@ enum class DailyBreakdownRange(val label: String) {
 @Composable
 fun ScreenTimeScreen(
     screenTimeDao: ScreenTimeDao,
-    dailyLimitMinutes: Int = 60,
     onBack: () -> Unit,
-    reelHistory: ReelHistory? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    dailyLimitMinutes: Int = 60,
+    reelHistory: ReelHistory? = null
 ) {
     BackHandler {
         onBack()
@@ -156,7 +160,57 @@ fun ScreenTimeScreen(
     }
 
     val weeklyTotalMinutes = last7Days.sumOf { it.second }
-    val weeklyDailyAverage = weeklyTotalMinutes / 7
+
+    val last7DaysRawSeconds = remember(records) {
+        var totalSec = 0
+        for (i in 6 downTo 0) {
+            val dCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -i) }
+            val dStr = dateFormat.format(dCal.time)
+            totalSec += (records.firstOrNull { it.date == dStr }?.seconds) ?: 0
+        }
+        totalSec
+    }
+
+    // Determine how many days the user has had tracking active within this 7-day window.
+    // If a user started tracking recently (e.g. installed today or 2 days ago), divide
+    // by days elapsed since their first record (min 1, max 7) to avoid an artificially collapsed average.
+    val trackingDaysDivisor = remember(records, todayStr) {
+        val earliestRecorded = records.filter { it.seconds > 0 }.minOfOrNull { it.date }
+        if (earliestRecorded == null) {
+            1
+        } else {
+            try {
+                val startCal = Calendar.getInstance().apply {
+                    time = dateFormat.parse(earliestRecorded) ?: Date()
+                }
+                val todayCal = Calendar.getInstance().apply {
+                    time = dateFormat.parse(todayStr) ?: Date()
+                }
+                val diffDays = ((todayCal.timeInMillis - startCal.timeInMillis) / (24 * 60 * 60 * 1000L)).toInt() + 1
+                diffDays.coerceIn(1, 7)
+            } catch (_: Exception) {
+                7
+            }
+        }
+    }
+
+    val weeklyDailyAverageSeconds = remember(last7DaysRawSeconds, trackingDaysDivisor) {
+        if (trackingDaysDivisor > 0) last7DaysRawSeconds / trackingDaysDivisor else 0
+    }
+
+    val weeklyDailyAverage = remember(weeklyDailyAverageSeconds) {
+        if (weeklyDailyAverageSeconds == 0) 0
+        else if (weeklyDailyAverageSeconds < 60) 1
+        else (weeklyDailyAverageSeconds + 30) / 60
+    }
+
+    val dailyAverageDisplayText = remember(weeklyDailyAverageSeconds, weeklyDailyAverage) {
+        when {
+            weeklyDailyAverageSeconds == 0 -> "0m"
+            weeklyDailyAverageSeconds < 60 -> "${weeklyDailyAverageSeconds}s"
+            else -> TimeFormatters.formatMinutes(weeklyDailyAverage)
+        }
+    }
 
     val displayedRecords = remember(records, selectedRange, customStartDateMillis, customEndDateMillis) {
         when (selectedRange) {
@@ -194,6 +248,7 @@ fun ScreenTimeScreen(
     }
     val hasMultipleYears = distinctYears.size > 1
     val hasMultipleMonths = distinctMonths.size > 1
+    val isDark = isSystemInDarkTheme()
 
     val yesterdayStr = remember {
         val yCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
@@ -309,7 +364,7 @@ fun ScreenTimeScreen(
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "${weeklyDailyAverage}m",
+                                text = dailyAverageDisplayText,
                                 color = IOSTextPrimary,
                                 fontSize = 32.sp,
                                 fontWeight = FontWeight.Bold
@@ -343,7 +398,7 @@ fun ScreenTimeScreen(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(0.5.dp)
-                                            .background(Color(0xFF3A3A3C))
+                                            .background(if (isDark) Color(0xFF3A3A3C) else Color(0xFFD1D1D6))
                                     )
                                     Text(
                                         text = "Limit",
@@ -400,7 +455,7 @@ fun ScreenTimeScreen(
                                                 modifier = Modifier
                                                     .fillMaxSize()
                                                     .clip(RoundedCornerShape(4.dp))
-                                                    .background(Color(0xFF2C2C2E))
+                                                    .background(if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA))
                                             )
 
                                             // Active filled bar
@@ -566,7 +621,7 @@ fun ScreenTimeScreen(
                                 .height(6.dp)
                                 .clip(RoundedCornerShape(3.dp)),
                             color = if (limitFraction >= 1f) Color(0xFFFF453A) else IOSBlue,
-                            trackColor = Color(0xFF2C2C2E),
+                            trackColor = if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA),
                             strokeCap = StrokeCap.Round
                         )
                     }
@@ -625,8 +680,8 @@ fun ScreenTimeScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(9.dp))
-                        .background(Color(0xFF1C1C1E))
-                        .border(0.5.dp, Color(0xFF2C2C2E), RoundedCornerShape(9.dp))
+                        .background(IOSGroupBg)
+                        .border(0.5.dp, IOSDivider, RoundedCornerShape(9.dp))
                         .padding(2.dp)
                 ) {
                     Row(modifier = Modifier.fillMaxWidth()) {
@@ -637,7 +692,11 @@ fun ScreenTimeScreen(
                                     .weight(1f)
                                     .height(30.dp)
                                     .clip(RoundedCornerShape(7.dp))
-                                    .background(if (isSelected) Color(0xFF3A3A3C) else Color.Transparent)
+                                    .background(
+                                        if (isSelected) {
+                                            if (isDark) Color(0xFF3A3A3C) else Color(0xFFE5E5EA)
+                                        } else Color.Transparent
+                                    )
                                     .clickable {
                                         if (range == DailyBreakdownRange.CUSTOM) {
                                             showCustomPicker = true
@@ -649,7 +708,7 @@ fun ScreenTimeScreen(
                             ) {
                                 Text(
                                     text = range.label,
-                                    color = if (isSelected) Color.White else IOSTextSecondary,
+                                    color = if (isSelected) IOSTextPrimary else IOSTextSecondary,
                                     fontSize = 12.sp,
                                     fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
                                 )
@@ -724,7 +783,7 @@ fun ScreenTimeScreen(
                                                 .width(36.dp)
                                                 .height(4.dp)
                                                 .clip(RoundedCornerShape(2.dp))
-                                                .background(Color(0xFF2C2C2E)),
+                                                .background(if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)),
                                             contentAlignment = Alignment.CenterStart
                                         ) {
                                             Box(

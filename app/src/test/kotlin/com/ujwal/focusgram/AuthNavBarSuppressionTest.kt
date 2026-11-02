@@ -68,14 +68,50 @@ class AuthNavBarSuppressionTest {
         assertTrue(isNavBarVisible("https://www.instagram.com/accounts/edit/", isAuthenticated = true, isAuthPage = false))
     }
 
+    private fun getFile(relPath: String): File {
+        val f1 = File(relPath)
+        if (f1.exists()) return f1
+        val f2 = File("app/$relPath")
+        if (f2.exists()) return f2
+        val stripped = relPath.removePrefix("app/")
+        val f3 = File(stripped)
+        if (f3.exists()) return f3
+        return File("app/$stripped")
+    }
+
     @Test
     fun testFocusGramAppEnforcesAuthCheck() {
-        val file = File("src/main/kotlin/com/ujwal/focusgram/ui/FocusGramApp.kt")
-        val content = if (file.exists()) file.readText() else File("app/src/main/kotlin/com/ujwal/focusgram/ui/FocusGramApp.kt").readText()
+        val content = getFile("src/main/kotlin/com/ujwal/focusgram/ui/FocusGramApp.kt").readText()
 
         assertTrue(
             "FocusGramApp must check !isAuthPage && isUserAuthenticated before rendering NativeBottomNavBar",
             content.contains("!isAuthPage && isUserAuthenticated")
+        )
+
+        assertTrue(
+            "FocusGramApp must check isUserAuthenticated && !isAuthPage before activating mindful gates",
+            content.contains("isUserAuthenticated && !isAuthPage && (")
+        )
+    }
+
+    @Test
+    fun testEngineScriptsGuardedByAuthentication() {
+        val ublockBg = getFile("src/main/assets/extensions/ublock/background.js").readText()
+        assertTrue(
+            "background.js must strictly check userIsAuthenticated before blocking web requests",
+            ublockBg.contains("!userIsAuthenticated")
+        )
+
+        val ublockContent = getFile("src/main/assets/extensions/ublock/focusgram_content.js").readText()
+        assertTrue(
+            "focusgram_content.js must guard authentication state via isAuthPage and authStateChanged",
+            ublockContent.contains("isAuthPage") && ublockContent.contains("authStateChanged")
+        )
+
+        val sessionMgr = getFile("src/main/kotlin/com/ujwal/focusgram/core/engine/GeckoSessionManager.kt").readText()
+        assertTrue(
+            "GeckoSessionManager must guard injectBottomBarTrimmer by isAuthenticated",
+            sessionMgr.contains("if (!isAuthenticated) return")
         )
     }
 }

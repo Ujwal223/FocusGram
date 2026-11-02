@@ -11,4 +11,4 @@ This directory contains the bundled, unpacked WebExtension for **uBlock Origin**
    - Immune to dynamic Instagram class obfuscation.
 3. **FOSS Compliance:**
    - Distributed under **GNU General Public License v3.0 (GPL-3.0)**.
-   - Author: Raymond Hill (gorhill) — https://github.com/gorhill/uBlock.
+   - Author: Raymond Hill (gorhill) : https://github.com/gorhill/uBlock.

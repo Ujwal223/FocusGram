@@ -22,9 +22,11 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.MediaStore
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import java.io.File
 import java.util.concurrent.atomic.AtomicReference
@@ -107,10 +109,12 @@ import com.ujwal.focusgram.core.engine.FocusGramPromptDelegate
 import com.ujwal.focusgram.core.engine.GeckoRuntimeManager
 import com.ujwal.focusgram.core.engine.GeckoSessionManager
 import com.ujwal.focusgram.core.engine.UserScriptManager
+import com.ujwal.focusgram.core.engine.findActivity
 import com.ujwal.focusgram.core.model.FocusSettings
 import com.ujwal.focusgram.core.model.IslandMode
 import com.ujwal.focusgram.core.security.EncryptedStorage
 import com.ujwal.focusgram.core.ui.theme.PureBlack
+import com.ujwal.focusgram.core.ui.theme.PureWhite
 import com.ujwal.focusgram.feature.applock.AppLockScreen
 import com.ujwal.focusgram.feature.applock.AppLockSettingsPage
 import com.ujwal.focusgram.feature.applock.AppLockSetupScreen
@@ -124,7 +128,6 @@ import com.ujwal.focusgram.feature.session.AppSessionPicker
 import com.ujwal.focusgram.feature.session.DailyLimitGateScreen
 import com.ujwal.focusgram.feature.session.SessionExhaustedScreen
 import com.ujwal.focusgram.core.utils.TimeFormatters
-import com.ujwal.focusgram.feature.snapshots.SnapshotManagerScreen
 import com.ujwal.focusgram.feature.webview.GeckoViewContainer
 import com.ujwal.focusgram.feature.screentime.ScreenTimeScreen
 import com.ujwal.focusgram.feature.wellness.AdPreloader
@@ -132,7 +135,6 @@ import com.ujwal.focusgram.feature.wellness.AdsterraAdScreen
 import com.ujwal.focusgram.feature.wellness.BreathGateScreen
 import com.ujwal.focusgram.feature.wellness.CooldownGateScreen
 import com.ujwal.focusgram.feature.wellness.EffortFrictionGate
-import com.ujwal.focusgram.feature.wellness.GuardrailsDashboardScreen
 import com.ujwal.focusgram.feature.onboarding.OnboardingScreen
 import com.ujwal.focusgram.feature.update.UpdateBanner
 import com.ujwal.focusgram.feature.update.UpdateCheckResult
@@ -149,9 +151,7 @@ enum class AppDestination {
     MAIN_WEBVIEW,
     SETTINGS,
     REELS_HISTORY,
-    SNAPSHOTS,
     SCREEN_TIME,
-    GUARDRAILS,
     APP_LOCK_SETUP,
     APP_LOCK_SETTINGS,
     CHAT_LOCK_SETUP,
@@ -211,8 +211,10 @@ fun FocusGramApp() {
     }
 
     val currentUrl by sessionManager.currentUrl.collectAsState()
+    val canGoBack by sessionManager.canGoBack.collectAsState()
     var isAppInForeground by remember { mutableStateOf(true) }
     var destination by rememberSaveable { mutableStateOf(AppDestination.MAIN_WEBVIEW) }
+    var guideStep by rememberSaveable { mutableStateOf(com.ujwal.focusgram.feature.guide.GestureGuideStep.IDLE) }
     val isViewingReels = destination == AppDestination.MAIN_WEBVIEW && currentUrl.lowercase().contains("/reel")
     val hasPin = remember { encryptedStorage.hasPin() }
     var isAppUnlocked by rememberSaveable { mutableStateOf(false) }
@@ -224,6 +226,11 @@ fun FocusGramApp() {
     var activeRemoteNotice by remember { mutableStateOf<RemoteNotice?>(null) }
 
     LaunchedEffect(Unit) {
+        sessionManager.attachActivity(context.findActivity())
+        val currentVersionCode = com.ujwal.focusgram.BuildConfig.VERSION_CODE
+        if (settings.lastKnownVersionCode != currentVersionCode) {
+            settingsRepository.setLastKnownVersionCode(currentVersionCode)
+        }
         when (val res = updateCheckerService.checkForUpdates(ignoreDismissed = false)) {
             is UpdateCheckResult.Available -> {
                 activeUpdateInfo = res.updateInfo
@@ -240,6 +247,55 @@ fun FocusGramApp() {
     var unlockedChatThreadIds by remember { mutableStateOf(emptySet<String>()) }
     var isDirectAllUnlocked by remember { mutableStateOf(false) }
     var pendingUnlockChat by remember { mutableStateOf<PendingChatUnlock?>(null) }
+    var pinSetupReturnDestination by rememberSaveable { mutableStateOf<AppDestination?>(null) }
+    var pendingChatLockThreadId by rememberSaveable { mutableStateOf<String?>(null) }
+
+    val pendingIntentUrl by MainActivity.pendingNavigationUrl.collectAsState()
+    LaunchedEffect(pendingIntentUrl) {
+        pendingIntentUrl?.let { url ->
+            destination = AppDestination.MAIN_WEBVIEW
+            MainActivity.pendingNavigationUrl.value = null
+
+            val lowerUrl = url.lowercase()
+            val blockedMessage = when {
+                settings.noDMs && (lowerUrl.contains("/direct") || lowerUrl.contains("/messages")) -> "Direct Messages are blocked"
+                settings.noReels && (lowerUrl.contains("/reel/") || lowerUrl.contains("/reels")) -> "Reels are blocked"
+                settings.noStories && lowerUrl.contains("/stories") -> "Stories are blocked"
+                else -> null
+            }
+
+            if (blockedMessage != null) {
+                android.widget.Toast.makeText(context, blockedMessage, android.widget.Toast.LENGTH_SHORT).show()
+                sessionManager.navigateTo("https://www.instagram.com/")
+                return@LaunchedEffect
+            }
+
+            val targetThreadId = if (url.contains("/direct/t/")) {
+                url.substringAfter("/direct/t/").trim('/').split('/').firstOrNull()?.lowercase()?.trim()
+            } else null
+
+            val isWholeDmLocked = settings.chatLockMode == "whole_dm" || settings.chatLockAll
+            val isLocked = isWholeDmLocked || (targetThreadId != null && (
+                settings.lockedChatIds.any { locked ->
+                    val cleanLocked = locked.trim().lowercase().removePrefix("@")
+                    cleanLocked.equals(targetThreadId, ignoreCase = true) ||
+                    cleanLocked.equals(settings.lockedChatUsernames[targetThreadId]?.lowercase()?.removePrefix("@"), ignoreCase = true) ||
+                    (threadToUsernameMap[targetThreadId]?.any { it.equals(cleanLocked, ignoreCase = true) } == true)
+                }
+            ))
+
+            // If incoming notification targets a locked chat or whole DM is locked, intercept with PIN challenge
+            if (isLocked && (targetThreadId == null || !unlockedChatThreadIds.contains(targetThreadId))) {
+                val cleanUser = settings.lockedChatUsernames[targetThreadId]
+                    ?: threadToUsernameMap[targetThreadId]?.firstOrNull()
+                val safeThreadId = targetThreadId ?: "all"
+                pendingUnlockChat = PendingChatUnlock(safeThreadId, cleanUser, url)
+                sessionManager.navigateTo("https://www.instagram.com/direct/inbox/")
+            } else {
+                sessionManager.loadUri(url)
+            }
+        }
+    }
 
     LaunchedEffect(extensionManager) {
         extensionManager.onThreadUsernameMapped = { threadId, usernames ->
@@ -258,6 +314,7 @@ fun FocusGramApp() {
                 ?: threadToUsernameMap[cleanThreadId]?.firstOrNull()
                 ?: settings.lockedChatUsernames[cleanThreadId]
             pendingUnlockChat = PendingChatUnlock(cleanThreadId, cleanUser, targetUrl)
+            sessionManager.navigateTo("https://www.instagram.com/direct/inbox/")
         }
         extensionManager.onToggleChatLock = { threadId, username ->
             scope.launch {
@@ -280,6 +337,11 @@ fun FocusGramApp() {
 
     var activeThreadId by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(currentThreadId) {
+        val dmManager = com.ujwal.focusgram.feature.notifications.DmNotificationManager.getInstance(context)
+        dmManager.activeChatThreadId = currentThreadId
+        if (!currentThreadId.isNullOrBlank()) {
+            dmManager.cancelNotificationForThread(currentThreadId)
+        }
         if (activeThreadId != null && activeThreadId != currentThreadId) {
             val closedThreadId = activeThreadId!!
             unlockedChatThreadIds = unlockedChatThreadIds - closedThreadId
@@ -343,6 +405,17 @@ fun FocusGramApp() {
         }
         false
     }
+
+    LaunchedEffect(isChatLockActive, currentThreadId) {
+        if (isChatLockActive && currentThreadId != null && pendingUnlockChat == null) {
+            val cleanThreadId = currentThreadId.lowercase().trim()
+            val cleanUser = threadToUsernameMap[cleanThreadId]?.firstOrNull()
+                ?: settings.lockedChatUsernames[cleanThreadId]
+            val targetUrl = currentUrl
+            pendingUnlockChat = PendingChatUnlock(cleanThreadId, cleanUser, targetUrl)
+            sessionManager.navigateTo("https://www.instagram.com/direct/inbox/")
+        }
+    }
     var hasPassedSessionPicker by rememberSaveable {
         mutableStateOf(initialSettings.activeSessionIsActive && initialSettings.activeSessionRemainingSeconds > 0)
     }
@@ -395,8 +468,8 @@ fun FocusGramApp() {
     var isBioFocused by remember { mutableStateOf(false) }
     var selectedBioStyle by remember { mutableStateOf("bold") }
     var isModalActive by remember { mutableStateOf(false) }
-    var isUserAuthenticated by remember { mutableStateOf(false) }
-    var isAuthPage by remember { mutableStateOf(false) }
+    var isUserAuthenticated: Boolean by remember { mutableStateOf(true) }
+    var isAuthPage: Boolean by remember { mutableStateOf(GeckoSessionManager.isAuthUrl(sessionManager.currentUrl.value)) }
 
     var sessionDurationMinutes by rememberSaveable {
         mutableIntStateOf(if (initialSettings.activeSessionIsActive && initialSettings.activeSessionDurationMinutes > 0) initialSettings.activeSessionDurationMinutes else 15)
@@ -413,7 +486,7 @@ fun FocusGramApp() {
     var adRewardAction by remember { mutableStateOf<(suspend () -> Unit)?>(null) }
     var settingsSubpage by rememberSaveable { mutableStateOf(com.ujwal.focusgram.feature.settings.SettingsSubpage.MAIN) }
 
-    val isGateActive = destination != AppDestination.ADSTERRA_REWARDED && (
+    val isGateActive = destination != AppDestination.ADSTERRA_REWARDED && isUserAuthenticated && !isAuthPage && (
             shouldShowLock ||
             isDailyLimitExhausted || isSessionExhausted ||
             (!hasPassedSessionPicker && remainingCooldownSeconds > 0 && !hasPassedCooldownGate) ||
@@ -485,26 +558,6 @@ fun FocusGramApp() {
         val allGranted = results.values.all { it }
         val callback = pendingPermissionCallback.getAndSet(null)
         callback?.invoke(allGranted)
-    }
-
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        Log.i("FocusGramApp", "Notification permission result: $isGranted")
-    }
-
-    LaunchedEffect(settings.notifyPersistent, settings.notifySessionEnd) {
-        if (settings.notifyPersistent || settings.notifySessionEnd) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                if (androidx.core.content.ContextCompat.checkSelfPermission(
-                        context,
-                        android.Manifest.permission.POST_NOTIFICATIONS
-                    ) != android.content.pm.PackageManager.PERMISSION_GRANTED
-                ) {
-                    notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                }
-            }
-        }
     }
 
     val filePickerHandler = remember {
@@ -670,8 +723,8 @@ fun FocusGramApp() {
 
     // Foreground ticker decrementing session allocation and logging per-second screen time.
     // Pauses immediately when user navigates away from webview (e.g. Settings, Diagnostics).
-    LaunchedEffect(hasPassedSessionPicker, isSessionExhausted, isDailyLimitExhausted, isAppInForeground, destination, isGateActive) {
-        if (hasPassedSessionPicker && !isSessionExhausted && !isDailyLimitExhausted && isAppInForeground && destination == AppDestination.MAIN_WEBVIEW && !isGateActive) {
+    LaunchedEffect(hasPassedSessionPicker, isSessionExhausted, isDailyLimitExhausted, isAppInForeground, destination, isGateActive, isUserAuthenticated, isAuthPage) {
+        if (isUserAuthenticated && !isAuthPage && hasPassedSessionPicker && !isSessionExhausted && !isDailyLimitExhausted && isAppInForeground && destination == AppDestination.MAIN_WEBVIEW && !isGateActive) {
             val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
             var unsavedSeconds = 0
             var unsavedReelsSeconds = 0
@@ -754,6 +807,20 @@ fun FocusGramApp() {
         }
     }
 
+    LaunchedEffect(settings.notifyPersistent) {
+        if (settings.notifyPersistent) {
+            val areEnabled = androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
+            val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+            } else {
+                true
+            }
+            if (!areEnabled || !hasPermission) {
+                settingsRepository.setNotifyPersistent(false)
+            }
+        }
+    }
+
     LaunchedEffect(isViewingReels, settings.notifyPersistent, hasPassedSessionPicker, isSessionExhausted, isDailyLimitExhausted) {
         if (settings.notifyPersistent && hasPassedSessionPicker && !isSessionExhausted && !isDailyLimitExhausted) {
             ScreenTimeService.updateRoute(context, isViewingReels)
@@ -761,9 +828,9 @@ fun FocusGramApp() {
     }
 
     LaunchedEffect(hasPassedSessionPicker, isSessionExhausted, isDailyLimitExhausted, settings.notifyPersistent, isAppInForeground, destination, isGateActive) {
-        if (!settings.notifyPersistent || !hasPassedSessionPicker || isSessionExhausted || isDailyLimitExhausted || !isAppInForeground) {
+        if (!settings.notifyPersistent || !hasPassedSessionPicker || isSessionExhausted || isDailyLimitExhausted) {
             ScreenTimeService.stopSession(context)
-        } else if (destination == AppDestination.MAIN_WEBVIEW && !isGateActive) {
+        } else if (isAppInForeground && destination == AppDestination.MAIN_WEBVIEW && !isGateActive) {
             ScreenTimeService.startSession(context, isViewingReels, totalElapsedSeconds, sessionDurationMinutes)
         } else {
             ScreenTimeService.pauseSession(context, totalElapsedSeconds, sessionDurationMinutes)
@@ -797,7 +864,7 @@ fun FocusGramApp() {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) {
                 isAppInForeground = false
-                ScreenTimeService.stopSession(context)
+                ScreenTimeService.pauseSession(context, currentTotalElapsedSeconds, currentSessionDurationMinutes)
                 sessionManager.pauseMedia()
                 if (currentHasPassedSessionPicker && !currentIsSessionExhausted) {
                     scope.launch(NonCancellable) {
@@ -862,6 +929,7 @@ fun FocusGramApp() {
         }
         extensionManager.onModalOrChatActive = { active ->
             isModalActive = active
+            sessionManager.isModalActive = active
             val currentMode = IslandMode.fromUrl(sessionManager.currentUrl.value)
             // On Reels, keep FLOATING layout so comments sheets position above the bottom bar.
             val mode = if (active && currentMode != IslandMode.FLOATING) IslandMode.HIDDEN else currentMode
@@ -883,12 +951,10 @@ fun FocusGramApp() {
             val ignoredCodes = setOf("reels", "reel", "videos", "audio", "clips", "home", "explore", "direct", "stories")
             val targetCode = if (cleanCode.length >= 5 && cleanCode.lowercase() !in ignoredCodes) {
                 cleanCode
-            } else if (author.isNotBlank()) {
-                author.trim().removePrefix("@")
             } else {
                 ""
             }
-            if (targetCode.length >= 3) {
+            if (targetCode.isNotBlank()) {
                 reelHistory.onWatched(targetCode, author, title)
             }
             scope.launch {
@@ -907,12 +973,10 @@ fun FocusGramApp() {
             val ignoredCodes = setOf("reels", "reel", "videos", "audio", "clips", "home", "explore", "direct", "stories")
             val targetCode = if (cleanCode.length >= 5 && cleanCode.lowercase() !in ignoredCodes) {
                 cleanCode
-            } else if (author.isNotBlank()) {
-                author.trim().removePrefix("@")
             } else {
                 ""
             }
-            if (targetCode.length >= 3 && (title.isNotBlank() || author.isNotBlank())) {
+            if (targetCode.isNotBlank() && (title.isNotBlank() || author.isNotBlank())) {
                 reelHistory.onMeta(targetCode, author, title)
             }
         }
@@ -926,9 +990,11 @@ fun FocusGramApp() {
             MediaDownloadHelper.triggerDownloadFailure(context, error)
         }
         extensionManager.onAuthStateChanged = { authenticated, authPage ->
-            isUserAuthenticated = authenticated
-            isAuthPage = authPage || !authenticated || isAuthUrl(sessionManager.currentUrl.value)
-            sessionManager.setAuthenticated(authenticated)
+            val authUrl = isAuthUrl(sessionManager.currentUrl.value)
+            val effectiveAuth = authenticated && !authPage && !authUrl
+            isUserAuthenticated = effectiveAuth
+            isAuthPage = authPage || !authenticated || authUrl
+            sessionManager.setAuthenticated(effectiveAuth)
         }
     }
 
@@ -940,8 +1006,6 @@ fun FocusGramApp() {
     }
 
     LaunchedEffect(Unit) {
-        extensionManager.initializeUBlockOrigin()
-
         sessionManager.session.navigationDelegate = FocusGramNavigationDelegate(
             context = context,
             sessionManager = sessionManager,
@@ -951,13 +1015,16 @@ fun FocusGramApp() {
                 isAuthPage = isAuthRoute
                 if (isAuthRoute) {
                     isUserAuthenticated = false
+                    sessionManager.setAuthenticated(false)
                 }
                 sessionManager.updateCurrentUrl(newUrl)
                 sessionManager.updateIslandMode(mode)
                 extensionManager.setIslandMode(mode)
                 isWebInputFocused = false
                 isBioFocused = false
-                isModalActive = mode == IslandMode.HIDDEN
+                val modalOpen = mode == IslandMode.HIDDEN
+                isModalActive = modalOpen
+                sessionManager.isModalActive = modalOpen
             }
         )
 
@@ -974,6 +1041,15 @@ fun FocusGramApp() {
             }
         )
 
+        val extensionResult = extensionManager.initializeContentBlocker()
+        extensionResult.onSuccess {
+            // Install the content-script native-message route before the first page
+            // load so document_start messages cannot race session setup.
+            extensionManager.attachContentMessageDelegate(sessionManager.session)
+        }.onFailure { error ->
+            android.util.Log.e("FocusGramApp", "Could not attach native messaging to the main GeckoSession", error)
+        }
+
         val initialUrl = when {
             settings.minimalModeEnabled -> "https://www.instagram.com/direct/inbox/"
             settings.startupPage == "following" -> "https://www.instagram.com/?variant=following"
@@ -981,13 +1057,20 @@ fun FocusGramApp() {
             settings.startupPage == "direct" -> "https://www.instagram.com/direct/inbox/"
             else -> GeckoSessionManager.DEFAULT_URL
         }
-        sessionManager.openAndLoad(initialUrl)
+        val isUpdateNoticePending = !settings.isMigrationCompleted &&
+            !settings.isMigrationDeclined &&
+            com.ujwal.focusgram.core.datastore.LegacyUpdateDetector.hasLegacyData(context)
+
+        if (!isUpdateNoticePending && !settings.isFirstRun) {
+            sessionManager.openAndLoad(initialUrl)
+        } else {
+            sessionManager.openSessionWithoutLoading()
+        }
     }
 
     var previousReloadSettings by remember { mutableStateOf<FocusSettings?>(null) }
     LaunchedEffect(settings) {
         sessionManager.updateSettings(settings)
-        extensionManager.broadcastSettings(settings)
         extensionManager.setRevealMode(settings.unblurMode)
         extensionManager.setUBlockEnabled(settings.noAds)
 
@@ -1014,7 +1097,7 @@ fun FocusGramApp() {
         activity?.finish()
     }
 
-    val currentUrlStr = sessionManager.currentUrl.value.lowercase()
+    val currentUrlStr = currentUrl.lowercase()
     val cleanCurrentPath = remember(currentUrlStr) {
         IslandMode.extractPath(currentUrlStr).substringBefore('?').substringBefore('#').trimEnd('/').ifEmpty { "/" }
     }
@@ -1022,25 +1105,76 @@ fun FocusGramApp() {
     val isDmInbox = cleanCurrentPath == "/direct" || cleanCurrentPath == "/direct/inbox"
     val isRootHome = cleanCurrentPath == "/"
 
+    LaunchedEffect(isUserAuthenticated, isAuthPage, isGateActive, isChatLockActive, settings.hasSeenGestureGuide, destination, isDmThread, isDmInbox, isModalActive, settings.minimalModeEnabled) {
+        if (!isUserAuthenticated || isAuthPage || isGateActive || isChatLockActive) {
+            if (guideStep != com.ujwal.focusgram.feature.guide.GestureGuideStep.IDLE) {
+                guideStep = com.ujwal.focusgram.feature.guide.GestureGuideStep.IDLE
+            }
+            return@LaunchedEffect
+        }
+        if (!settings.hasSeenGestureGuide && destination == AppDestination.MAIN_WEBVIEW && !isDmThread && !isDmInbox && !isModalActive && !settings.minimalModeEnabled) {
+            if (guideStep == com.ujwal.focusgram.feature.guide.GestureGuideStep.IDLE) {
+                delay(800L)
+                guideStep = com.ujwal.focusgram.feature.guide.GestureGuideStep.DOUBLE_TAP_REFRESH
+            }
+        }
+    }
+
+    var hasVisitedSettingsInGuide by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(destination) {
+        if (destination == AppDestination.SETTINGS) {
+            hasVisitedSettingsInGuide = true
+        }
+    }
+
+    // Safety watchdog: If user visited Settings during guide and has now returned to MAIN_WEBVIEW, ensure guide completes
+    LaunchedEffect(destination, guideStep, hasVisitedSettingsInGuide) {
+        if (hasVisitedSettingsInGuide && destination == AppDestination.MAIN_WEBVIEW &&
+            (guideStep == com.ujwal.focusgram.feature.guide.GestureGuideStep.SETTINGS_WAIT ||
+             guideStep == com.ujwal.focusgram.feature.guide.GestureGuideStep.SETTINGS_PRESS_BACK)) {
+            guideStep = com.ujwal.focusgram.feature.guide.GestureGuideStep.COMPLETED
+            settingsRepository.setHasSeenGestureGuide(true)
+        }
+    }
+
+    // BackHandler dismissing chat lock veil and navigating securely to inbox
+    BackHandler(enabled = destination == AppDestination.MAIN_WEBVIEW && !isGateActive && isChatLockActive) {
+        pendingUnlockChat = null
+        if (currentThreadId != null) {
+            unlockedChatThreadIds = unlockedChatThreadIds - currentThreadId
+        }
+        sessionManager.userScriptManager?.evaluate(sessionManager.session, """
+            if (typeof window.__fgRemovePrivacyVeil === 'function') {
+                window.__fgRemovePrivacyVeil();
+            }
+        """)
+        if (settings.chatLockMode == "whole_dm" || settings.chatLockAll) {
+            sessionManager.navigateTo("https://www.instagram.com/")
+        } else {
+            sessionManager.navigateTo("https://www.instagram.com/direct/inbox/")
+        }
+    }
+
     // Disabling BackHandler at root URL lets the system gesture invoke predictive back-to-home.
-    val canHandleBack = !isGateActive && (
+    val canHandleBack = !isGateActive && !isChatLockActive && (
             destination != AppDestination.MAIN_WEBVIEW ||
             isDmThread ||
             isDmInbox ||
-            (!isRootHome && (sessionManager.canGoBack.value || (!currentUrlStr.endsWith("instagram.com/") && !currentUrlStr.endsWith("instagram.com"))))
+            (!isRootHome && (canGoBack || (!currentUrlStr.endsWith("instagram.com/") && !currentUrlStr.endsWith("instagram.com"))))
     )
 
     BackHandler(enabled = canHandleBack) {
         when {
-            destination == AppDestination.APP_LOCK_SETUP -> {
-                destination = AppDestination.APP_LOCK_SETTINGS
+            destination == AppDestination.APP_LOCK_SETUP || destination == AppDestination.CHAT_LOCK_SETUP -> {
+                val returnDest = pinSetupReturnDestination ?: AppDestination.APP_LOCK_SETTINGS
+                pinSetupReturnDestination = null
+                pendingChatLockThreadId = null
+                destination = returnDest
             }
             destination in listOf(
                 AppDestination.APP_LOCK_SETTINGS,
                 AppDestination.SCREEN_TIME,
                 AppDestination.REELS_HISTORY,
-                AppDestination.SNAPSHOTS,
-                AppDestination.GUARDRAILS,
                 AppDestination.DEBUG_MENU,
                 AppDestination.ONBOARDING
             ) -> {
@@ -1054,23 +1188,31 @@ fun FocusGramApp() {
                 }
             }
             destination == AppDestination.SETTINGS -> {
+                if (guideStep == com.ujwal.focusgram.feature.guide.GestureGuideStep.SETTINGS_PRESS_BACK ||
+                    guideStep == com.ujwal.focusgram.feature.guide.GestureGuideStep.SETTINGS_WAIT) {
+                    guideStep = com.ujwal.focusgram.feature.guide.GestureGuideStep.COMPLETED
+                    scope.launch { settingsRepository.setHasSeenGestureGuide(true) }
+                }
                 destination = AppDestination.MAIN_WEBVIEW
             }
             destination == AppDestination.MAIN_WEBVIEW && isDmThread -> {
                 isWebInputFocused = false
                 isModalActive = false
+                sessionManager.isModalActive = false
                 // Override back action in user's DM to navigate strictly to /direct/inbox without history traversal
                 sessionManager.navigateTo("https://www.instagram.com/direct/inbox/")
             }
             destination == AppDestination.MAIN_WEBVIEW && isDmInbox -> {
                 isWebInputFocused = false
                 isModalActive = false
+                sessionManager.isModalActive = false
                 // Override back action in DM inbox to navigate strictly to home screen without history traversal
                 sessionManager.navigateTo("https://www.instagram.com/")
             }
             destination == AppDestination.MAIN_WEBVIEW && !isRootHome -> {
                 isWebInputFocused = false
                 isModalActive = false
+                sessionManager.isModalActive = false
                 if (cleanCurrentPath == "/explore" || cleanCurrentPath == "/reels" || (!cleanCurrentPath.contains('/') && cleanCurrentPath.length > 1)) {
                     sessionManager.navigateTo("https://www.instagram.com/")
                 } else if (sessionManager.canGoBack.value) {
@@ -1090,6 +1232,31 @@ fun FocusGramApp() {
         else -> !isSystemDark
     }
 
+    val isUpdateNoticePending = remember(settings.isMigrationCompleted, settings.isMigrationDeclined) {
+        !settings.isMigrationCompleted &&
+        !settings.isMigrationDeclined &&
+        com.ujwal.focusgram.core.datastore.LegacyUpdateDetector.hasLegacyData(context)
+    }
+
+    if (isUpdateNoticePending) {
+        com.ujwal.focusgram.feature.update.UpdateNoticeScreen(
+            onDismiss = {
+                scope.launch {
+                    settingsRepository.setFirstRunCompleted()
+                    settingsRepository.setMigrationCompleted(true)
+                    settingsRepository.setHasSeenGestureGuide(false)
+                    com.ujwal.focusgram.core.datastore.LegacyUpdateDetector.purgeLegacyFiles(context)
+                    hasPassedBreathGate = !settings.showBreathGate || settings.breathGateSeconds <= 0
+                    hasPassedEffortFriction = true
+                    hasPassedSessionPicker = false
+                    hasPassedCooldownGate = true
+                    sessionManager.openAndLoad("https://www.instagram.com/accounts/login/?mtn")
+                }
+            }
+        )
+        return
+    }
+
     if (settings.isFirstRun) {
         OnboardingScreen(
             settings = settings,
@@ -1097,10 +1264,12 @@ fun FocusGramApp() {
             onComplete = {
                 scope.launch {
                     settingsRepository.setFirstRunCompleted()
+                    settingsRepository.setHasSeenGestureGuide(false)
                     hasPassedBreathGate = !settings.showBreathGate || settings.breathGateSeconds <= 0
                     hasPassedEffortFriction = true
                     hasPassedSessionPicker = false
                     hasPassedCooldownGate = true
+                    sessionManager.openAndLoad("https://www.instagram.com/accounts/login/?mtn")
                 }
             }
         )
@@ -1119,7 +1288,7 @@ fun FocusGramApp() {
 
             val navBarBottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
             val navBarTotalHeight = 64.dp + navBarBottomInset
-            val bottomNavShift = if (islandMode == IslandMode.FLOATING) {
+            val bottomNavShift = if (islandMode == IslandMode.FLOATING && isUserAuthenticated && !isAuthPage) {
                 if (!isKeyboardOrInputActive) navBarTotalHeight else 16.dp
             } else 0.dp
 
@@ -1128,7 +1297,7 @@ fun FocusGramApp() {
             val isWebviewVisible = destination == AppDestination.MAIN_WEBVIEW && !isGateActive
             GeckoViewContainer(
                 sessionManager = sessionManager,
-                grayscale = settings.grayscaleEnabled,
+                grayscale = (settings.grayscaleEnabled || settings.isGrayscaleActive()) && isUserAuthenticated && !isAuthPage,
                 isVisible = isWebviewVisible,
                 modifier = Modifier
                     .fillMaxSize()
@@ -1143,6 +1312,8 @@ fun FocusGramApp() {
 
             ReelsTopBar(
                 isVisible = !isGateActive &&
+                        isUserAuthenticated &&
+                        !isAuthPage &&
                         destination == AppDestination.MAIN_WEBVIEW &&
                         islandMode == IslandMode.FLOATING &&
                         !isModalActive &&
@@ -1212,6 +1383,15 @@ fun FocusGramApp() {
 
                     IconButton(
                         onClick = {
+                            val hasUsablePin = encryptedStorage.hasPin() || encryptedStorage.hasChatPin()
+                            if (!isCurrentlyLocked && !hasUsablePin) {
+                                Toast.makeText(context, "Please set up a 4-digit PIN first to lock chats", Toast.LENGTH_LONG).show()
+                                pinSetupReturnDestination = AppDestination.MAIN_WEBVIEW
+                                pendingChatLockThreadId = currentThreadId
+                                destination = if (settings.useSeparateChatPin) AppDestination.CHAT_LOCK_SETUP else AppDestination.APP_LOCK_SETUP
+                                return@IconButton
+                            }
+
                             var username = threadToUsernameMap[currentThreadId]?.firstOrNull()
                                 ?: settings.lockedChatUsernames[currentThreadId]
                             scope.launch {
@@ -1324,6 +1504,19 @@ fun FocusGramApp() {
                     onRefreshReels = {
                         sessionManager.refreshReels()
                     },
+                    onRefreshPage = {
+                        sessionManager.session.reload()
+                    },
+                    onDoubleTapTab = { tab ->
+                        if (guideStep == com.ujwal.focusgram.feature.guide.GestureGuideStep.DOUBLE_TAP_REFRESH) {
+                            guideStep = com.ujwal.focusgram.feature.guide.GestureGuideStep.LONG_PRESS_PROFILE
+                        }
+                    },
+                    onProfileLongPress = {
+                        if (guideStep == com.ujwal.focusgram.feature.guide.GestureGuideStep.LONG_PRESS_PROFILE) {
+                            guideStep = com.ujwal.focusgram.feature.guide.GestureGuideStep.SETTINGS_WAIT
+                        }
+                    },
                     modifier = Modifier.align(Alignment.BottomCenter)
                 )
             }
@@ -1336,8 +1529,8 @@ fun FocusGramApp() {
                         .imePadding()
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     shape = RoundedCornerShape(20.dp),
-                    color = Color(0xFA181820),
-                    border = BorderStroke(1.dp, Color(0x33FFFFFF)),
+                    color = if (isAppLight) Color(0xF5FFFFFF) else Color(0xFA181820),
+                    border = BorderStroke(1.dp, if (isAppLight) Color(0x1F000000) else Color(0x33FFFFFF)),
                     shadowElevation = 8.dp
                 ) {
                     Row(
@@ -1360,10 +1553,10 @@ fun FocusGramApp() {
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(14.dp))
-                                    .background(if (isSelected) Color.White else Color(0xFF262626))
+                                    .background(if (isSelected) (if (isAppLight) PureBlack else Color.White) else (if (isAppLight) Color(0xFFE5E5EA) else Color(0xFF262626)))
                                     .border(
                                         width = 1.dp,
-                                        color = if (isSelected) Color.White else Color(0x33FFFFFF),
+                                        color = if (isSelected) (if (isAppLight) PureBlack else Color.White) else (if (isAppLight) Color(0x1F000000) else Color(0x33FFFFFF)),
                                         shape = RoundedCornerShape(14.dp)
                                     )
                                     .clickable {
@@ -1376,7 +1569,7 @@ fun FocusGramApp() {
                             ) {
                                 Text(
                                     text = label,
-                                    color = if (isSelected) Color.Black else Color(0xFFD1D5DB),
+                                    color = if (isSelected) (if (isAppLight) PureWhite else PureBlack) else (if (isAppLight) Color(0xFF3C3C43) else Color(0xFFD1D5DB)),
                                     fontSize = 13.sp,
                                     fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
                                 )
@@ -1415,7 +1608,14 @@ fun FocusGramApp() {
                             com.ujwal.focusgram.feature.settings.SettingsScreen(
                                 repository = settingsRepository,
                                 inputSettings = settings,
-                                onBack = { destination = AppDestination.MAIN_WEBVIEW },
+                                onBack = {
+                                    if (guideStep == com.ujwal.focusgram.feature.guide.GestureGuideStep.SETTINGS_PRESS_BACK ||
+                                        guideStep == com.ujwal.focusgram.feature.guide.GestureGuideStep.SETTINGS_WAIT) {
+                                        guideStep = com.ujwal.focusgram.feature.guide.GestureGuideStep.COMPLETED
+                                        scope.launch { settingsRepository.setHasSeenGestureGuide(true) }
+                                    }
+                                    destination = AppDestination.MAIN_WEBVIEW
+                                },
                                 onNavigateReelsHistory = { destination = AppDestination.REELS_HISTORY },
                                 onNavigateScreenTime = { destination = AppDestination.SCREEN_TIME },
                                 onNavigateAppLock = { destination = AppDestination.APP_LOCK_SETTINGS },
@@ -1433,7 +1633,10 @@ fun FocusGramApp() {
                                 currentSubpage = settingsSubpage,
                                 onSubpageChange = { settingsSubpage = it },
                                 encryptedStorage = encryptedStorage,
-                                onNavigateChatPinSetup = { destination = AppDestination.CHAT_LOCK_SETUP },
+                                onNavigateChatPinSetup = {
+                                    pinSetupReturnDestination = AppDestination.SETTINGS
+                                    destination = AppDestination.CHAT_LOCK_SETUP
+                                },
                                 onNavigateOnboarding = { destination = AppDestination.ONBOARDING },
                                 onNavigateDebugMenu = { destination = AppDestination.DEBUG_MENU }
                             )
@@ -1450,17 +1653,6 @@ fun FocusGramApp() {
                             )
                         }
 
-                        AppDestination.SNAPSHOTS -> {
-                            SnapshotManagerScreen(
-                                snapshotDao = database.snapshotDao(),
-                                onBack = { destination = AppDestination.SETTINGS },
-                                onOpenSnapshot = { url ->
-                                    destination = AppDestination.MAIN_WEBVIEW
-                                    sessionManager.loadUrl(url)
-                                }
-                            )
-                        }
-
                         AppDestination.SCREEN_TIME -> {
                             ScreenTimeScreen(
                                 screenTimeDao = database.screenTimeDao(),
@@ -1470,20 +1662,34 @@ fun FocusGramApp() {
                             )
                         }
 
-                        AppDestination.GUARDRAILS -> {
-                            GuardrailsDashboardScreen(
-                                repository = settingsRepository,
-                                screenTimeDao = database.screenTimeDao(),
-                                onBack = { destination = AppDestination.SETTINGS }
-                            )
-                        }
-
                         AppDestination.APP_LOCK_SETUP -> {
                             AppLockSetupScreen(
                                 encryptedStorage = encryptedStorage,
                                 settingsRepository = settingsRepository,
-                                onBack = { destination = AppDestination.APP_LOCK_SETTINGS },
-                                onSuccess = { destination = AppDestination.APP_LOCK_SETTINGS }
+                                onBack = {
+                                    val returnDest = pinSetupReturnDestination ?: AppDestination.APP_LOCK_SETTINGS
+                                    pinSetupReturnDestination = null
+                                    pendingChatLockThreadId = null
+                                    destination = returnDest
+                                },
+                                onSuccess = {
+                                    val threadToLock = pendingChatLockThreadId
+                                    if (threadToLock != null) {
+                                        scope.launch {
+                                            if (!settings.lockedChatIds.contains(threadToLock) && !settings.lockedChatUsernames.containsKey(threadToLock)) {
+                                                val username = threadToUsernameMap[threadToLock]?.firstOrNull()
+                                                    ?: settings.lockedChatUsernames[threadToLock]
+                                                settingsRepository.toggleLockedChat(threadToLock, username)
+                                                unlockedChatThreadIds = unlockedChatThreadIds - threadToLock
+                                                extensionManager.notifyChatLocked(threadToLock)
+                                            }
+                                        }
+                                    }
+                                    val returnDest = pinSetupReturnDestination ?: AppDestination.APP_LOCK_SETTINGS
+                                    pinSetupReturnDestination = null
+                                    pendingChatLockThreadId = null
+                                    destination = returnDest
+                                }
                             )
                         }
 
@@ -1492,8 +1698,14 @@ fun FocusGramApp() {
                                 repository = settingsRepository,
                                 encryptedStorage = encryptedStorage,
                                 onBack = { destination = AppDestination.SETTINGS },
-                                onChangePin = { destination = AppDestination.APP_LOCK_SETUP },
-                                onChangeChatPin = { destination = AppDestination.CHAT_LOCK_SETUP }
+                                onChangePin = {
+                                    pinSetupReturnDestination = AppDestination.APP_LOCK_SETTINGS
+                                    destination = AppDestination.APP_LOCK_SETUP
+                                },
+                                onChangeChatPin = {
+                                    pinSetupReturnDestination = AppDestination.APP_LOCK_SETTINGS
+                                    destination = AppDestination.CHAT_LOCK_SETUP
+                                }
                             )
                         }
 
@@ -1501,10 +1713,30 @@ fun FocusGramApp() {
                             AppLockSetupScreen(
                                 encryptedStorage = encryptedStorage,
                                 settingsRepository = settingsRepository,
-                                onBack = { destination = AppDestination.APP_LOCK_SETTINGS },
-                                onSuccess = { destination = AppDestination.APP_LOCK_SETTINGS },
-                                title = "Set Chat Lock PIN",
-                                subtitle = "Used to unlock protected Direct Messages and conversations.",
+                                onBack = {
+                                    val returnDest = pinSetupReturnDestination ?: AppDestination.APP_LOCK_SETTINGS
+                                    pinSetupReturnDestination = null
+                                    pendingChatLockThreadId = null
+                                    destination = returnDest
+                                },
+                                onSuccess = {
+                                    val threadToLock = pendingChatLockThreadId
+                                    if (threadToLock != null) {
+                                        scope.launch {
+                                            if (!settings.lockedChatIds.contains(threadToLock) && !settings.lockedChatUsernames.containsKey(threadToLock)) {
+                                                val username = threadToUsernameMap[threadToLock]?.firstOrNull()
+                                                    ?: settings.lockedChatUsernames[threadToLock]
+                                                settingsRepository.toggleLockedChat(threadToLock, username)
+                                                unlockedChatThreadIds = unlockedChatThreadIds - threadToLock
+                                                extensionManager.notifyChatLocked(threadToLock)
+                                            }
+                                        }
+                                    }
+                                    val returnDest = pinSetupReturnDestination ?: AppDestination.APP_LOCK_SETTINGS
+                                    pinSetupReturnDestination = null
+                                    pendingChatLockThreadId = null
+                                    destination = returnDest
+                                },
                                 isChatPinSetup = true
                             )
                         }
@@ -1553,6 +1785,13 @@ fun FocusGramApp() {
                                     } else {
                                         ScreenTimeService.pauseSession(context, newElapsed, newDuration)
                                     }
+                                },
+                                onTestGestureGuide = {
+                                    scope.launch {
+                                        settingsRepository.setHasSeenGestureGuide(false)
+                                    }
+                                    guideStep = com.ujwal.focusgram.feature.guide.GestureGuideStep.DOUBLE_TAP_REFRESH
+                                    destination = AppDestination.MAIN_WEBVIEW
                                 }
                             )
                         }
@@ -1620,7 +1859,7 @@ fun FocusGramApp() {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(PureBlack)
+                        .background(if (isAppLight) Color(0xFFF2F2F7) else PureBlack)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
@@ -1718,12 +1957,12 @@ fun FocusGramApp() {
                 }
             }
 
-            // Veil rendering pure black over DOM conversation content while awaiting biometric or PIN auth.
+            // Veil rendering background over DOM conversation content while awaiting biometric or PIN auth.
             if (destination == AppDestination.MAIN_WEBVIEW && !isGateActive && isChatLockActive) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(PureBlack)
+                        .background(if (isAppLight) Color(0xFFF2F2F7) else PureBlack)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
@@ -1746,6 +1985,11 @@ fun FocusGramApp() {
                         customVerifyPin = if (settings.useSeparateChatPin && encryptedStorage.hasChatPin()) {
                             { pin -> encryptedStorage.verifyChatPin(pin) }
                         } else null,
+                        onSetupPin = {
+                            pinSetupReturnDestination = AppDestination.MAIN_WEBVIEW
+                            pendingChatLockThreadId = activeThread
+                            destination = if (settings.useSeparateChatPin) AppDestination.CHAT_LOCK_SETUP else AppDestination.APP_LOCK_SETUP
+                        },
                         onCancel = {
                             pendingUnlockChat = null
                             if (currentThreadId != null) {
@@ -1824,6 +2068,18 @@ fun FocusGramApp() {
                     )
                 }
             }
+
+            if (isUserAuthenticated && !isAuthPage && !isGateActive && !isChatLockActive && (destination == AppDestination.MAIN_WEBVIEW || destination == AppDestination.SETTINGS)) {
+                com.ujwal.focusgram.feature.guide.GestureGuideOverlay(
+                    currentStep = guideStep,
+                    onStepAdvanced = { nextStep ->
+                        guideStep = nextStep
+                        if (nextStep == com.ujwal.focusgram.feature.guide.GestureGuideStep.IDLE) {
+                            scope.launch { settingsRepository.setHasSeenGestureGuide(true) }
+                        }
+                    }
+                )
+            }
         }
     }
 
@@ -1834,20 +2090,23 @@ fun FocusGramApp() {
                 remoteNoticeService.markShown(notice.id)
                 activeRemoteNotice = null
             },
-            containerColor = Color(0xEB1C1C1E),
+            containerColor = if (isAppLight) PureWhite else Color(0xEB1C1C1E),
             modifier = Modifier
                 .clip(RoundedCornerShape(24.dp))
                 .border(
                     BorderStroke(
                         1.dp,
-                        Brush.verticalGradient(listOf(Color(0x38FFFFFF), Color(0x10FFFFFF)))
+                        if (isAppLight)
+                            Brush.verticalGradient(listOf(Color(0x20000000), Color(0x08000000)))
+                        else
+                            Brush.verticalGradient(listOf(Color(0x38FFFFFF), Color(0x10FFFFFF)))
                     ),
                     RoundedCornerShape(24.dp)
                 ),
             title = {
                 Text(
                     text = notice.header,
-                    color = Color.White,
+                    color = if (isAppLight) PureBlack else Color.White,
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp
                 )
@@ -1855,7 +2114,7 @@ fun FocusGramApp() {
             text = {
                 Text(
                     text = notice.body,
-                    color = Color(0xFFC7C7CC),
+                    color = if (isAppLight) Color(0xFF3C3C43) else Color(0xFFC7C7CC),
                     fontSize = 14.sp,
                     lineHeight = 20.sp
                 )
@@ -1867,8 +2126,8 @@ fun FocusGramApp() {
                         activeRemoteNotice = null
                     },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.White,
-                        contentColor = Color.Black
+                        containerColor = if (isAppLight) PureBlack else Color.White,
+                        contentColor = if (isAppLight) PureWhite else Color.Black
                     ),
                     shape = RoundedCornerShape(20.dp)
                 ) {
@@ -1881,6 +2140,17 @@ fun FocusGramApp() {
 
 private fun postSessionExpiredNotification(context: Context) {
     try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                android.util.Log.w("FocusGramApp", "POST_NOTIFICATIONS permission not granted; skipping notification.")
+                return
+            }
+        }
+
         // Trigger haptic feedback directly so alert registers even when system notification sound is muted.
         HapticHelper.performSessionCompletionAlert(context)
 
@@ -1925,14 +2195,4 @@ private fun postSessionExpiredNotification(context: Context) {
     }
 }
 
-private fun isAuthUrl(url: String): Boolean {
-    val lower = url.lowercase()
-    return (lower.contains("/accounts") && !lower.contains("/accounts/edit")) ||
-            lower.contains("/login") ||
-            lower.contains("/signup") ||
-            lower.contains("/two_factor") ||
-            lower.contains("/challenge") ||
-            lower.contains("/onetap") ||
-            lower.contains("accountscenter.") ||
-            lower.contains("facebook.com")
-}
+private fun isAuthUrl(url: String): Boolean = GeckoSessionManager.isAuthUrl(url)

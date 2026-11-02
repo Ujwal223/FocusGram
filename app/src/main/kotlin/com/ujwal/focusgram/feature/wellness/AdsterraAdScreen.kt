@@ -15,6 +15,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,6 +46,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -58,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.ujwal.focusgram.core.ui.theme.PureBlack
+import com.ujwal.focusgram.core.ui.theme.PureWhite
 import kotlinx.coroutines.delay
 
 private val ADSTERRA_INTERNAL_DOMAINS = listOf(
@@ -178,7 +181,7 @@ fun AdsterraAdScreen(
     var elapsedSeconds by rememberSaveable { mutableIntStateOf(0) }
     var adsClicked by rememberSaveable { mutableIntStateOf(0) }
     var lastClickedUrl by rememberSaveable { mutableStateOf("") }
-    var lastClickTime by rememberSaveable { mutableStateOf(0L) }
+    var lastClickTime by rememberSaveable { mutableLongStateOf(0L) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
 
     val isSettingToggle = sessionType == "setting_toggle"
@@ -219,9 +222,17 @@ fun AdsterraAdScreen(
         else -> "Tap BOTH ads below to unlock your reward ($adsClicked/2 clicked)"
     }
 
+    val isDark = isSystemInDarkTheme()
+    val bgColor = if (isDark) PureBlack else PureWhite
+    val cardBg = if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA)
+    val cardBorder = if (isDark) Color(0xFF2C2C2E) else Color(0xFFD1D1D6)
+    val textPrimary = if (isDark) Color.White else PureBlack
+    val statusBoxBg = if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7)
+    val statusBoxBorder = if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)
+
     Surface(
         modifier = Modifier.fillMaxSize(),
-        color = PureBlack
+        color = bgColor
     ) {
         Column(
             modifier = Modifier
@@ -239,13 +250,13 @@ fun AdsterraAdScreen(
                     modifier = Modifier
                         .size(34.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFF1C1C1E))
-                        .border(0.5.dp, Color(0xFF2C2C2E), CircleShape)
+                        .background(cardBg)
+                        .border(0.5.dp, cardBorder, CircleShape)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Close",
-                        tint = Color.White,
+                        tint = textPrimary,
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -260,7 +271,7 @@ fun AdsterraAdScreen(
                             isEffortFriction -> "Focus Bypass"
                             else -> "Extend Session"
                         },
-                        color = Color.White,
+                        color = textPrimary,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -279,15 +290,15 @@ fun AdsterraAdScreen(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF1C1C1E))
-                        .border(0.5.dp, Color(0xFF2C2C2E), RoundedCornerShape(12.dp))
+                        .background(cardBg)
+                        .border(0.5.dp, cardBorder, RoundedCornerShape(12.dp))
                         .padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
                     Text(
                         text = "${elapsedSeconds.coerceAtMost(requiredSeconds)}s / ${requiredSeconds}s",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
-                        color = if (isComplete) Color.White else Color(0xFF8E8E93)
+                        color = if (isComplete) textPrimary else Color(0xFF8E8E93)
                     )
                 }
             }
@@ -297,8 +308,8 @@ fun AdsterraAdScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(2.dp),
-                color = Color.White,
-                trackColor = Color(0xFF2C2C2E)
+                color = if (isDark) Color.White else PureBlack,
+                trackColor = cardBorder
             )
 
             Box(
@@ -306,15 +317,15 @@ fun AdsterraAdScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 10.dp)
                 .clip(RoundedCornerShape(10.dp))
-                .background(Color(0xFF1C1C1E))
-                .border(0.5.dp, Color(0xFF2C2C2E), RoundedCornerShape(10.dp))
+                .background(statusBoxBg)
+                .border(0.5.dp, statusBoxBorder, RoundedCornerShape(10.dp))
                 .padding(horizontal = 14.dp, vertical = 8.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = statusText,
                     fontSize = 12.sp,
-                    color = if (isComplete) Color.White else Color(0xFF8E8E93),
+                    color = if (isComplete) textPrimary else Color(0xFF8E8E93),
                     fontWeight = FontWeight.Medium
                 )
             }
@@ -325,8 +336,8 @@ fun AdsterraAdScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .border(0.5.dp, Color(0xFF2C2C2E), RoundedCornerShape(12.dp))
-                    .background(Color(0xFF111111))
+                    .border(0.5.dp, cardBorder, RoundedCornerShape(12.dp))
+                    .background(if (isDark) Color(0xFF111111) else Color(0xFFFAFAFA))
             ) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
@@ -343,6 +354,8 @@ fun AdsterraAdScreen(
                                 allowFileAccess = false
                                 loadWithOverviewMode = true
                                 useWideViewPort = true
+                                // Adsterra network requires mixed content for third-party creative syndication;
+                                // isolated by allowContentAccess = false and allowFileAccess = false
                                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                                 mediaPlaybackRequiresUserGesture = false
                                 cacheMode = WebSettings.LOAD_DEFAULT
@@ -353,26 +366,31 @@ fun AdsterraAdScreen(
                                     userAgentString = defaultUa.replace("; wv", "")
                                 }
                             }
-                            setBackgroundColor(0xFF111111.toInt())
+                            setBackgroundColor(if (isDark) 0xFF111111.toInt() else 0xFFFAFAFA.toInt())
 
                             fun handleAdClick(url: String): Boolean {
                                 val clean = url.trim()
                                 if (clean.isNotBlank() && !isAdsterraInternalDomain(clean) && !clean.startsWith("about:") && !clean.startsWith("data:")) {
-                                    val now = System.currentTimeMillis()
-                                    if (clean != lastClickedUrl || now - lastClickTime > 1500L) {
-                                        lastClickedUrl = clean
-                                        lastClickTime = now
-                                        if (adsClicked < 2) {
-                                            adsClicked++
+                                    val parsedUri = try { Uri.parse(clean) } catch (_: Exception) { null }
+                                    val scheme = parsedUri?.scheme?.lowercase() ?: ""
+                                    if (scheme == "http" || scheme == "https") {
+                                        val now = System.currentTimeMillis()
+                                        if (clean != lastClickedUrl || now - lastClickTime > 1500L) {
+                                            lastClickedUrl = clean
+                                            lastClickTime = now
+                                            if (adsClicked < 2) {
+                                                adsClicked++
+                                            }
                                         }
+                                        try {
+                                            val browserIntent = Intent(Intent.ACTION_VIEW, parsedUri).apply {
+                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                addCategory(Intent.CATEGORY_BROWSABLE)
+                                            }
+                                            ctx.startActivity(browserIntent)
+                                        } catch (_: Exception) {}
+                                        return true
                                     }
-                                    try {
-                                        val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(clean)).apply {
-                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        }
-                                        ctx.startActivity(browserIntent)
-                                    } catch (_: Exception) {}
-                                    return true
                                 }
                                 return false
                             }
@@ -468,10 +486,10 @@ fun AdsterraAdScreen(
                         .height(52.dp),
                     shape = RoundedCornerShape(26.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.White,
-                        contentColor = Color.Black,
-                        disabledContainerColor = Color(0xFF1C1C1E),
-                        disabledContentColor = Color(0xFF636366)
+                        containerColor = if (isDark) Color.White else PureBlack,
+                        contentColor = if (isDark) Color.Black else PureWhite,
+                        disabledContainerColor = if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA),
+                        disabledContentColor = if (isDark) Color(0xFF636366) else Color(0xFF8E8E93)
                     )
                 ) {
                     Icon(
@@ -513,10 +531,10 @@ fun AdsterraAdScreen(
                             .height(44.dp),
                         shape = RoundedCornerShape(22.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF1C1C1E),
-                            contentColor = Color.White
+                            containerColor = cardBg,
+                            contentColor = textPrimary
                         ),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF2C2C2E))
+                        border = androidx.compose.foundation.BorderStroke(1.dp, cardBorder)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Refresh,

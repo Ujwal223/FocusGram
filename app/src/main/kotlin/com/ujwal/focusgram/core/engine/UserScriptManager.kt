@@ -27,9 +27,12 @@ class UserScriptManager(private val context: Context) {
      * Serializes [FocusSettings] and chat lock state to `window.__FOCUSGRAM_CONFIG__`
      * and dispatches a DOM custom event for active script listeners.
      */
-    fun injectConfig(session: GeckoSession, settings: FocusSettings) {
+    fun injectConfig(session: GeckoSession, settings: FocusSettings, isAuthenticated: Boolean = true) {
         val lockedIdsJson = org.json.JSONArray(settings.lockedChatIds.map { it.lowercase().trim().removePrefix("@") }).toString()
         val lockedUsersJson = org.json.JSONObject(settings.lockedChatUsernames).toString()
+        val unblurModeJson = org.json.JSONObject.quote(settings.unblurMode)
+        val chatLockModeJson = org.json.JSONObject.quote(settings.chatLockMode)
+        val blockDmReelsSwipingJson = org.json.JSONObject.quote(settings.blockDmReelsSwiping.toString())
         val configJs = """
             (function() {
                 window.__FOCUSGRAM_CONFIG__ = {
@@ -40,15 +43,16 @@ class UserScriptManager(private val context: Context) {
                     blurExplore: ${settings.blurExplore},
                     blurReels: ${settings.blurReels},
                     blurFeed: ${settings.blurFeed},
-                    unblurMode: '${settings.unblurMode}',
+                    unblurMode: $unblurModeJson,
                     tapToUnblur: ${settings.tapToUnblur},
                     requireLongPress: ${settings.requireLongPress},
                     hideLikeCounts: ${settings.hideLikeCounts},
                     hideFollowerCounts: ${settings.hideFollowerCounts},
                     hideSuggestedPosts: ${settings.hideSuggestedPosts},
                     hideShopTab: ${settings.hideShopTab},
+                    hideNotesTray: ${settings.hideNotesTray},
                     blockAutoplay: ${settings.noAutoplay},
-                    grayscale: ${settings.grayscaleEnabled},
+                    grayscale: ${settings.isGrayscaleActive()},
                     minimalMode: ${settings.minimalModeEnabled},
                     videoDownloadEnabled: ${settings.videoDownloadEnabled},
                     portraitOnly: ${settings.portraitOnly},
@@ -64,14 +68,14 @@ class UserScriptManager(private val context: Context) {
                     igSeen: ${settings.ghostHideDirectSeen},
                     igTyping: ${settings.ghostHideTypingIndicator}
                 };
-                window.__fgChatLockMode = '${settings.chatLockMode}';
+                window.__fgChatLockMode = $chatLockModeJson;
                 window.__fgChatLockAll = ${settings.chatLockAll || settings.chatLockMode == "whole_dm"};
                 window.__fgLockedChatIds = $lockedIdsJson;
                 window.__fgLockedChatUsernames = $lockedUsersJson;
                 window.__fgThreadUsernameMap = $lockedUsersJson;
 
                 const syncDetail = {
-                    chatLockMode: '${settings.chatLockMode}',
+                    chatLockMode: $chatLockModeJson,
                     chatLockAll: ${settings.chatLockAll || settings.chatLockMode == "whole_dm"},
                     lockedChatIds: $lockedIdsJson,
                     lockedChatUsernames: $lockedUsersJson,
@@ -95,7 +99,7 @@ class UserScriptManager(private val context: Context) {
                     window.__focusgramGhostSettings.igTyping = ${settings.ghostHideTypingIndicator};
                 }
                 if (window.__fgSetGrayscale) {
-                    window.__fgSetGrayscale(${settings.grayscaleEnabled});
+                    window.__fgSetGrayscale(${settings.isGrayscaleActive()});
                 }
                 const filterUpdatePayload = {
                     blockAds: ${settings.noAds},
@@ -111,7 +115,7 @@ class UserScriptManager(private val context: Context) {
                     window.dispatchEvent(new CustomEvent('focusgram:filter-config-update', { detail: filterUpdatePayload }));
                     document.dispatchEvent(new CustomEvent('focusgram:filter-config-update', { detail: filterUpdatePayload }));
                 } catch(_) {}
-                document.documentElement.setAttribute('data-fg-block-dm-reels', '${settings.blockDmReelsSwiping}');
+                document.documentElement.setAttribute('data-fg-block-dm-reels', String($blockDmReelsSwipingJson));
                 window.postMessage({
                     source: "GHOSTIFY_EXTENSION",
                     type: "GHOSTIFY_SETTINGS_UPDATE",
@@ -158,7 +162,7 @@ class UserScriptManager(private val context: Context) {
         }
     }
 
-    fun injectAll(session: GeckoSession, settings: FocusSettings) {
+    fun injectAll(session: GeckoSession, settings: FocusSettings, isAuthenticated: Boolean = true) {
         val scripts = listOf(
             "fetch_interceptor.js",
             "content_hider.js",
@@ -169,16 +173,34 @@ class UserScriptManager(private val context: Context) {
             "stealth_instagram.js"
         )
         val bundle = StringBuilder()
+        bundle.append("""
+            if ((function() {
+                try {
+                    var h = (window.location.hostname || '').toLowerCase();
+                    if (h.includes('facebook.com') || h.includes('accountscenter.') || h.includes('meta.com')) return true;
+                    var p = (window.location.pathname || '').toLowerCase();
+                    if (p.includes('/accounts/edit')) return false;
+                    if (p.startsWith('/accounts') || p.startsWith('/login') || p.startsWith('/signup') ||
+                        p.startsWith('/two_factor') || p.startsWith('/challenge') || p.startsWith('/onetap') || p.startsWith('/privacy')) return true;
+                    if (document.getElementById('loginForm') ||
+                        document.querySelector('form[action*="login"], form[action*="signup"], form input[type="password"], input[name="password"]')) return true;
+                } catch (_) {}
+                return false;
+            })()) {
+                console.log('[FocusGram] Auth/login page active - skipping UserScripts injection.');
+            } else {
+        """.trimIndent())
         for (name in scripts) {
             val code = loadScript(name)
             if (code.isNotBlank()) {
-                bundle.append("try {\n")
+                bundle.append("\ntry {\n")
                     .append(code)
                     .append("\n} catch (e) { console.error('[FocusGram] Script error in ").append(name).append(":', e); }\n")
             }
         }
+        bundle.append("\n}\n")
         evaluate(session, bundle.toString())
-        injectConfig(session, settings)
+        injectConfig(session, settings, isAuthenticated)
     }
 
     companion object {

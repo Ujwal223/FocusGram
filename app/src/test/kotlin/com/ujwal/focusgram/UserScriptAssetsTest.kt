@@ -16,9 +16,7 @@ class UserScriptAssetsTest {
         "content_hider.js",
         "autoplay_blocker.js",
         "grayscale.js",
-        "spa_navigation_monitor.js",
         "native_feel.js",
-        "reel_metadata_extractor.js",
         "fetch_interceptor.js",
         "media_downloader.js",
         "stealth_instagram.js"

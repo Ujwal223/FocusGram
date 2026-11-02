@@ -16,6 +16,7 @@ fragment = "1.8.6"
 geckoview = "157.0.20260924084938"
 coroutines = "1.10.1"
 junit = "4.13.2"
+json = "20240303"
 androidxJunit = "1.2.1"
 espressoCore = "3.6.1"
 
@@ -56,6 +57,7 @@ kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 
 # Testing
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+json = { group = "org.json", name = "json", version.ref = "json" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxJunit" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
 androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }

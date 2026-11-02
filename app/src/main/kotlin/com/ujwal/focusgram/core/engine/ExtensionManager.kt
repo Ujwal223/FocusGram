@@ -1,8 +1,11 @@
 package com.ujwal.focusgram.core.engine
 
 import android.util.Log
+import com.ujwal.focusgram.FocusGramApp
 import com.ujwal.focusgram.core.model.FocusSettings
 import com.ujwal.focusgram.core.model.IslandMode
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -10,6 +13,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
+import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.WebExtension
 
 /**
@@ -21,9 +25,20 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
     private val _isContentBlockerActive = MutableStateFlow(false)
     val isContentBlockerActive: StateFlow<Boolean> = _isContentBlockerActive.asStateFlow()
 
+    private val contentBlockerInitializationMutex = Mutex()
     private var contentBlockerExtension: WebExtension? = null
-    private var activePort: WebExtension.Port? = null
+    private val activePorts = java.util.concurrent.CopyOnWriteArrayList<WebExtension.Port>()
+    private var activePort: WebExtension.Port?
+        get() = activePorts.firstOrNull()
+        set(value) {
+            if (value != null && !activePorts.contains(value)) activePorts.add(value)
+        }
     private var cachedSettings: FocusSettings = FocusSettings()
+
+    @Volatile
+    private var lastCopiedText: String = ""
+    @Volatile
+    private var lastCopyTimestamp: Long = 0L
 
     var onOpenSettings: (() -> Unit)? = null
     var onInputFocused: ((Boolean) -> Unit)? = null
@@ -40,22 +55,80 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
     var onThreadUsernameMapped: ((threadId: String, usernames: List<String>) -> Unit)? = null
     var onToggleChatLock: ((threadId: String, username: String?) -> Unit)? = null
     var onRequestUnlockChat: ((threadId: String, username: String?, targetUrl: String?) -> Unit)? = null
+    var onDmReceived: ((threadId: String, sender: String, snippet: String) -> Unit)? = null
+    var onDmBadgeCountChanged: ((count: Int) -> Unit)? = null
+
+    /**
+     * Background scripts use the extension-level delegate; content scripts use a
+     * delegate attached to the specific GeckoSession. Both routes intentionally
+     * share one handler so the headless DM watcher can deliver directly to Android
+     * if its extension background page is not ready yet.
+     */
+    private val nativeMessageDelegate = object : WebExtension.MessageDelegate {
+        override fun onMessage(nativeApp: String, message: Any, sender: WebExtension.MessageSender): GeckoResult<Any>? {
+            val action = (message as? JSONObject)?.optString("action")
+                ?: (message as? String)?.let { try { JSONObject(it).optString("action") } catch (_: Exception) { null } }
+            Log.d(TAG, "onMessage from $nativeApp: action=$action")
+            handleIncomingMessage(message)
+            if (action == "getSettings") {
+                val response = JSONObject()
+                    .put("status", "ok")
+                    .put("action", "updateSettings")
+                    .put("settings", buildSettingsJson(cachedSettings))
+                    .put("revealMode", cachedSettings.unblurMode)
+                return GeckoResult.fromValue(response)
+            }
+            return GeckoResult.fromValue(JSONObject().put("status", "ok"))
+        }
+
+        override fun onConnect(port: WebExtension.Port) {
+            Log.i(TAG, "WebExtension native port connected: ${port.name}")
+            if (!activePorts.contains(port)) {
+                activePorts.add(port)
+            }
+            port.setDelegate(object : WebExtension.PortDelegate {
+                override fun onPortMessage(message: Any, p: WebExtension.Port) {
+                    val action = (message as? JSONObject)?.optString("action")
+                        ?: (message as? String)?.let { try { JSONObject(it).optString("action") } catch (_: Exception) { null } }
+                    Log.d(TAG, "onPortMessage action: $action")
+                    handleIncomingMessage(message, sourcePort = p)
+                }
+
+                override fun onDisconnect(p: WebExtension.Port) {
+                    Log.i(TAG, "WebExtension port disconnected: ${p.name}")
+                    activePorts.remove(p)
+                }
+            })
+            sendSettingsToPort(port, cachedSettings)
+            try {
+                port.postMessage(JSONObject().put("revealMode", cachedSettings.unblurMode))
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to send initial revealMode to port: ${e.message}", e)
+            }
+        }
+    }
 
     /**
      * Installs and activates built-in content blocking and FocusGram controller from APK assets.
      */
-    suspend fun initializeContentBlocker(): Result<WebExtension> {
-        contentBlockerExtension?.let { return Result.success(it) }
-        return try {
+    suspend fun initializeContentBlocker(): Result<WebExtension> = contentBlockerInitializationMutex.withLock {
+        contentBlockerExtension?.let { return@withLock Result.success(it) }
+        try {
             Log.i(TAG, "Mounting built-in Content Blocker WebExtension from assets...")
             val extension = try {
+                val ext = runtime.webExtensionController
+                    .ensureBuiltIn(CONTENT_BLOCKER_ASSET_URI, CONTENT_BLOCKER_EXTENSION_ID)
+                    .await()
+                if (ext != null) {
+                    try {
+                        runtime.webExtensionController.update(ext).await()
+                    } catch (_: Exception) {}
+                }
+                ext
+            } catch (e: Exception) {
+                Log.w(TAG, "ensureBuiltIn fallback to installBuiltIn: ${e.message}")
                 runtime.webExtensionController
                     .installBuiltIn(CONTENT_BLOCKER_ASSET_URI)
-                    .await()
-            } catch (e: Exception) {
-                Log.w(TAG, "installBuiltIn fallback to ensureBuiltIn: ${e.message}")
-                runtime.webExtensionController
-                    .ensureBuiltIn(CONTENT_BLOCKER_ASSET_URI, CONTENT_BLOCKER_EXTENSION_ID)
                     .await()
             }
 
@@ -86,42 +159,21 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
     suspend fun initializeUBlockOrigin(): Result<WebExtension> = initializeContentBlocker()
 
     private fun setupMessageDelegate(extension: WebExtension) {
-        extension.setMessageDelegate(object : WebExtension.MessageDelegate {
-            override fun onMessage(nativeApp: String, message: Any, sender: WebExtension.MessageSender): GeckoResult<Any>? {
-                Log.d(TAG, "onMessage from $nativeApp: $message")
-                handleIncomingMessage(message)
-                val response = JSONObject().put("status", "ok")
-                return GeckoResult.fromValue(response)
-            }
-
-            override fun onConnect(port: WebExtension.Port) {
-                Log.i(TAG, "WebExtension native port connected: ${port.name}")
-                activePort = port
-                port.setDelegate(object : WebExtension.PortDelegate {
-                    override fun onPortMessage(message: Any, p: WebExtension.Port) {
-                        Log.d(TAG, "onPortMessage: $message")
-                        handleIncomingMessage(message)
-                    }
-
-                    override fun onDisconnect(p: WebExtension.Port) {
-                        Log.i(TAG, "WebExtension port disconnected")
-                        if (activePort == p) {
-                            activePort = null
-                        }
-                    }
-                })
-                // Immediately synchronize cached settings and reveal mode
-                sendSettingsToPort(port, cachedSettings)
-                try {
-                    port.postMessage(JSONObject().put("revealMode", cachedSettings.unblurMode))
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to send initial revealMode to port: ${e.message}", e)
-                }
-            }
-        }, "focusgram")
+        extension.setMessageDelegate(nativeMessageDelegate, "focusgram")
     }
 
-    private fun handleIncomingMessage(message: Any) {
+    /** Enables native messages originating from content scripts in [session]. */
+    fun attachContentMessageDelegate(session: GeckoSession) {
+        val extension = contentBlockerExtension ?: return
+        try {
+            session.webExtensionController.setMessageDelegate(extension, nativeMessageDelegate, "focusgram")
+            Log.i(TAG, "Attached content-script native message delegate to GeckoSession")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed attaching content-script message delegate: ${e.message}", e)
+        }
+    }
+
+    private fun handleIncomingMessage(message: Any, sourcePort: WebExtension.Port? = null) {
         val json = when (message) {
             is JSONObject -> message
             is String -> try { JSONObject(message) } catch (_: Exception) { null }
@@ -146,7 +198,8 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
             }
             "urlChanged" -> {
                 val url = json.optString("url")
-                if (url.isNotEmpty()) {
+                // Never let background DM listener session contaminate foreground Compose UI navigation
+                if (url.isNotEmpty() && !url.contains("focusgram_bg_dm=1")) {
                     Log.d(TAG, "Received urlChanged from Instagram web: $url")
                     mainHandler.post { onUrlChanged?.invoke(url) }
                 }
@@ -202,6 +255,40 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                     onDownloadStarted?.invoke(filename)
                 }
             }
+            "clipboardCopy" -> {
+                val text = json.optString("text")
+                if (text.isNotBlank()) {
+                    Log.i(TAG, "Received clipboardCopy from web: $text")
+                    mainHandler.post {
+                        try {
+                            val context = FocusGramApp.instance
+                            val settings = context.settingsRepository.getSettingsSync()
+                            val finalText = if (settings.sanitizeLinks) {
+                                com.ujwal.focusgram.core.utils.NetworkUtils.sanitizeText(text)
+                            } else {
+                                text
+                            }
+                            if (com.ujwal.focusgram.core.utils.NetworkUtils.isBareInstagramRootUrl(finalText)) {
+                                Log.w(TAG, "Suppressed bare Instagram root URL clipboard write: $finalText")
+                                return@post
+                            }
+                            // Suppress duplicate toasts when rapid sequential events fire for the same copy action
+                            if (!com.ujwal.focusgram.core.utils.ClipboardDebouncer.shouldCopy(finalText)) {
+                                return@post
+                            }
+
+                            val isSingleUrl = (finalText.startsWith("http://") || finalText.startsWith("https://")) && !finalText.contains("\n") && !finalText.contains(" ")
+                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            val clip = android.content.ClipData.newPlainText(if (isSingleUrl) "Instagram" else "Text", finalText)
+                            clipboard.setPrimaryClip(clip)
+                            val toastMsg = if (isSingleUrl) "Link copied to clipboard" else "Copied to clipboard"
+                            android.widget.Toast.makeText(context, toastMsg, android.widget.Toast.LENGTH_SHORT).show()
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed writing copied text to clipboard: ${e.message}")
+                        }
+                    }
+                }
+            }
             "downloadMedia" -> {
                 val mediaUrl = json.optString("url")
                 val filename = json.optString("filename")
@@ -216,6 +303,8 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                 }
             }
             "authStateChanged" -> {
+                val url = json.optString("url", "")
+                if (url.contains("focusgram_bg_dm=1")) return
                 val isAuthenticated = json.optBoolean("isAuthenticated", true)
                 val isAuthPage = json.optBoolean("isAuthPage", false)
                 Log.d(TAG, "Received authStateChanged from web: isAuthenticated=$isAuthenticated, isAuthPage=$isAuthPage")
@@ -269,8 +358,86 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                     }
                 }
             }
+            "dmReceived" -> {
+                val threadId = json.optString("threadId")
+                val sender = json.optString("sender")
+                val snippet = json.optString("snippet")
+                val messageCount = json.optInt("messageCount", 1)
+                val messageCountStr = json.optString("messageCountStr", "")
+                val messageTime = json.optString("messageTime", "")
+                // Never log private sender names or snippet contents to logcat
+                Log.d(TAG, "Received incoming direct message notification event")
+                mainHandler.post {
+                    onDmReceived?.invoke(threadId, sender, snippet)
+                    try {
+                        com.ujwal.focusgram.feature.notifications.DmNotificationManager
+                            .getInstance(com.ujwal.focusgram.FocusGramApp.instance)
+                            .onDmReceived(
+                                threadId = threadId,
+                                sender = sender,
+                                snippet = snippet,
+                                messageCount = messageCount,
+                                messageCountStr = messageCountStr,
+                                messageTime = messageTime
+                            )
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error routing incoming DM to DmNotificationManager: ${e.message}", e)
+                    }
+                }
+            }
+            "dmWatcherReady" -> {
+                // Privacy-safe diagnostics: do not log any Instagram content.
+                Log.i(TAG, "DM watcher content script is ready: path=${json.optString("path")}")
+            }
+            "dmWatcherStatus" -> {
+                // Privacy-safe diagnostics to identify DOM-selector vs bridge issues.
+                Log.i(
+                    TAG,
+                    "DM watcher scan: path=${json.optString("path")}, candidates=" +
+                        "${json.optInt("candidateCount", 0)}, unread=${json.optInt("unreadDetected", 0)}"
+                )
+            }
+            "dmBadgeCountChanged" -> {
+                val count = json.optInt("unreadCount", 0)
+                Log.d(TAG, "Received dmBadgeCountChanged from web: count=$count")
+                mainHandler.post {
+                    onDmBadgeCountChanged?.invoke(count)
+                    try {
+                        com.ujwal.focusgram.feature.notifications.DmNotificationManager
+                            .getInstance(com.ujwal.focusgram.FocusGramApp.instance)
+                            .onBadgeCountChanged(count)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error routing badge count to DmNotificationManager: ${e.message}", e)
+                    }
+                }
+            }
+            "dmThreadRead" -> {
+                val threadId = json.optString("threadId")
+                val sender = json.optString("sender")
+                mainHandler.post {
+                    try {
+                        val manager = com.ujwal.focusgram.feature.notifications.DmNotificationManager
+                            .getInstance(com.ujwal.focusgram.FocusGramApp.instance)
+                        if (threadId.isNotBlank()) {
+                            manager.cancelNotificationForThread(threadId)
+                        }
+                        if (sender.isNotBlank()) {
+                            manager.cancelNotificationForThread(sender)
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+            "dmAllThreadsRead" -> {
+                mainHandler.post {
+                    try {
+                        com.ujwal.focusgram.feature.notifications.DmNotificationManager
+                            .getInstance(com.ujwal.focusgram.FocusGramApp.instance)
+                            .cancelAllDmNotifications()
+                    } catch (_: Exception) {}
+                }
+            }
             "getSettings" -> {
-                activePort?.let { sendSettingsToPort(it, cachedSettings) }
+                sourcePort?.let { sendSettingsToPort(it, cachedSettings) } ?: broadcastSettings(cachedSettings)
             }
         }
     }
@@ -280,42 +447,53 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
      */
     fun broadcastSettings(settings: FocusSettings) {
         cachedSettings = settings
-        activePort?.let { sendSettingsToPort(it, settings) }
+        for (port in activePorts) {
+            sendSettingsToPort(port, settings)
+        }
+    }
+
+    fun buildSettingsJson(settings: FocusSettings): JSONObject {
+        return JSONObject().apply {
+            put("noAds", settings.noAds)
+            put("noStories", settings.noStories)
+            put("noReels", settings.noReels)
+            put("hideFeedPosts", settings.hideFeedPosts)
+            put("blurExplore", settings.blurExplore)
+            put("blurReels", settings.blurReels)
+            put("blurFeed", settings.blurFeed)
+            put("tapToUnblur", settings.tapToUnblur)
+            put("requireLongPress", settings.requireLongPress)
+            put("unblurMode", settings.unblurMode)
+            put("hideLikeCounts", settings.hideLikeCounts)
+            put("hideFollowerCounts", settings.hideFollowerCounts)
+            put("hideSuggestedPosts", settings.hideSuggestedPosts)
+            put("hideShopTab", settings.hideShopTab)
+            put("hideNotesTray", settings.hideNotesTray)
+            put("noAutoplay", settings.noAutoplay)
+            put("grayscale", settings.isGrayscaleActive())
+            put("minimalMode", settings.minimalModeEnabled)
+            put("videoDownloadEnabled", settings.videoDownloadEnabled)
+            put("portraitOnly", settings.portraitOnly)
+            put("storySearchEnabled", settings.storySearchEnabled)
+            put("customBioFontsEnabled", settings.customBioFontsEnabled)
+            put("ghostModeEnabled", settings.ghostModeEnabled)
+            put("ghostHideStorySeen", settings.ghostHideStorySeen)
+            put("ghostHideDirectSeen", settings.ghostHideDirectSeen)
+            put("ghostHideTypingIndicator", settings.ghostHideTypingIndicator)
+
+            put("dmNotificationsEnabled", settings.dmNotificationsEnabled)
+            put("dmNotificationPreview", settings.dmNotificationPreview)
+
+            put("chatLockMode", settings.chatLockMode)
+            put("chatLockAll", settings.chatLockAll)
+            put("lockedChatIds", JSONArray(settings.lockedChatIds.toList()))
+            put("lockedChatUsernames", JSONObject(settings.lockedChatUsernames))
+        }
     }
 
     private fun sendSettingsToPort(port: WebExtension.Port, settings: FocusSettings) {
         try {
-            val settingsJson = JSONObject().apply {
-                put("noAds", settings.noAds)
-                put("noStories", settings.noStories)
-                put("noReels", settings.noReels)
-                put("hideFeedPosts", settings.hideFeedPosts)
-                put("blurExplore", settings.blurExplore)
-                put("blurReels", settings.blurReels)
-                put("tapToUnblur", settings.tapToUnblur)
-                put("requireLongPress", settings.requireLongPress)
-                put("unblurMode", settings.unblurMode)
-                put("hideLikeCounts", settings.hideLikeCounts)
-                put("hideFollowerCounts", settings.hideFollowerCounts)
-                put("hideSuggestedPosts", settings.hideSuggestedPosts)
-                put("hideShopTab", settings.hideShopTab)
-                put("noAutoplay", settings.noAutoplay)
-                put("grayscale", settings.grayscaleEnabled)
-                put("minimalMode", settings.minimalModeEnabled)
-                put("videoDownloadEnabled", settings.videoDownloadEnabled)
-                put("portraitOnly", settings.portraitOnly)
-                put("storySearchEnabled", settings.storySearchEnabled)
-                put("customBioFontsEnabled", settings.customBioFontsEnabled)
-                put("ghostModeEnabled", settings.ghostModeEnabled)
-                put("ghostHideStorySeen", settings.ghostHideStorySeen)
-                put("ghostHideDirectSeen", settings.ghostHideDirectSeen)
-                put("ghostHideTypingIndicator", settings.ghostHideTypingIndicator)
-
-                put("chatLockMode", settings.chatLockMode)
-                put("chatLockAll", settings.chatLockAll)
-                put("lockedChatIds", JSONArray(settings.lockedChatIds.toList()))
-                put("lockedChatUsernames", JSONObject(settings.lockedChatUsernames))
-            }
+            val settingsJson = buildSettingsJson(settings)
 
             val msg = JSONObject().apply {
                 put("action", "updateSettings")
@@ -323,9 +501,19 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                 put("revealMode", settings.unblurMode)
             }
             port.postMessage(msg)
-            Log.d(TAG, "Broadcast settings to WebExtension: noAds=${settings.noAds}, ghost=${settings.ghostModeEnabled}, chatLockAll=${settings.chatLockAll}, lockedChats=${settings.lockedChatIds.size}")
+            Log.d(TAG, "Broadcast settings to WebExtension port: noAds=${settings.noAds}, ghost=${settings.ghostModeEnabled}, chatLockAll=${settings.chatLockAll}, lockedChats=${settings.lockedChatIds.size}")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to send settings to WebExtension port", e)
+        }
+    }
+
+    private fun postToAllPorts(msg: JSONObject) {
+        for (port in activePorts) {
+            try {
+                port.postMessage(msg)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to post message to port ${port.name}: ${e.message}")
+            }
         }
     }
 
@@ -339,8 +527,8 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                 put("threadId", threadId)
                 put("all", isAll)
             }
-            activePort?.postMessage(msg)
-            Log.d(TAG, "Sent unlockChat to WebExtension port: threadId=$threadId, all=$isAll")
+            postToAllPorts(msg)
+            Log.d(TAG, "Sent unlockChat to WebExtension ports: threadId=$threadId, all=$isAll")
         } catch (e: Exception) {
             Log.e(TAG, "Failed sending unlockChat to WebExtension", e)
         }
@@ -355,8 +543,8 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                 put("action", "lockChat")
                 put("threadId", threadId)
             }
-            activePort?.postMessage(msg)
-            Log.d(TAG, "Sent lockChat to WebExtension port: threadId=$threadId")
+            postToAllPorts(msg)
+            Log.d(TAG, "Sent lockChat to WebExtension ports: threadId=$threadId")
         } catch (e: Exception) {
             Log.e(TAG, "Failed sending lockChat to WebExtension", e)
         }
@@ -371,10 +559,10 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                 put("action", "revealMode")
                 put("revealMode", mode)
             }
-            activePort?.postMessage(msg)
-            Log.d(TAG, "Sent revealMode('$mode') to WebExtension port")
+            postToAllPorts(msg)
+            Log.d(TAG, "Sent revealMode('$mode') to WebExtension ports")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to send revealMode to port: ${e.message}", e)
+            Log.e(TAG, "Failed to send revealMode to ports: ${e.message}", e)
         }
     }
 
@@ -387,9 +575,9 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                 put("action", "navigateSpa")
                 put("path", path)
             }
-            activePort?.postMessage(msg)
+            postToAllPorts(msg)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to send navigateSpa to port", e)
+            Log.e(TAG, "Failed to send navigateSpa to ports", e)
         }
     }
 
@@ -411,10 +599,10 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                 put("action", "nav")
                 put("nav", target)
             }
-            activePort?.postMessage(msg)
-            Log.d(TAG, "Sent go('$target') to WebExtension port")
+            postToAllPorts(msg)
+            Log.d(TAG, "Sent go('$target') to WebExtension ports")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to send go to port: ${e.message}", e)
+            Log.e(TAG, "Failed to send go to ports: ${e.message}", e)
         }
     }
 
@@ -426,10 +614,10 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
             val msg = JSONObject().apply {
                 put("action", "triggerCreate")
             }
-            activePort?.postMessage(msg)
-            Log.d(TAG, "Sent triggerCreate to WebExtension port")
+            postToAllPorts(msg)
+            Log.d(TAG, "Sent triggerCreate to WebExtension ports")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to send triggerCreate to port: ${e.message}", e)
+            Log.e(TAG, "Failed to send triggerCreate to ports: ${e.message}", e)
         }
     }
 
@@ -442,10 +630,10 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                 put("action", "setIslandMode")
                 put("island", mode.name)
             }
-            activePort?.postMessage(msg)
-            Log.d(TAG, "Sent setIslandMode(${mode.name}) to WebExtension port")
+            postToAllPorts(msg)
+            Log.d(TAG, "Sent setIslandMode(${mode.name}) to WebExtension ports")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to send setIslandMode to port: ${e.message}", e)
+            Log.e(TAG, "Failed to send setIslandMode to ports: ${e.message}", e)
         }
     }
 
@@ -466,10 +654,10 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
             val msg = JSONObject().apply {
                 put("action", "requestReelDownload")
             }
-            activePort?.postMessage(msg)
-            Log.d(TAG, "Sent requestReelDownload to WebExtension port")
+            postToAllPorts(msg)
+            Log.d(TAG, "Sent requestReelDownload to WebExtension ports")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to send requestReelDownload to port: ${e.message}", e)
+            Log.e(TAG, "Failed to send requestReelDownload to ports: ${e.message}", e)
         }
     }
 
@@ -482,10 +670,10 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                 put("action", "setBioStyle")
                 put("style", style)
             }
-            activePort?.postMessage(msg)
-            Log.d(TAG, "Sent setBioStyle ($style) to WebExtension port")
+            postToAllPorts(msg)
+            Log.d(TAG, "Sent setBioStyle ($style) to WebExtension ports")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to send setBioStyle to port: ${e.message}", e)
+            Log.e(TAG, "Failed to send setBioStyle to ports: ${e.message}", e)
         }
     }
 

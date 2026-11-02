@@ -1,3 +1,20 @@
+(function () {
+function isAuthPage() {
+  try {
+    const host = (location.hostname || '').toLowerCase();
+    if (host.includes('facebook.com') || host.includes('accountscenter.') || host.includes('meta.com')) return true;
+    const path = (location.pathname || '').toLowerCase();
+    if (path.includes('/accounts/edit')) return false;
+    if (path.startsWith('/accounts') || path.startsWith('/login') || path.startsWith('/signup') ||
+        path.startsWith('/two_factor') || path.startsWith('/challenge') || path.startsWith('/onetap') ||
+        path.startsWith('/privacy')) return true;
+    if (document.getElementById('loginForm') ||
+        document.querySelector('form[action*="login"], form[action*="signup"], form input[type="password"], input[name="password"]')) return true;
+  } catch (_) {}
+  return false;
+}
+if (isAuthPage()) return;
+
 const inDM = () => location.pathname.startsWith('/direct/t/');
 const isToggleActive = () => document.documentElement.getAttribute('data-fg-block-dm-reels') !== 'false';
 const MIN = 0.45;
@@ -103,3 +120,4 @@ document.addEventListener('play', schedule, true);
 document.addEventListener('loadeddata', schedule, true);
 setInterval(scan, 200);
 setInterval(() => { if (inDM()) beat(true); }, 200);
+})();

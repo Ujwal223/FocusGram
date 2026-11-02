@@ -193,11 +193,15 @@ object AppIconManager {
             val option = IconOption.fromId(iconId)
             val label = activity.getString(R.string.app_name)
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 val taskDesc = ActivityManager.TaskDescription.Builder()
                     .setLabel(label)
                     .setIcon(option.iconRes)
                     .build()
+                activity.setTaskDescription(taskDesc)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                @Suppress("DEPRECATION")
+                val taskDesc = ActivityManager.TaskDescription(label, option.iconRes)
                 activity.setTaskDescription(taskDesc)
             } else {
                 val bmp = BitmapFactory.decodeResource(activity.resources, option.iconRes)

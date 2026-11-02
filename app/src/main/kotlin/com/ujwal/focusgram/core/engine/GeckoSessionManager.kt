@@ -1,15 +1,27 @@
 package com.ujwal.focusgram.core.engine
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.util.Log
 import com.ujwal.focusgram.core.model.FocusSettings
 import com.ujwal.focusgram.core.model.IslandMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.mozilla.geckoview.BasicSelectionActionDelegate
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoSessionSettings
+
+internal fun Context.findActivity(): Activity? {
+    var ctx = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
 
 /**
  * Manages the primary [GeckoSession] lifecycle, foreground/background media states,
@@ -21,6 +33,17 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
     var userScriptManager: UserScriptManager? = null
     var extensionManager: ExtensionManager? = null
     var currentSettings: FocusSettings = FocusSettings()
+    var isModalActive: Boolean = false
+
+    private var basicSelectionDelegate: BasicSelectionActionDelegate? = null
+
+    fun attachActivity(activity: Activity?) {
+        basicSelectionDelegate = if (activity != null) {
+            BasicSelectionActionDelegate(activity)
+        } else {
+            null
+        }
+    }
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -43,8 +66,18 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
     private val _instagramTheme = MutableStateFlow("auto")
     val instagramTheme: StateFlow<String> = _instagramTheme.asStateFlow()
 
+    private val _hasNetworkError = MutableStateFlow(false)
+    val hasNetworkError: StateFlow<Boolean> = _hasNetworkError.asStateFlow()
+
+    fun setNetworkError(hasError: Boolean) {
+        _hasNetworkError.value = hasError
+        if (hasError) {
+            _isLoading.value = false
+        }
+    }
+
     private var isOpen = false
-    var isAuthenticated: Boolean = false
+    var isAuthenticated: Boolean = true
         private set
 
     fun setAuthenticated(auth: Boolean) {
@@ -52,18 +85,18 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
         isAuthenticated = auth
         if (auth && changed) {
             val url = _currentUrl.value.lowercase()
-            val isAuth = (url.contains("/accounts") && !url.contains("/accounts/edit")) || url.contains("/login") || url.contains("/signup")
+            val isAuth = isAuthUrl(url)
             if (!isAuth) {
                 injectBottomBarTrimmer()
                 extensionManager?.broadcastSettings(currentSettings)
-                userScriptManager?.injectAll(session, currentSettings)
+                userScriptManager?.injectAll(session, currentSettings, isAuthenticated = true)
             }
         }
     }
 
     init {
         val settings = GeckoSessionSettings.Builder()
-            .useTrackingProtection(true)
+            .useTrackingProtection(false)
             .suspendMediaWhenInactive(true)
             .allowJavascript(true)
             .userAgentMode(GeckoSessionSettings.USER_AGENT_MODE_MOBILE)
@@ -73,6 +106,49 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
             .build()
 
         session = GeckoSession(settings)
+        session.selectionActionDelegate = object : GeckoSession.SelectionActionDelegate {
+            override fun onShowActionRequest(
+                session: GeckoSession,
+                selection: GeckoSession.SelectionActionDelegate.Selection
+            ) {
+                val isEditable = (selection.flags and GeckoSession.SelectionActionDelegate.FLAG_IS_EDITABLE) != 0
+                val hasText = !selection.text.isNullOrBlank()
+
+                // Allow selection action mode (Copy/Share menu) when:
+                // 1. Text is editable (input/textarea)
+                // 2. A modal or dialog is active (e.g. post link copy modal)
+                // 3. User selected text from allowed content surfaces (DMs, Bio, captions)
+                if (isEditable || isModalActive || hasText) {
+                    val delegate = basicSelectionDelegate
+                    if (delegate != null) {
+                        delegate.onShowActionRequest(session, selection)
+                        return
+                    }
+                }
+
+                // Block default browser select/copy menus on non-editable elements
+                if ((selection.flags and GeckoSession.SelectionActionDelegate.FLAG_IS_EDITABLE) == 0) {
+                    try {
+                        selection.hide()
+                    } catch (_: Exception) {}
+                }
+            }
+
+            override fun onHideAction(session: GeckoSession, reason: Int) {
+                basicSelectionDelegate?.onHideAction(session, reason)
+            }
+
+            override fun onShowClipboardPermissionRequest(
+                session: GeckoSession,
+                perm: GeckoSession.SelectionActionDelegate.ClipboardPermission
+            ): org.mozilla.geckoview.GeckoResult<org.mozilla.geckoview.AllowOrDeny> {
+                return org.mozilla.geckoview.GeckoResult.fromValue(org.mozilla.geckoview.AllowOrDeny.ALLOW)
+            }
+
+            override fun onDismissClipboardPermissionRequest(session: GeckoSession) {
+                basicSelectionDelegate?.onDismissClipboardPermissionRequest(session)
+            }
+        }
         setupProgressDelegate()
     }
 
@@ -80,10 +156,11 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
         session.progressDelegate = object : GeckoSession.ProgressDelegate {
             override fun onPageStart(session: GeckoSession, url: String) {
                 Log.d(TAG, "Page started loading: $url")
-                if (!url.startsWith("focusgram-download:") && !url.startsWith("javascript:")) {
+                if (!url.startsWith("focusgram-download:") && !url.startsWith("focusgram-clipboard:") && !url.startsWith("javascript:")) {
                     _isLoading.value = true
                     _currentUrl.value = url
                     _progress.value = 10
+                    _hasNetworkError.value = false
                 }
             }
 
@@ -92,12 +169,22 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
                 _isLoading.value = false
                 _progress.value = 100
                 if (success) {
+                    _hasNetworkError.value = false
                     val url = _currentUrl.value.lowercase()
-                    val isAuth = (url.contains("/accounts") && !url.contains("/accounts/edit")) || url.contains("/login") || url.contains("/signup")
-                    if (isAuthenticated && !isAuth) {
+                    val isAuth = isAuthUrl(url)
+                    if (!isAuth) {
                         injectBottomBarTrimmer()
                         extensionManager?.broadcastSettings(currentSettings)
-                        userScriptManager?.injectAll(session, currentSettings)
+                        userScriptManager?.injectAll(session, currentSettings, isAuthenticated = true)
+                    }
+                } else {
+                    val url = _currentUrl.value.lowercase()
+                    val isAppScheme = url.startsWith("focusgram-download:") || url.startsWith("focusgram-clipboard:") || url.startsWith("javascript:") || url.startsWith("about:")
+                    if (!isAppScheme) {
+                        val isOffline = !com.ujwal.focusgram.core.utils.NetworkUtils.isNetworkAvailable(com.ujwal.focusgram.FocusGramApp.instance)
+                        if (isOffline) {
+                            _hasNetworkError.value = true
+                        }
                     }
                 }
             }
@@ -112,22 +199,46 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
     }
 
     /**
+     * Attaches the session to the runtime without issuing an immediate network load.
+     * Used when migration or onboarding must complete before loading the target URL.
+     */
+    fun openSessionWithoutLoading() {
+        if (!isOpen) {
+            Log.i(TAG, "Opening GeckoSession with runtime (standby mode)...")
+            session.open(runtime)
+            isOpen = true
+            session.setActive(true)
+        }
+    }
+
+    /**
      * Opens the session attached to the GeckoRuntime.
      */
-    fun openSession(initialUrl: String = DEFAULT_URL) {
+    fun openSession(initialUrl: String = DEFAULT_URL, cookieHeader: String? = null) {
         if (!isOpen) {
             Log.i(TAG, "Opening GeckoSession with runtime...")
             session.open(runtime)
             isOpen = true
-            session.loadUri(initialUrl)
+            session.setActive(true)
+            if (!initialUrl.startsWith("about:") && !com.ujwal.focusgram.core.utils.NetworkUtils.isNetworkAvailable(com.ujwal.focusgram.FocusGramApp.instance)) {
+                _hasNetworkError.value = true
+            }
+            if (!cookieHeader.isNullOrBlank()) {
+                val loader = GeckoSession.Loader()
+                    .uri(initialUrl)
+                    .additionalHeaders(mapOf("Cookie" to cookieHeader))
+                session.load(loader)
+            } else {
+                session.loadUri(initialUrl)
+            }
         }
     }
 
-    fun openAndLoad(initialUrl: String = DEFAULT_URL) {
+    fun openAndLoad(initialUrl: String = DEFAULT_URL, cookieHeader: String? = null) {
         if (!isOpen) {
-            openSession(initialUrl)
+            openSession(initialUrl, cookieHeader)
         } else {
-            loadUri(initialUrl)
+            loadUri(initialUrl, cookieHeader)
         }
     }
 
@@ -151,13 +262,24 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
         }
     }
 
-    fun loadUri(uri: String) {
+    fun loadUri(uri: String, cookieHeader: String? = null) {
         _currentUrl.value = uri
-        session.loadUri(uri)
+        session.setActive(true)
+        if (!uri.startsWith("about:") && !com.ujwal.focusgram.core.utils.NetworkUtils.isNetworkAvailable(com.ujwal.focusgram.FocusGramApp.instance)) {
+            _hasNetworkError.value = true
+        }
+        if (!cookieHeader.isNullOrBlank()) {
+            val loader = GeckoSession.Loader()
+                .uri(uri)
+                .additionalHeaders(mapOf("Cookie" to cookieHeader))
+            session.load(loader)
+        } else {
+            session.loadUri(uri)
+        }
     }
 
-    fun loadUrl(url: String) {
-        loadUri(url)
+    fun loadUrl(url: String, cookieHeader: String? = null) {
+        loadUri(url, cookieHeader)
     }
 
     fun updateIslandMode(mode: IslandMode) {
@@ -170,10 +292,10 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
 
     fun updateSettings(settings: FocusSettings) {
         currentSettings = settings
+        extensionManager?.broadcastSettings(settings)
         val url = _currentUrl.value.lowercase()
-        val isAuth = (url.contains("/accounts") && !url.contains("/accounts/edit")) || url.contains("/login") || url.contains("/signup")
-        if (!isAuth) {
-            userScriptManager?.injectConfig(session, settings)
+        if (!isAuthUrl(url)) {
+            userScriptManager?.injectConfig(session, settings, isAuthenticated = true)
         }
     }
 
@@ -181,6 +303,24 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
         if (!url.startsWith("javascript:")) {
             _currentUrl.value = url
             _islandMode.value = IslandMode.fromUrl(url)
+        }
+    }
+
+    /**
+     * Evaluates JavaScript safely within the running session by percent-encoding the wrapped payload.
+     */
+    fun evaluateJs(script: String) {
+        val mgr = userScriptManager
+        if (mgr != null) {
+            mgr.evaluate(session, script)
+        } else {
+            try {
+                val wrapped = "(function(){ try {\n$script\n} catch(e) { console.error('[GeckoSession] Execution error:', e); } })();"
+                val encoded = "javascript:" + java.net.URLEncoder.encode(wrapped, "UTF-8").replace("+", "%20")
+                session.loadUri(encoded)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to evaluate script: ${e.message}", e)
+            }
         }
     }
 
@@ -195,10 +335,13 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
             path
         }.ifEmpty { "/" }
 
-        val js = """javascript:(function(){
+        val safeRelative = org.json.JSONObject.quote(relativePath)
+        val safeFull = org.json.JSONObject.quote(fullUrl)
+
+        val js = """
             try {
-                var p = '$relativePath';
-                var full = '$fullUrl';
+                var p = $safeRelative;
+                var full = $safeFull;
                 if (window.__focusgramNavigate) {
                     window.__focusgramNavigate(p);
                     return;
@@ -243,10 +386,10 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
 
                 window.location.assign(full);
             } catch(e) {
-                window.location.assign('$fullUrl');
+                window.location.assign(full);
             }
-        })();"""
-        session.loadUri(js)
+        """.trimIndent()
+        evaluateJs(js)
     }
 
     /**
@@ -262,7 +405,7 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
      * Executes SPA navigation to the logged-in user's profile without opening the edit profile page.
      */
     fun openProfileSpa() {
-        val js = """javascript:(function(){
+        val js = """
             try {
                 if (window.__focusgramOpenProfile) {
                     window.__focusgramOpenProfile();
@@ -296,8 +439,8 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
             } catch(e) {
                 window.location.assign('https://www.instagram.com/');
             }
-        })();"""
-        session.loadUri(js)
+        """.trimIndent()
+        evaluateJs(js)
     }
 
     /**
@@ -305,13 +448,15 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
      * so it does not collide with the native Jetpack Compose Island navigation bar.
      */
     fun injectBottomBarTrimmer() {
-        val js = """javascript:(function() {
+        if (!isAuthenticated) return
+        val current = _currentUrl.value.lowercase()
+        if (isAuthUrl(current)) return
+
+        val js = """
             try {
                 var p = (window.location.pathname || '').toLowerCase();
                 var h = (window.location.hostname || '').toLowerCase();
                 if (p.startsWith('/direct') || (p.startsWith('/accounts') && !p.startsWith('/accounts/edit')) || p.startsWith('/login') || p.startsWith('/signup') || p.startsWith('/two_factor') || p.startsWith('/challenge') || p.startsWith('/onetap') || h.includes('facebook.com') || h.includes('accountscenter.')) return;
-                var c = document.cookie || '';
-                if ((p === '/' || p === '') && !c.includes('sessionid=') && !c.includes('ds_user_id=')) return;
                 if (document.getElementById('loginForm') || document.querySelector('form[action*="login"], input[name="password"]')) return;
                 document.querySelectorAll('a[href="/"], a[href="/?variant=home"], svg[aria-label="Home"], a[href*="/explore/"]').forEach(function(target) {
                     var el = target.closest('a') || target;
@@ -336,11 +481,13 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
                     }
                 });
             } catch (_) {}
-        })();"""
-        session.loadUri(js)
+        """.trimIndent()
+        evaluateJs(js)
     }
 
     fun reload() {
+        _hasNetworkError.value = false
+        _isLoading.value = true
         session.reload()
     }
 
@@ -348,7 +495,7 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
      * Refreshes the Home feed and scrolls smoothly to the top.
      */
     fun refreshHome() {
-        val js = """javascript:(function(){
+        val js = """
             try {
                 window.scrollTo(0, 0);
                 var main = document.querySelector('main') || document.querySelector('[role="main"]');
@@ -359,15 +506,15 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
             } catch(e) {
                 window.location.reload();
             }
-        })();"""
-        session.loadUri(js)
+        """.trimIndent()
+        evaluateJs(js)
     }
 
     /**
      * Refreshes the Reels feed.
      */
     fun refreshReels() {
-        val js = """javascript:(function(){
+        val js = """
             try {
                 window.scrollTo(0, 0);
                 var reels = document.querySelector('a[href*="/reels/"], a[href*="/reel/"]');
@@ -376,8 +523,8 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
             } catch(e) {
                 window.location.reload();
             }
-        })();"""
-        session.loadUri(js)
+        """.trimIndent()
+        evaluateJs(js)
     }
 
     fun goBack(): Boolean {
@@ -404,8 +551,8 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
             session.goBack()
             return true
         }
-        val js = "javascript:(function(){ if(window.history && window.history.length > 1) { window.history.back(); } else { window.location.href='/'; } })();"
-        session.loadUri(js)
+        val js = "if(window.history && window.history.length > 1) { window.history.back(); } else { window.location.href='/'; }"
+        evaluateJs(js)
         return true
     }
 
@@ -435,8 +582,8 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
 
     fun pauseMedia() {
         try {
-            val pauseJs = "javascript:(function(){ try { window.__fgMediaPaused = true; document.querySelectorAll('video, audio').forEach(function(m){ try { m.pause(); } catch(_) {} }); } catch(_) {} })();"
-            session.loadUri(pauseJs)
+            val pauseJs = "try { window.__fgMediaPaused = true; document.querySelectorAll('video, audio').forEach(function(m){ try { m.pause(); } catch(_) {} }); } catch(_) {}"
+            evaluateJs(pauseJs)
             session.setActive(false)
         } catch (e: Exception) {
             Log.w(TAG, "Error pausing media: ${e.message}")
@@ -446,8 +593,8 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
     fun resumeMedia() {
         try {
             session.setActive(true)
-            val resumeJs = "javascript:(function(){ try { window.__fgMediaPaused = false; } catch(_) {} })();"
-            session.loadUri(resumeJs)
+            val resumeJs = "try { window.__fgMediaPaused = false; } catch(_) {}"
+            evaluateJs(resumeJs)
         } catch (e: Exception) {
             Log.w(TAG, "Error resuming media: ${e.message}")
         }
@@ -464,6 +611,38 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
     companion object {
         private const val TAG = "GeckoSessionManager"
         const val DEFAULT_URL = "https://www.instagram.com/"
+
+        fun isAuthUrl(url: String): Boolean {
+            val lower = url.lowercase()
+            if (lower.startsWith("about:") || lower.startsWith("blob:") || lower.startsWith("data:")) return false
+            if (lower.contains("accountscenter.") || lower.contains("facebook.com") || lower.contains("meta.com")) return true
+            val uri = try { android.net.Uri.parse(url) } catch (_: Exception) { null }
+            val path = uri?.path?.lowercase() ?: ""
+            if (path.startsWith("/accounts/edit") ||
+                path.startsWith("/accounts/activity") ||
+                path.startsWith("/accounts/privacy_and_security") ||
+                path.startsWith("/accounts/supervision") ||
+                path.startsWith("/accounts/professional_account")
+            ) {
+                return false
+            }
+            return path.startsWith("/accounts/login") ||
+                    path.startsWith("/accounts/emailsignup") ||
+                    path.startsWith("/accounts/signup") ||
+                    path.startsWith("/accounts/two_factor") ||
+                    path.startsWith("/accounts/password") ||
+                    path.startsWith("/accounts/suspended") ||
+                    path.startsWith("/accounts/vetted_user") ||
+                    path.startsWith("/accounts/account_recovery") ||
+                    path.startsWith("/accounts/disavow") ||
+                    path.startsWith("/accounts/contact_history") ||
+                    path.startsWith("/login") ||
+                    path.startsWith("/signup") ||
+                    path.startsWith("/two_factor") ||
+                    path.startsWith("/challenge") ||
+                    path.startsWith("/onetap") ||
+                    (lower.contains("/accounts") && !path.startsWith("/accounts/"))
+        }
 
         // Mobile Safari UA causes Instagram to serve touch-friendly web layouts without Google Play banners
         const val IOS_USER_AGENT = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"

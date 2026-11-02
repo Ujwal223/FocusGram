@@ -187,4 +187,41 @@ class ReelsHistoryLogicTest {
             tempFile.delete()
         }
     }
+
+    @Test
+    fun testDistinctReelCodesNeverMerge() {
+        // Distinct valid shortcodes must never be collapsed together even if author and caption match
+        assertFalse(
+            com.ujwal.focusgram.feature.history.ReelHistory.isMatchingReel(
+                codeA = "DF5a_reel1",
+                authorA = "popular_creator",
+                captionA = "Daily vlog part 1 #vlog #fun",
+                codeB = "DF5a_reel2",
+                authorB = "popular_creator",
+                captionB = "Daily vlog part 2 #vlog #fun"
+            )
+        )
+    }
+
+    @Test
+    fun testRewatchCooldownPreventsViewInflation() {
+        val tempFile = java.io.File.createTempFile("reel_cooldown_test", ".json")
+        try {
+            // Instantiate with 30s cooldown
+            val history = com.ujwal.focusgram.feature.history.ReelHistory(tempFile, minRewatchIntervalMs = 30_000L)
+
+            // Initial view
+            history.onWatched("unique_code_1", "creator1", "My awesome reel")
+            assertEquals(1, history.items.value.size)
+            assertEquals(1, history.items.value[0].views)
+
+            // Duplicate report within cooldown (e.g. from second script or rapid loop)
+            history.onWatched("unique_code_1", "creator1", "My awesome reel")
+            assertEquals(1, history.items.value.size)
+            // Views must remain 1 instead of inflating to 2
+            assertEquals(1, history.items.value[0].views)
+        } finally {
+            tempFile.delete()
+        }
+    }
 }

@@ -17,6 +17,7 @@
 - NEW: Live Notifications That shows session timer.
 - NEW: Reels Counter (Track how many and how long have you been watching Reels).
 - NEW: Reels History. 
+- NEW: Remove Notes Tray
   and more....
 
 
@@ -24,6 +25,7 @@
 
 - Removed: Leveling System, Credits, Baitme etc. 
 - Removed: Top bar with Focusgram Logo.
+- Fixed: Message Notifications (Previously DM Notifications) didn't work AT All
 - Fixed: You couldn't send messages when in Ghost mode.
 - Fixed: Captions & Audio Banner were Cutted off.
 - Fixed: Blur state of the homepage and reels couldn't be changed once set.
@@ -34,9 +36,7 @@
 ### Uncloned Instagram Package Edition
 
 Looking to replace the official Instagram app directly on your phone? Download the uncloned edition (`com.instagram.android` package name) directly from our distribution channel:
-- 🔗 **Download Uncloned Edition (`com.instagram.android`):** [https://focusgram.blogspot.com/](https://focusgram.blogspot.com/)
-
-[Note: this webpage contains ads]
+- 🔗 **Download Uncloned Edition (`com.instagram.android`):** [https://focusgram.blogspot.com/](https://focusgram.blogspot.com/)  [Note: this webpage contains ads]
 
 FEW CHANGES IN USER INTERACTION: 
 1. Long Press the Profile Icon to open Focusgram Settings (The app looks a LOT CLeaner)

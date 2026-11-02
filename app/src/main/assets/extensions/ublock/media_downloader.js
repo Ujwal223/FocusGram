@@ -8,12 +8,23 @@
 'use strict';
 
 (function () {
+    // Skip entirely in the headless background direct message session
+    try {
+        var href = (window.location.href || '').toLowerCase();
+        if (href.includes('focusgram_bg_dm=1')) return;
+    } catch (_) {}
+
     function isAuthPage() {
         try {
+            var host = (window.location.hostname || '').toLowerCase();
+            if (host.includes('facebook.com') || host.includes('accountscenter.') || host.includes('meta.com')) return true;
             var path = (window.location.pathname || '').toLowerCase();
             if (path.includes('/accounts/edit')) return false;
-            if (path.startsWith('/accounts') || path.startsWith('/login') || path.startsWith('/signup') || path.startsWith('/two_factor') || path.startsWith('/challenge')) return true;
-            if (document.getElementById('loginForm') || document.querySelector('form[action*="login"], form input[type="password"]')) return true;
+            if (path.startsWith('/accounts') || path.startsWith('/login') || path.startsWith('/signup') ||
+                path.startsWith('/two_factor') || path.startsWith('/challenge') || path.startsWith('/onetap') ||
+                path.startsWith('/privacy')) return true;
+            if (document.getElementById('loginForm') ||
+                document.querySelector('form[action*="login"], form[action*="signup"], form input[type="password"], input[name="password"]')) return true;
         } catch (_) {}
         return false;
     }
@@ -79,12 +90,8 @@
     }, { passive: true, capture: true });
 
     function triggerNativeDownload(url, filename, error) {
-        if (url) {
-            try {
-                window.location.href = 'focusgram-download://download?url=' + encodeURIComponent(url) + '&filename=' + encodeURIComponent(filename || '');
-            } catch (_) {}
-        }
-
+        // In GeckoView, WebExtension messaging communicates directly with ExtensionManager
+        // without navigating or disrupting the active page session.
         try {
             if (typeof browser !== 'undefined' && browser.runtime && browser.runtime.sendMessage) {
                 browser.runtime.sendMessage({
@@ -96,6 +103,14 @@
                 return;
             }
         } catch (_) {}
+
+        // Custom URL scheme fallback only when WebExtension API is unavailable (e.g. standalone WebView)
+        if (url) {
+            try {
+                window.location.href = 'focusgram-download://download?url=' + encodeURIComponent(url) + '&filename=' + encodeURIComponent(filename || '');
+                return;
+            } catch (_) {}
+        }
 
         try {
             window.dispatchEvent(new CustomEvent('focusgram:download-request', {
@@ -260,8 +275,9 @@
         if (!url || typeof url !== 'string') return false;
         if (isLikelyImageUrl(url)) return false;
         const lower = url.toLowerCase();
+        if (lower.includes('video_dashinit')) return false;
         return lower.includes('.mp4') || lower.includes('.webm') || lower.includes('/v/t50.') ||
-               lower.includes('/v/t16.') || lower.includes('video_dashinit') || lower.startsWith('data:video');
+               lower.includes('/v/t16.') || lower.startsWith('data:video');
     }
 
     function getActiveStreamFromPerformance() {
@@ -275,9 +291,10 @@
                 if (!name.startsWith('http://') && !name.startsWith('https://')) continue;
                 if (isLikelyImageUrl(name)) continue;
                 if (!name.includes('cdninstagram.com') && !name.includes('fbcdn.net')) continue;
+                if (name.includes('video_dashinit')) continue;
 
                 if (name.includes('.mp4') || name.includes('/v/t50.') || name.includes('/v/t16.') ||
-                    name.includes('video_dashinit') || (name.includes('bytestart') && !isLikelyImageUrl(name))) {
+                    (name.includes('bytestart') && !isLikelyImageUrl(name))) {
                     try {
                         const u = new URL(name);
                         u.searchParams.delete('bytestart');
@@ -461,13 +478,6 @@
                 }
             } catch (_) {}
 
-            if (!resolvedUrl && hasVideoElement) {
-                const streamMedia = getActiveStreamFromPerformance();
-                if (streamMedia && streamMedia.url && isLikelyVideoUrl(streamMedia.url)) {
-                    resolvedUrl = streamMedia.url;
-                    isVideo = true;
-                }
-            }
 
             if (!resolvedUrl) {
                 try {
@@ -815,13 +825,23 @@
             let holdThresholdPassed = false;
             let holdTimer = null;
 
-            const executeDownload = () => {
+            const executeDownload = (e) => {
+                if (e) {
+                    try {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    } catch (_) {}
+                }
                 const now = Date.now();
-                if (now - lastTrigger < 1000) return;
+                if (now - lastTrigger < 800) return;
                 lastTrigger = now;
 
                 dlBtn.style.transform = 'scale(0.82)';
-                setTimeout(() => { dlBtn.style.transform = 'scale(1)'; }, 150);
+                dlBtn.style.opacity = '0.5';
+                setTimeout(() => {
+                    dlBtn.style.transform = 'scale(1)';
+                    dlBtn.style.opacity = '0.9';
+                }, 200);
 
                 let code = shortcode;
                 if (!code) {
@@ -877,13 +897,11 @@
             }, { passive: true, capture: true });
 
             dlBtn.addEventListener('touchend', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
                 clearTimeout(holdTimer);
                 const holdDuration = Date.now() - touchStartTime;
 
                 if (isHolding && !hasMoved && (holdThresholdPassed || holdDuration >= 30) && !isGlobalScrolling && (Date.now() - lastScrollTime >= 250)) {
-                    executeDownload();
+                    executeDownload(e);
                 }
 
                 isHolding = false;
@@ -892,8 +910,7 @@
             }, true);
 
             dlBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
+                executeDownload(e);
             }, true);
 
             if (actionInfo && actionInfo.row && actionInfo.anchor) {
@@ -993,10 +1010,11 @@
     });
 
     setInterval(() => {
+        if (document.hidden) return;
         syncDownloadButtons();
         syncProfileDownloadButton();
         syncReelsDownloadButton();
-    }, 300);
+    }, 1000);
 
     setTimeout(() => {
         syncDownloadButtons();

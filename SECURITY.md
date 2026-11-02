@@ -45,6 +45,14 @@ Users often ask why FocusGram shows a login screen requesting their primary Inst
 
 ---
 
+## Security Audit Report (AI Agents)
+
+For complete transparency, FocusGram undergoes deep automated security reviews conducted by autonomous AI Security Research Agents. The technical report is published directly in the repository under `Reports/`:
+
+* **[Security Architecture & Audit Report](Reports/SECURITY_REPORT.md)**: Deep architectural threat analysis, OWASP MASVS v2.0 verification, cryptographic implementation review (KeyStore AES-256 GCM, constant-time comparisons), direct message notification sandboxing, DOM script injection protections, canonical path traversal prevention, and Android 12+ zero-backup configuration.
+
+---
+
 ## Reporting a Vulnerability
 
 If you discover a security vulnerability or privacy flaw within FocusGram:

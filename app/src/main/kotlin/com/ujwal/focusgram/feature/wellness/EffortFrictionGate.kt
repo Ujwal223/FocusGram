@@ -2,6 +2,7 @@ package com.ujwal.focusgram.feature.wellness
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,7 +34,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,9 +44,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.ClipboardManager
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalTextToolbar
+import androidx.compose.ui.platform.TextToolbar
+import androidx.compose.ui.platform.TextToolbarStatus
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -51,8 +61,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ujwal.focusgram.core.ui.theme.DarkCard
+import com.ujwal.focusgram.core.ui.theme.FocusGold
 import com.ujwal.focusgram.core.ui.theme.FocusGreen
 import com.ujwal.focusgram.core.ui.theme.PureBlack
+import com.ujwal.focusgram.core.ui.theme.PureWhite
 import com.ujwal.focusgram.core.ui.theme.TextMuted
 import com.ujwal.focusgram.core.ui.theme.TextSecondary
 
@@ -62,7 +74,7 @@ import com.ujwal.focusgram.core.ui.theme.TextSecondary
 @Composable
 fun EffortFrictionGate(
     sessionType: String = "Instagram", // "Instagram" or "Reels"
-    wordCount: Int = 30,
+    wordCount: Int = 10,
     onProceed: () -> Unit,
     onCancel: () -> Unit
 ) {
@@ -85,9 +97,35 @@ fun EffortFrictionGate(
         index < targetWords.size && targetWords[index] == word
     }.size
 
+    val isDark = isSystemInDarkTheme()
+
+    // Disable copy-paste menu toolbar and system clipboard access so the user must type consciously
+    val emptyTextToolbar = remember {
+        object : TextToolbar {
+            override val status: TextToolbarStatus
+                get() = TextToolbarStatus.Hidden
+            override fun hide() {}
+            override fun showMenu(
+                rect: Rect,
+                onCopyRequested: (() -> Unit)?,
+                onPasteRequested: (() -> Unit)?,
+                onCutRequested: (() -> Unit)?,
+                onSelectAllRequested: (() -> Unit)?
+            ) {}
+        }
+    }
+
+    val noOpClipboardManager = remember {
+        object : ClipboardManager {
+            override fun getText(): AnnotatedString? = null
+            override fun setText(annotatedString: AnnotatedString) {}
+            override fun hasText(): Boolean = false
+        }
+    }
+
     Surface(
         modifier = Modifier.fillMaxSize(),
-        color = PureBlack
+        color = if (isDark) PureBlack else PureWhite
     ) {
         Column(
             modifier = Modifier
@@ -123,13 +161,13 @@ fun EffortFrictionGate(
             Text(
                 text = "Effort Friction Gate",
                 style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-                color = Color.White
+                color = if (isDark) Color.White else Color(0xFF111115)
             )
 
             Text(
                 text = "Type the ${targetWords.size}-word discipline mantra to earn $sessionType time.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary,
+                color = if (isDark) TextSecondary else Color(0xFF6C6C70),
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(top = 6.dp, bottom = 20.dp)
             )
@@ -138,8 +176,8 @@ fun EffortFrictionGate(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
-                    .background(DarkCard)
-                    .border(1.dp, Color(0xFF262626), RoundedCornerShape(14.dp))
+                    .background(if (isDark) DarkCard else Color(0xFFF2F2F7))
+                    .border(1.dp, if (isDark) Color(0xFF262626) else Color(0xFFE5E5EA), RoundedCornerShape(14.dp))
                     .padding(16.dp)
             ) {
                 Row(
@@ -167,33 +205,43 @@ fun EffortFrictionGate(
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontFamily = FontFamily.Monospace,
                         lineHeight = 22.sp,
-                        color = Color(0xFFE0E0E0)
+                        color = if (isDark) Color(0xFFE0E0E0) else Color(0xFF222225)
                     )
                 )
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            OutlinedTextField(
-                value = userInput,
-                onValueChange = { userInput = it },
-                placeholder = {
-                    Text("Type the mantra accurately above...", color = TextMuted)
-                },
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 3,
-                maxLines = 5,
-                shape = RoundedCornerShape(14.dp),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = if (isCompleted) FocusGreen else Color(0xFFFF9800),
-                    unfocusedBorderColor = Color(0xFF333333),
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    cursorColor = Color(0xFFFF9800)
+            CompositionLocalProvider(
+                LocalTextToolbar provides emptyTextToolbar,
+                LocalClipboardManager provides noOpClipboardManager
+            ) {
+                OutlinedTextField(
+                    value = userInput,
+                    onValueChange = { newValue ->
+                        // Reject multi-character batch inserts from paste, adb input text, or external force-push
+                        if (isSingleCharOrDelete(userInput, newValue)) {
+                            userInput = newValue
+                        }
+                    },
+                    placeholder = {
+                        Text("Type the mantra accurately above...", color = TextMuted)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                    maxLines = 5,
+                    shape = RoundedCornerShape(14.dp),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = if (isCompleted) FocusGreen else Color(0xFFFF9800),
+                        unfocusedBorderColor = if (isDark) Color(0xFF333333) else Color(0xFFD1D1D6),
+                        focusedTextColor = if (isDark) Color.White else Color.Black,
+                        unfocusedTextColor = if (isDark) Color.White else Color.Black,
+                        cursorColor = Color(0xFFFF9800)
+                    )
                 )
-            )
+            }
 
             Spacer(modifier = Modifier.height(24.dp))
 
@@ -207,8 +255,8 @@ fun EffortFrictionGate(
                 colors = ButtonDefaults.buttonColors(
                     containerColor = FocusGreen,
                     contentColor = PureBlack,
-                    disabledContainerColor = Color.White.copy(alpha = 0.1f),
-                    disabledContentColor = Color.White.copy(alpha = 0.3f)
+                    disabledContainerColor = if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.08f),
+                    disabledContentColor = if (isDark) Color.White.copy(alpha = 0.3f) else Color.Black.copy(alpha = 0.3f)
                 )
             ) {
                 Icon(
@@ -217,7 +265,7 @@ fun EffortFrictionGate(
                     modifier = Modifier.size(18.dp)
                 )
                 Text(
-                    text = if (isCompleted) " Challenge Complete — Continue" else " Unlock Session",
+                    text = if (isCompleted) " Challenge Complete: Continue" else " Unlock Session",
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp
                 )
@@ -225,19 +273,65 @@ fun EffortFrictionGate(
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            val outlineBorderColor = if (isDark) Color(0xFF333333) else Color(0xFFD1D1D6)
             OutlinedButton(
                 onClick = onCancel,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
                 shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White.copy(alpha = 0.7f)),
-                border = ButtonDefaults.outlinedButtonBorder(enabled = true).copy(brush = Brush.linearGradient(listOf(Color(0xFF333333), Color(0xFF333333))))
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = if (isDark) Color.White.copy(alpha = 0.7f) else Color.Black.copy(alpha = 0.7f)
+                ),
+                border = ButtonDefaults.outlinedButtonBorder(enabled = true).copy(
+                    brush = Brush.linearGradient(listOf(outlineBorderColor, outlineBorderColor))
+                )
             ) {
                 Text("Close & Stay Focused")
+            }
+
+            if (com.ujwal.focusgram.BuildConfig.DEBUG) {
+                Spacer(modifier = Modifier.height(10.dp))
+                TextButton(
+                    onClick = onProceed,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "⚡ Skip Friction Challenge (Debug)",
+                        color = FocusGold,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(20.dp))
         }
     }
+}
+
+/**
+ * Validates that an edit is either a single character insertion, a single character replacement,
+ * or a deletion. Blocks multi-character batch inserts from paste, adb input text, or external injection.
+ */
+internal fun isSingleCharOrDelete(oldText: String, newText: String): Boolean {
+    // If text was shortened or unchanged, allow (deletion or no-op)
+    if (newText.length < oldText.length) {
+        return true
+    }
+    // Find common prefix length
+    var prefix = 0
+    while (prefix < oldText.length && prefix < newText.length && oldText[prefix] == newText[prefix]) {
+        prefix++
+    }
+    // Find common suffix length
+    var oldSuffix = oldText.length - 1
+    var newSuffix = newText.length - 1
+    while (oldSuffix >= prefix && newSuffix >= prefix && oldText[oldSuffix] == newText[newSuffix]) {
+        oldSuffix--
+        newSuffix--
+    }
+    // Number of new characters introduced
+    val insertedCount = newSuffix - prefix + 1
+    return insertedCount <= 1
 }

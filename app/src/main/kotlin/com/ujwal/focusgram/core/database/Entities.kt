@@ -46,15 +46,3 @@ data class SessionRecord(
     val completed: Boolean = true
 )
 
-/**
- * Serialized HTML content and metadata for offline post or thread review.
- */
-@Entity(tableName = "saved_snapshots")
-data class SnapshotItem(
-    @PrimaryKey
-    val id: String,
-    val url: String,
-    val title: String,
-    val savedAt: Long = System.currentTimeMillis(),
-    val htmlContent: String? = null
-)

@@ -13,6 +13,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,7 +50,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.material3.CircularProgressIndicator
 import com.ujwal.focusgram.core.utils.AppIconManager
 import com.ujwal.focusgram.core.utils.TimeFormatters
-import com.ujwal.focusgram.core.utils.HistoricalIconManager
 import com.ujwal.focusgram.core.security.EncryptedStorage
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Block
@@ -859,17 +859,17 @@ private fun MainSettingsContent(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = appTimeText, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text(text = appTimeText, color = IOSTextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         Text(text = "App Time", color = Color(0xFF8E8E93), fontSize = 11.sp)
                     }
                     Box(modifier = Modifier.width(1.dp).height(24.dp).background(Color(0xFF2C2C2E)))
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = reelsTimeText, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text(text = reelsTimeText, color = IOSTextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         Text(text = "Reels Time", color = Color(0xFF8E8E93), fontSize = 11.sp)
                     }
                     Box(modifier = Modifier.width(1.dp).height(24.dp).background(Color(0xFF2C2C2E)))
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = "$todayReelsWatched", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text(text = "$todayReelsWatched", color = IOSTextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         Text(text = "Reels Watched", color = Color(0xFF8E8E93), fontSize = 11.sp)
                     }
                 }
@@ -1072,6 +1072,15 @@ private fun FocusModeSubpage(
                     iconBgColor = IOSRed,
                     checked = settings.hideFeedPosts,
                     onCheckedChange = { scope.launch { repository.setHideFeedPosts(it) } },
+                    showDivider = true
+                )
+                IOSSettingsRow(
+                    title = "Block Direct Messages",
+                    subtitle = "Disable DM access for deep focus sessions",
+                    icon = Icons.Default.Block,
+                    iconBgColor = IOSRed,
+                    checked = settings.noDMs,
+                    onCheckedChange = { scope.launch { repository.setNoDMs(it) } },
                     showDivider = false
                 )
             }
@@ -1097,8 +1106,8 @@ private fun FocusModeSubpage(
                     onCheckedChange = { scope.launch { repository.setBlurExplore(it) } }
                 )
                 IOSSettingsRow(
-                    title = "Blur Reels",
-                    subtitle = "Blur reels video thumbnails until tapped",
+                    title = "Blur Videos",
+                    subtitle = "Blur video thumbnails until revealed",
                     icon = Icons.Default.Visibility,
                     iconBgColor = IOSTeal,
                     checked = settings.blurReels,
@@ -1123,20 +1132,28 @@ private fun FocusModeSubpage(
             IOSSectionTitle(title = "DISTRACTION BLOCKERS")
             IOSGroupedCard {
                 IOSSettingsRow(
-                    title = "Block Video Autoplay",
-                    subtitle = "Stop videos and reels from playing automatically until tapped",
-                    icon = Icons.Default.PlayArrow,
-                    iconBgColor = IOSBlue,
-                    checked = settings.noAutoplay,
-                    onCheckedChange = { scope.launch { repository.setNoAutoplay(it) } }
-                )
-                IOSSettingsRow(
                     title = "Hide Stories Tray",
                     subtitle = "Eliminate stories carousel at the top of the feed",
                     icon = Icons.Default.PlayArrow,
                     iconBgColor = IOSRed,
                     checked = settings.noStories,
                     onCheckedChange = { scope.launch { repository.setNoStories(it) } }
+                )
+                IOSSettingsRow(
+                    title = "Hide Notes Tray",
+                    subtitle = "Eliminate notes carousel at the top of direct messages",
+                    icon = Icons.AutoMirrored.Filled.Chat,
+                    iconBgColor = IOSBlue,
+                    checked = settings.hideNotesTray,
+                    onCheckedChange = { scope.launch { repository.setHideNotesTray(it) } }
+                )
+                IOSSettingsRow(
+                    title = "Block Video Autoplay",
+                    subtitle = "Stop videos and reels from playing automatically until tapped",
+                    icon = Icons.Default.PlayArrow,
+                    iconBgColor = IOSBlue,
+                    checked = settings.noAutoplay,
+                    onCheckedChange = { scope.launch { repository.setNoAutoplay(it) } }
                 )
                 IOSSettingsRow(
                     title = "Block Reels & Short Videos",
@@ -1152,31 +1169,7 @@ private fun FocusModeSubpage(
                     icon = Icons.Default.Lock,
                     iconBgColor = IOSPurple,
                     checked = settings.blockDmReelsSwiping,
-                    onCheckedChange = { scope.launch { repository.setBlockDmReelsSwiping(it) } }
-                )
-                IOSSettingsRow(
-                    title = "Hide Suggested Posts",
-                    subtitle = "Only show posts from accounts you actually follow",
-                    icon = Icons.Default.Star,
-                    iconBgColor = IOSOrange,
-                    checked = settings.hideSuggestedPosts,
-                    onCheckedChange = { scope.launch { repository.setHideSuggestedPosts(it) } }
-                )
-                IOSSettingsRow(
-                    title = "Hide Shop Tab",
-                    subtitle = "Remove commercial shopping tab and suggestions",
-                    icon = Icons.Default.ShoppingBag,
-                    iconBgColor = IOSBlue,
-                    checked = settings.hideShopTab,
-                    onCheckedChange = { scope.launch { repository.setHideShopTab(it) } }
-                )
-                IOSSettingsRow(
-                    title = "Block Direct Messages",
-                    subtitle = "Disable DM access for deep focus sessions",
-                    icon = Icons.Default.Block,
-                    iconBgColor = IOSRed,
-                    checked = settings.noDMs,
-                    onCheckedChange = { scope.launch { repository.setNoDMs(it) } },
+                    onCheckedChange = { scope.launch { repository.setBlockDmReelsSwiping(it) } },
                     showDivider = false
                 )
             }
@@ -1672,7 +1665,7 @@ private fun ExtrasSubpage(
                 val isCustomLaunch = settings.startupPage != "home"
                 IOSSettingsRow(
                     title = "Launch Page",
-                    subtitle = if (isCustomLaunch) "Start on ${when (settings.startupPage) { "following" -> "Following Feed"; "favorites" -> "Favorites Feed"; "direct" -> "Direct Messages"; else -> "Home Feed" }}" else "Opens default Instagram Home",
+                    subtitle = if (isCustomLaunch) "Start on ${when (settings.startupPage) { "following" -> "Following Feed"; "favorites" -> "Favorites Feed"; "direct" -> "Direct Messages"; else -> "Home Feed" }}" else "Choose which page to open on app launch",
                     icon = Icons.AutoMirrored.Filled.OpenInNew,
                     iconBgColor = IOSBlue,
                     checked = isCustomLaunch,
@@ -2151,9 +2144,20 @@ private fun NotificationsSubpage(
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val isDark = isSystemInDarkTheme()
+    var showDmWarningDialog by remember { mutableStateOf(false) }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
-    ) { _ -> }
+    ) { isGranted ->
+        if (isGranted) {
+            scope.launch {
+                repository.setDmNotificationsEnabled(true)
+                com.ujwal.focusgram.feature.notifications.DmNotificationService.start(context)
+                com.ujwal.focusgram.core.utils.BatteryOptimizationHelper.openBatteryOptimizationSettings(context)
+            }
+        }
+    }
 
     val checkAndRequestNotificationPermission = { onGranted: () -> Unit ->
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -2169,6 +2173,65 @@ private fun NotificationsSubpage(
         } else {
             onGranted()
         }
+    }
+
+    if (showDmWarningDialog) {
+        AlertDialog(
+            onDismissRequest = { showDmWarningDialog = false },
+            containerColor = if (isDark) Color(0xFF1C1C1E) else Color.White,
+            icon = {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Chat,
+                    contentDescription = null,
+                    tint = IOSBlue,
+                    modifier = Modifier.size(32.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Enable Message Notifications?",
+                    color = if (isDark) Color.White else Color.Black,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "• A persistent notification will remain active in the background.\n" +
+                                "• Background listening may consume slightly more battery than usual.\n" +
+                                "• Instagram may show your status as \"Active\".\n" +
+                                "• Your messages are processed locally on-device and never stored or sent anywhere.",
+                        color = if (isDark) Color(0xFFD1D5DB) else Color(0xFF3C3C43),
+                        fontSize = 13.sp,
+                        lineHeight = 20.sp
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDmWarningDialog = false
+                        checkAndRequestNotificationPermission {
+                            scope.launch {
+                                repository.setDmNotificationsEnabled(true)
+                                repository.setDmNotificationPreview(true)
+                                com.ujwal.focusgram.feature.notifications.DmNotificationService.start(context)
+                                com.ujwal.focusgram.core.utils.BatteryOptimizationHelper.openBatteryOptimizationSettings(context)
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = IOSBlue)
+                ) {
+                    Text("Turn On", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDmWarningDialog = false }) {
+                    Text("Cancel", color = if (isDark) Color(0xFF8E8E93) else Color(0xFF6C6C70))
+                }
+            }
+        )
     }
 
     LazyColumn(
@@ -2245,6 +2308,44 @@ private fun NotificationsSubpage(
                             } else {
                                 scope.launch { repository.setNotifyEvery5Minutes(false) }
                             }
+                        },
+                        showDivider = false,
+                        isDependent = true
+                    )
+                }
+            }
+        }
+
+        item {
+            IOSSectionTitle(title = "DIRECT MESSAGE NOTIFICATIONS")
+            IOSGroupedCard {
+                IOSSettingsRow(
+                    title = "Message Notifications",
+                    subtitle = "Receive notifications when new direct messages arrive",
+                    icon = Icons.AutoMirrored.Filled.Chat,
+                    iconBgColor = IOSBlue,
+                    checked = settings.dmNotificationsEnabled,
+                    onCheckedChange = { willEnable ->
+                        if (willEnable) {
+                            showDmWarningDialog = true
+                        } else {
+                            scope.launch {
+                                repository.setDmNotificationsEnabled(false)
+                                repository.setDmNotificationPreview(false)
+                                com.ujwal.focusgram.feature.notifications.DmNotificationService.stop(context)
+                            }
+                        }
+                    },
+                    showDivider = settings.dmNotificationsEnabled
+                )
+                if (settings.dmNotificationsEnabled) {
+                    IOSSettingsRow(
+                        title = "Ignore Battery Optimization",
+                        subtitle = "Prevent your phone from killing background message notifications",
+                        icon = Icons.Default.Security,
+                        iconBgColor = IOSOrange,
+                        onClick = {
+                            com.ujwal.focusgram.core.utils.BatteryOptimizationHelper.openBatteryOptimizationSettings(context)
                         },
                         showDivider = false,
                         isDependent = true

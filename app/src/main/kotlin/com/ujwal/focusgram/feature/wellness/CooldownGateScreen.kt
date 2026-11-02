@@ -1,8 +1,10 @@
 package com.ujwal.focusgram.feature.wellness
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ujwal.focusgram.core.ui.theme.DarkCard
 import com.ujwal.focusgram.core.ui.theme.PureBlack
+import com.ujwal.focusgram.core.ui.theme.PureWhite
 import com.ujwal.focusgram.core.ui.theme.TextMuted
 import com.ujwal.focusgram.core.ui.theme.TextSecondary
 import com.ujwal.focusgram.core.utils.HapticHelper
@@ -83,11 +86,13 @@ fun CooldownGateScreen(
 
     val minutes = effectiveRemaining / 60
     val seconds = effectiveRemaining % 60
-    val formattedTime = String.format("%02d:%02d", minutes, seconds)
+    val formattedTime = String.format(java.util.Locale.US, "%02d:%02d", minutes, seconds)
+
+    val isDark = isSystemInDarkTheme()
 
     Surface(
         modifier = Modifier.fillMaxSize(),
-        color = PureBlack
+        color = if (isDark) PureBlack else PureWhite
     ) {
         Column(
             modifier = Modifier
@@ -128,7 +133,7 @@ fun CooldownGateScreen(
                     fontWeight = FontWeight.Bold,
                     letterSpacing = (-0.5).sp
                 ),
-                color = Color.White
+                color = if (isDark) Color.White else Color(0xFF111115)
             )
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -136,7 +141,7 @@ fun CooldownGateScreen(
             Text(
                 text = "Your session has ended.\nCome back when the cooldown timer expires.",
                 style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 22.sp),
-                color = TextSecondary,
+                color = if (isDark) TextSecondary else Color(0xFF6C6C70),
                 textAlign = TextAlign.Center
             )
 
@@ -146,8 +151,8 @@ fun CooldownGateScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(20.dp))
-                    .background(DarkCard)
-                    .border(1.dp, Color(0xFF262626), RoundedCornerShape(20.dp))
+                    .background(if (isDark) DarkCard else Color(0xFFF2F2F7))
+                    .border(1.dp, if (isDark) Color(0xFF262626) else Color(0xFFE5E5EA), RoundedCornerShape(20.dp))
                     .padding(vertical = 24.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -163,7 +168,7 @@ fun CooldownGateScreen(
                         text = formattedTime,
                         fontSize = 44.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White,
+                        color = if (isDark) Color.White else Color(0xFF111115),
                         letterSpacing = 2.sp
                     )
                 }
@@ -177,19 +182,23 @@ fun CooldownGateScreen(
                     fontStyle = FontStyle.Italic,
                     lineHeight = 22.sp
                 ),
-                color = TextMuted,
+                color = if (isDark) TextMuted else Color(0xFF8E8E93),
                 textAlign = TextAlign.Center
             )
 
             Spacer(modifier = Modifier.height(48.dp))
 
+            val outlineColor = if (isDark) Color(0xFF333333) else Color(0xFFD1D1D6)
             OutlinedButton(
                 onClick = onExit,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
                 shape = RoundedCornerShape(26.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = if (isDark) Color.White else Color.Black
+                ),
+                border = BorderStroke(1.dp, outlineColor)
             ) {
                 Text(
                     text = "Close App & Rest",

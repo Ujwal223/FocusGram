@@ -15,6 +15,7 @@
 [![Downloads](https://img.shields.io/github/downloads/Ujwal223/FocusGram/total?style=for-the-badge&color=fa8900)](https://github.com/Ujwal223/FocusGram/releases)
 [![Uptodown](https://img.shields.io/badge/Uptodown-Download-00A859?style=for-the-badge&logo=android&logoColor=white)](https://focusgram.en.uptodown.com/android)
 [![Support](https://img.shields.io/badge/Support-BuyMeMomo-FFDD00.svg?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://buymemomo.com/ujwal)
+[![Security Audit](https://img.shields.io/badge/Security_Audit-Passed_(MASVS)-success?style=for-the-badge&logo=shield)](Reports/SECURITY_REPORT.md)
 
 <br/>
 </div>
@@ -147,6 +148,12 @@ cd FocusGram
 - **Zero Credential Interception**: The login interface is rendered inside GeckoView as a sealed black box. FocusGram's Kotlin codebase cannot inspect, intercept, or log passwords or 2FA codes.
 - **Strictly Local Storage**: All settings, screen time stats, and session records stay encrypted on your phone.
 - **No Third-Party SDKs**: Zero Google Firebase, zero analytics, zero crash reporting services, and zero network calls from Kotlin to external servers.
+
+### Independent Security Audit (AI Agents)
+
+FocusGram undergoes deep automated architectural and security reviews conducted by autonomous AI Security Research Agents. The full independent assessment report, threat model analyses, and OWASP MASVS compliance verification are published directly in the repository:
+
+* **[Security Architecture & Audit Report](Reports/SECURITY_REPORT.md)**: Comprehensive review covering trust boundaries, OWASP MASVS compliance, KeyStore cryptographic hardening, direct message notification sandboxing, DOM injection defenses, and zero-backup rules.
 
 For detailed security architecture, threat model explanations, and vulnerability disclosure instructions, see **[SECURITY.md](SECURITY.md)**.  
 For contribution guidelines and development standards, see **[CONTRIBUTING.md](CONTRIBUTING.md)**.

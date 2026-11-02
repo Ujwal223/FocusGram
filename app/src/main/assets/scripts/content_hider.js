@@ -9,10 +9,15 @@
 
     function isAuthPage() {
         try {
+            var host = (window.location.hostname || '').toLowerCase();
+            if (host.includes('facebook.com') || host.includes('accountscenter.') || host.includes('meta.com')) return true;
             var path = (window.location.pathname || '').toLowerCase();
             if (path.includes('/accounts/edit')) return false;
-            if (path.startsWith('/accounts') || path.startsWith('/login') || path.startsWith('/signup') || path.startsWith('/two_factor') || path.startsWith('/challenge')) return true;
-            if (document.getElementById('loginForm') || document.querySelector('form[action*="login"], form input[type="password"]')) return true;
+            if (path.startsWith('/accounts') || path.startsWith('/login') || path.startsWith('/signup') ||
+                path.startsWith('/two_factor') || path.startsWith('/challenge') || path.startsWith('/onetap') ||
+                path.startsWith('/privacy')) return true;
+            if (document.getElementById('loginForm') ||
+                document.querySelector('form[action*="login"], form[action*="signup"], form input[type="password"], input[name="password"]')) return true;
         } catch (_) {}
         return false;
     }
@@ -134,12 +139,20 @@
             `;
         }
 
-        if (config.hideReels) {
+        if (config.hideReels || config.noReels) {
             css += `
                 a[href*="/reel"],
                 a[href*="/reels"],
                 div:has(> a[href*="/reel"]) {
                     display: none !important;
+                }
+
+                /* Block Reels: permanently blur feed videos & short video containers */
+                html[data-fg-feed] article video,
+                html[data-fg-feed] article div:has(> video),
+                html[data-fg-feed] article div[data-fg-reel-container] {
+                    filter: blur(24px) !important;
+                    pointer-events: none !important;
                 }
             `;
         }
@@ -156,16 +169,28 @@
         if (config.blurFeed) {
             css += `
                 /* Blur feed media elements without blurring parent containers. */
-                html[data-fg-feed] article img:not(header img):not([alt*="profile" i]):not([data-fg-reveal]):not(.fg-unblurred),
+                article img:not(header img):not([data-fg-reveal]):not(.fg-unblurred),
+                article video:not([data-fg-reveal]):not(.fg-unblurred),
+                html[data-fg-feed] article img:not(header img):not([data-fg-reveal]):not(.fg-unblurred),
                 html[data-fg-feed] article video:not([data-fg-reveal]):not(.fg-unblurred),
-                html[data-fg-feed] article canvas:not([data-fg-reveal]):not(.fg-unblurred) {
+                article div[style*="aspect-ratio"]:not([data-fg-reveal]):not(.fg-unblurred),
+                article div:has(> img):not(header *):not([data-fg-reveal]):not(.fg-unblurred),
+                article div:has(> video):not([data-fg-reveal]):not(.fg-unblurred),
+                article ul li:not([data-fg-reveal]):not(.fg-unblurred),
+                article div[role="group"]:not([data-fg-reveal]):not(.fg-unblurred) {
                     filter: blur(28px) !important;
                     transition: filter 0.25s ease-in-out !important;
                 }
 
                 /* Keep header avatars unblurred. */
-                html[data-fg-feed] article header img,
-                html[data-fg-feed] article img[alt*="profile" i] {
+                article header img,
+                article header * {
+                    filter: none !important;
+                }
+
+                /* Keep modal dialogs unblurred */
+                div[role="dialog"] article,
+                div[role="dialog"] article * {
                     filter: none !important;
                 }
             `;
@@ -203,7 +228,27 @@
             .fg-unblurred img,
             .fg-unblurred video,
             .fg-unblurred canvas,
-            .fg-unblurred div {
+            .fg-unblurred div,
+            article[data-fg-reveal] img,
+            article[data-fg-reveal] video,
+            article[data-fg-reveal] canvas,
+            article.fg-unblurred img,
+            article.fg-unblurred video,
+            article.fg-unblurred canvas,
+            article li[data-fg-reveal] img,
+            article li[data-fg-reveal] video,
+            article li.fg-unblurred img,
+            article li.fg-unblurred video,
+            article div[role="group"][data-fg-reveal] img,
+            article div[role="group"][data-fg-reveal] video,
+            article div[role="group"].fg-unblurred img,
+            article div[role="group"].fg-unblurred video,
+            html[data-fg-feed] article[data-fg-reveal] img,
+            html[data-fg-feed] article[data-fg-reveal] video,
+            html[data-fg-feed] article[data-fg-reveal] canvas,
+            html[data-fg-feed] article.fg-unblurred img,
+            html[data-fg-feed] article.fg-unblurred video,
+            html[data-fg-feed] article.fg-unblurred canvas {
                 filter: none !important;
             }
 
@@ -252,6 +297,25 @@
                 a[href*="/shop"],
                 a[href*="/shopping"] {
                     display: none !important;
+                }
+            `;
+        }
+
+        if (config.hideNotesTray) {
+            css += `
+                div.x1c4vz4f:has(div[role="presentation"][data-interactable] ul),
+                div.x1c4vz4f:has(ul),
+                div[role="presentation"][data-interactable]:has(ul),
+                div:has(> div > div > ul:has(li .xsnw5ke)),
+                div[data-fg-notes-tray="true"] {
+                    display: none !important;
+                    visibility: hidden !important;
+                    height: 0 !important;
+                    min-height: 0 !important;
+                    max-height: 0 !important;
+                    overflow: hidden !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
                 }
             `;
         }
@@ -332,6 +396,15 @@
     function scanDynamicDOM() {
         const config = window.__FOCUSGRAM_CONFIG__ || {};
         try {
+            if (config.hideNotesTray) {
+                const notesContainers = document.querySelectorAll('div.x1c4vz4f, div[role="presentation"][data-interactable]');
+                notesContainers.forEach(container => {
+                    if (container.querySelector('ul') || container.querySelector('.xsnw5ke')) {
+                        container.setAttribute('data-fg-notes-tray', 'true');
+                        container.style.setProperty('display', 'none', 'important');
+                    }
+                });
+            }
             if (config.noAds !== false) {
                 const SPONSORED_KW = ['sponsored', 'gesponsert', 'sponsorisé', 'sponsorise', 'publicidad', 'patrocinado', 'sponsorizzato', 'sponsrad', 'paid partnership', 'werbung', 'anuncio', 'werbeanzeige'];
                 const AD_CTA = ['shop now', 'install now', 'sign up', 'apply now', 'book now', 'order now', 'get offer'];
@@ -654,32 +727,46 @@
         const config = window.__FOCUSGRAM_CONFIG__ || {};
 
         if (config.blurFeed) {
-            // Ignore slide advance controls, headers, and reactions when resolving unblur targets.
-            if (el.closest('button[aria-label="Next"], button[aria-label="Go back"], button[aria-label="Next slide"], button[aria-label="Previous slide"], button[aria-label="Chevron"], header, section:has(svg[aria-label="Like"])')) {
+            // Ignore only the controls themselves. Instagram commonly places the
+            // media and the reaction rail in the same section, so rejecting a
+            // section that merely contains a Like/Comment icon also rejects every
+            // home-feed photo and video inside that post.
+            if (el.closest('button[aria-label="Next"], button[aria-label="Go back"], button[aria-label="Next slide"], button[aria-label="Previous slide"], button[aria-label="Chevron"], header, form, [role="button"][aria-label*="Like"], [role="button"][aria-label*="Comment"]')) {
                 return null;
             }
 
-            const article = el.closest('article');
-            if (article) {
-                const media = el.matches('img, video, canvas') ? el : (el.closest('img, video, canvas') || el.querySelector('img, video, canvas'));
-                const slide = el.closest('li, [role="group"], [style*="scroll-snap-align"], [data-testid*="slide"]') ||
-                              (media ? media.closest('div[style*="width: 100%"], div[style*="min-width"]') : null);
+            // If "Block Reels & Short Videos" is on, feed videos CANNOT be unblurred
+            const isBlockReelsActive = !!(config.hideReels || config.noReels);
+            const isVideo = el.tagName === 'VIDEO' || !!el.closest('video') || !!el.querySelector('video') || !!el.closest('article div:has(> video)');
+            if (isBlockReelsActive && isVideo) {
+                return null;
+            }
 
-                if (slide && !slide.hasAttribute('data-fg-reveal') && !slide.classList.contains('fg-unblurred')) {
-                    return slide;
+            // 1. Check if clicked inside a specific carousel slide
+            const carouselSlide = el.closest('article ul li, article div[role="group"]');
+            if (carouselSlide) {
+                if (!carouselSlide.hasAttribute('data-fg-reveal') && !carouselSlide.classList.contains('fg-unblurred')) {
+                    return carouselSlide;
                 }
-                if (media && !media.hasAttribute('data-fg-reveal') && !media.classList.contains('fg-unblurred')) {
-                    return media;
-                }
+                return null; // Already unblurred slide; pass through to native Instagram actions
+            }
 
-                // Single post media container fallback.
-                const mediaContainer = article.querySelector('div[style*="aspect-ratio"], div:has(> img), div:has(> video)');
-                if (mediaContainer && mediaContainer.contains(el)) {
-                    const postImg = mediaContainer.querySelector('img:not(header img), video');
-                    if (postImg && !postImg.hasAttribute('data-fg-reveal') && !postImg.classList.contains('fg-unblurred')) {
-                        return postImg;
-                    }
-                }
+            // 2. Feed post media container or article
+            const mediaContainer = el.closest('div[style*="aspect-ratio"], div:has(> img), div:has(> video)');
+            if (mediaContainer && !mediaContainer.hasAttribute('data-fg-reveal') && !mediaContainer.classList.contains('fg-unblurred')) {
+                return mediaContainer;
+            }
+
+            // 3. Fallback to single post (non-carousel)
+            const feedArticle = el.closest('article');
+            if (feedArticle && !feedArticle.hasAttribute('data-fg-reveal') && !feedArticle.classList.contains('fg-unblurred')) {
+                return feedArticle;
+            }
+
+            // 4. Fallback to direct media element or container
+            const media = el.matches('img, video, canvas') ? el : el.closest('div:has(> img), div:has(> video)');
+            if (media && !media.hasAttribute('data-fg-reveal') && !media.classList.contains('fg-unblurred')) {
+                return media;
             }
         }
 
@@ -705,14 +792,37 @@
 
     function revealTarget(target) {
         if (!target) return;
-        target.setAttribute('data-fg-reveal', '1');
-        target.classList.add('fg-unblurred');
         target.style.setProperty('filter', 'none', 'important');
-        target.querySelectorAll('*').forEach(c => {
-            c.setAttribute('data-fg-reveal', '1');
-            c.classList.add('fg-unblurred');
-            c.style.setProperty('filter', 'none', 'important');
-        });
+        const markRevealed = function (element) {
+            element.setAttribute('data-fg-reveal', '1');
+            element.classList.add('fg-unblurred');
+            element.style.setProperty('filter', 'none', 'important');
+        };
+        markRevealed(target);
+        const children = target.querySelectorAll('*');
+        for (let i = 0; i < children.length; i++) {
+            markRevealed(children[i]);
+        }
+        // Home-feed CSS can blur more than one nested media wrapper. Mark each
+        // matching ancestor through the post so no parent filter remains active.
+        const art = target.closest('article');
+        let ancestor = target.parentElement;
+        while (ancestor && ancestor !== art) {
+            if (ancestor.matches('div[style*="aspect-ratio"], div:has(> img), div:has(> video), li, div[role="group"]')) {
+                markRevealed(ancestor);
+            }
+            ancestor = ancestor.parentElement;
+        }
+
+        // If unblurring inside a single-post article, reveal its media too.
+        if (art && !target.closest('li, [role="group"]')) {
+            art.setAttribute('data-fg-reveal', '1');
+            markRevealed(art);
+            const artChildren = art.querySelectorAll('img, video, canvas, div[style*="aspect-ratio"], div:has(> img), div:has(> video)');
+            for (let i = 0; i < artChildren.length; i++) {
+                markRevealed(artChildren[i]);
+            }
+        }
     }
 
     document.addEventListener('pointerdown', (e) => {
@@ -730,7 +840,7 @@
     }, true);
 
     document.addEventListener('pointermove', (e) => {
-        if (holdTimer && Math.hypot(e.clientX - holdStartX, e.clientY - holdStartY) > 12) {
+        if (holdTimer && Math.hypot(e.clientX - holdStartX, e.clientY - holdStartY) > 24) {
             clearTimeout(holdTimer);
             holdTimer = null;
         }
@@ -760,6 +870,40 @@
             e.preventDefault();
             e.stopPropagation();
             revealTarget(target);
+        }
+    }, true);
+
+    // Block client-side link navigation when feature toggles (Block Reels, Block DMs, Hide Stories) are active
+    document.addEventListener('click', (e) => {
+        // If user is clicking to unblur a blurred target, do not intercept or navigate away
+        if (getBlurredTarget(e.target)) return;
+
+        const link = e.target.closest('a[href]');
+        if (!link) return;
+        const href = (link.getAttribute('href') || '').toLowerCase();
+        const config = window.__FOCUSGRAM_CONFIG__ || {};
+        if ((config.hideReels || config.noReels) && (href.startsWith('/reel/') || href.startsWith('/reels') || href === '/reel')) {
+            if (!e.target.closest('article')) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof window.__focusgramNavigate === 'function') window.__focusgramNavigate('/');
+                else window.location.href = '/';
+                return;
+            }
+        }
+        if ((config.hideDMs || config.noDMs) && (href.startsWith('/direct') || href.startsWith('/messages'))) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (typeof window.__focusgramNavigate === 'function') window.__focusgramNavigate('/');
+            else window.location.href = '/';
+            return;
+        }
+        if ((config.hideStories || config.noStories) && (href.startsWith('/stories/') || href === '/stories')) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (typeof window.__focusgramNavigate === 'function') window.__focusgramNavigate('/');
+            else window.location.href = '/';
+            return;
         }
     }, true);
 

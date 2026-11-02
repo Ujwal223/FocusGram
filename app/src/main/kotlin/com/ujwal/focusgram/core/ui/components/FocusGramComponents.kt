@@ -3,6 +3,7 @@ package com.ujwal.focusgram.core.ui.components
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -40,35 +41,53 @@ import com.ujwal.focusgram.core.ui.theme.DarkCard
 import androidx.compose.ui.graphics.Brush
 import com.ujwal.focusgram.core.ui.theme.DarkCardElevated
 import com.ujwal.focusgram.core.ui.theme.InstagramBlue
+import com.ujwal.focusgram.core.ui.theme.LightBorder
 import com.ujwal.focusgram.core.ui.theme.PureBlack
+import com.ujwal.focusgram.core.ui.theme.PureWhite
 import com.ujwal.focusgram.core.ui.theme.TextMuted
 import com.ujwal.focusgram.core.ui.theme.TextPrimary
 import com.ujwal.focusgram.core.ui.theme.TextSecondary
 import com.ujwal.focusgram.core.ui.theme.tactilePress
 
 /**
- * Dark surface container card with liquid glass styling, rounded corners, and optional tactile click feedback.
+ * Surface container card with liquid glass styling, rounded corners, and optional tactile click feedback.
+ * Adapts dynamically to light and dark theme modes.
  */
 @Composable
 fun FocusGramCard(
     modifier: Modifier = Modifier,
-    backgroundColor: Color = DarkCard,
-    borderColor: Color = DarkBorder,
+    backgroundColor: Color = if (isSystemInDarkTheme()) DarkCard else Color.White,
+    borderColor: Color = if (isSystemInDarkTheme()) DarkBorder else LightBorder,
     onClick: (() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
+    val isDark = isSystemInDarkTheme()
     val shape = RoundedCornerShape(16.dp)
     val glassBorderBrush = Brush.verticalGradient(
-        colors = listOf(
-            Color(0x2DFFFFFF),
-            Color(0x0DFFFFFF)
-        )
+        colors = if (isDark) {
+            listOf(
+                Color(0x2DFFFFFF),
+                Color(0x0DFFFFFF)
+            )
+        } else {
+            listOf(
+                Color(0x1F000000),
+                Color(0x0D000000)
+            )
+        }
     )
     val glassBgBrush = Brush.verticalGradient(
-        colors = listOf(
-            backgroundColor.copy(alpha = 0.90f),
-            backgroundColor.copy(alpha = 0.78f)
-        )
+        colors = if (isDark) {
+            listOf(
+                backgroundColor.copy(alpha = 0.90f),
+                backgroundColor.copy(alpha = 0.78f)
+            )
+        } else {
+            listOf(
+                backgroundColor,
+                backgroundColor
+            )
+        }
     )
 
     val cardModifier = if (onClick != null) {
@@ -95,8 +114,8 @@ fun FocusGramCard(
 @Composable
 fun FocusGramSectionHeader(
     title: String,
-    subtitle: String? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    subtitle: String? = null
 ) {
     Column(
         modifier = modifier
@@ -131,8 +150,11 @@ fun FocusGramTopBar(
     onBack: (() -> Unit)? = null,
     actions: @Composable (() -> Unit)? = null
 ) {
+    val isDark = isSystemInDarkTheme()
+    val barColor = if (isDark) PureBlack else Color(0xFFF2F2F7)
+    val contentColor = if (isDark) TextPrimary else PureBlack
     Surface(
-        color = PureBlack,
+        color = barColor,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -149,7 +171,7 @@ fun FocusGramTopBar(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
-                        tint = TextPrimary
+                        tint = contentColor
                     )
                 }
                 Spacer(modifier = Modifier.width(8.dp))
@@ -160,7 +182,7 @@ fun FocusGramTopBar(
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.SemiBold
                 ),
-                color = TextPrimary,
+                color = contentColor,
                 modifier = Modifier.weight(1f)
             )
 
@@ -181,6 +203,7 @@ fun FocusGramToggleRow(
     modifier: Modifier = Modifier,
     icon: ImageVector? = null
 ) {
+    val isDark = isSystemInDarkTheme()
     FocusGramCard(
         modifier = modifier.fillMaxWidth(),
         onClick = { onCheckedChange(!checked) }
@@ -196,7 +219,7 @@ fun FocusGramToggleRow(
                     modifier = Modifier
                         .size(38.dp)
                         .clip(CircleShape)
-                        .background(DarkCardElevated),
+                        .background(if (isDark) DarkCardElevated else Color(0xFFE5E5EA)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -215,7 +238,7 @@ fun FocusGramToggleRow(
                     style = MaterialTheme.typography.bodyLarge.copy(
                         fontWeight = FontWeight.Medium
                     ),
-                    color = TextPrimary
+                    color = if (isDark) TextPrimary else PureBlack
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
@@ -231,10 +254,10 @@ fun FocusGramToggleRow(
                 checked = checked,
                 onCheckedChange = onCheckedChange,
                 colors = SwitchDefaults.colors(
-                    checkedThumbColor = PureBlack,
+                    checkedThumbColor = if (isDark) PureBlack else PureWhite,
                     checkedTrackColor = InstagramBlue,
                     uncheckedThumbColor = TextMuted,
-                    uncheckedTrackColor = DarkCardElevated
+                    uncheckedTrackColor = if (isDark) DarkCardElevated else Color(0xFFE5E5EA)
                 )
             )
         }

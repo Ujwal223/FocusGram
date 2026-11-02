@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -24,6 +25,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,8 +43,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ujwal.focusgram.core.ui.theme.FocusGold
 import com.ujwal.focusgram.core.ui.theme.InstagramBlue
 import com.ujwal.focusgram.core.ui.theme.PureBlack
+import com.ujwal.focusgram.core.ui.theme.PureWhite
 import com.ujwal.focusgram.core.utils.HapticHelper
 import kotlinx.coroutines.delay
 
@@ -78,9 +82,11 @@ fun BreathGateScreen(
         label = "breath_scale"
     )
 
+    val isDark = isSystemInDarkTheme()
+
     Surface(
         modifier = Modifier.fillMaxSize(),
-        color = PureBlack
+        color = if (isDark) PureBlack else PureWhite
     ) {
         Column(
             modifier = Modifier
@@ -98,7 +104,7 @@ fun BreathGateScreen(
                     fontSize = 21.sp,
                     lineHeight = 28.sp
                 ),
-                color = Color.White
+                color = if (isDark) Color.White else Color(0xFF111115)
             )
 
             Spacer(modifier = Modifier.height(72.dp))
@@ -123,7 +129,7 @@ fun BreathGateScreen(
                 Box(
                     modifier = Modifier
                         .size(45.dp)
-                        .background(Color.White.copy(alpha = 0.25f), CircleShape)
+                        .background((if (isDark) Color.White else PureBlack).copy(alpha = 0.25f), CircleShape)
                 )
             }
 
@@ -133,7 +139,7 @@ fun BreathGateScreen(
                 text = if (canContinue) "Breathed." else "Take a deep breath for $secondsRemaining seconds...",
                 style = MaterialTheme.typography.bodyLarge.copy(
                     fontStyle = FontStyle.Italic,
-                    color = Color.White.copy(alpha = 0.75f)
+                    color = if (isDark) Color.White.copy(alpha = 0.75f) else Color.Black.copy(alpha = 0.75f)
                 ),
                 textAlign = TextAlign.Center
             )
@@ -148,18 +154,33 @@ fun BreathGateScreen(
                     .height(52.dp),
                 shape = RoundedCornerShape(26.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.White,
-                    contentColor = Color.Black,
-                    disabledContainerColor = Color.White.copy(alpha = 0.12f),
-                    disabledContentColor = Color.White.copy(alpha = 0.35f)
+                    containerColor = if (isDark) Color.White else PureBlack,
+                    contentColor = if (isDark) Color.Black else PureWhite,
+                    disabledContainerColor = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f),
+                    disabledContentColor = if (isDark) Color.White.copy(alpha = 0.35f) else Color.Black.copy(alpha = 0.35f)
                 )
             ) {
                 Text(
                     text = "Continue to Instagram",
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 15.sp,
-                    color = if (canContinue) Color.Black else Color.White.copy(alpha = 0.35f)
+                    color = if (canContinue) (if (isDark) Color.Black else PureWhite) else (if (isDark) Color.White.copy(alpha = 0.35f) else Color.Black.copy(alpha = 0.35f))
                 )
+            }
+
+            if (com.ujwal.focusgram.BuildConfig.DEBUG) {
+                Spacer(modifier = Modifier.height(14.dp))
+                TextButton(
+                    onClick = onFinish,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "⚡ Skip Breathing (Debug)",
+                        color = FocusGold,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                }
             }
         }
     }

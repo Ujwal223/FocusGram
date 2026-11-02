@@ -57,11 +57,22 @@ class ScreenTimeService : Service() {
         super.onCreate()
         createNotificationChannel()
         createIntervalNotificationChannel()
-        val minutes = sessionSeconds / 60
-        val secs = sessionSeconds % 60
-        val timeStr = String.format("%02d:%02d", minutes, secs)
-        val initialTitle = "Session Timer: $timeStr"
-        val initialNotification = buildNotification(initialTitle, getSessionSubtitle(false))
+
+        // If service is cold-started or recreated while an active session exists, sync persisted progress immediately
+        try {
+            val activeSession = FocusGramApp.instance.settingsRepository.getSettingsSync()
+            if (activeSession.activeSessionIsActive && activeSession.activeSessionElapsedSeconds > 0) {
+                sessionSeconds = activeSession.activeSessionElapsedSeconds
+                if (activeSession.activeSessionDurationMinutes > 0) {
+                    sessionDurationMinutes = activeSession.activeSessionDurationMinutes
+                }
+                sessionStartTime = System.currentTimeMillis() - (sessionSeconds * 1000L)
+            }
+        } catch (_: Exception) {}
+
+        val initialTitle = "Session Timer"
+        val useChrono = sessionStartTime > 0L
+        val initialNotification = buildNotification(initialTitle, getSessionSubtitle(false), useChronometer = useChrono)
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 ServiceCompat.startForeground(
@@ -157,10 +168,14 @@ class ScreenTimeService : Service() {
     }
 
     private fun startTracking() {
-        if (trackingJob?.isActive == true) return
+        if (trackingJob?.isActive == true) {
+            sessionStartTime = System.currentTimeMillis() - (sessionSeconds * 1000L)
+            updateSessionNotification(useChronometer = true)
+            return
+        }
 
         sessionStartTime = System.currentTimeMillis() - (sessionSeconds * 1000L)
-        updateSessionNotification()
+        updateSessionNotification(useChronometer = true)
 
         trackingJob = serviceScope.launch {
             val app = FocusGramApp.instance
@@ -169,7 +184,12 @@ class ScreenTimeService : Service() {
             while (isActive) {
                 delay(1000L)
                 sessionSeconds++
-                updateSessionNotification()
+
+                // Update notification text every 60 seconds (or on route update)
+                // Chronometer in System UI automatically updates the timer display every second without IPC overhead
+                if (sessionSeconds % 60 == 0) {
+                    updateSessionNotification(useChronometer = true)
+                }
 
                 // Check 5-minute interval alert
                 if (sessionSeconds > 0 && sessionSeconds % 300 == 0) {
@@ -186,12 +206,9 @@ class ScreenTimeService : Service() {
         }
     }
 
-    private fun updateSessionNotification() {
-        val minutes = sessionSeconds / 60
-        val secs = sessionSeconds % 60
-        val timeStr = String.format("%02d:%02d", minutes, secs)
-        val title = "Session Timer: $timeStr"
-        updateNotification(title, getSessionSubtitle(false))
+    private fun updateSessionNotification(useChronometer: Boolean = true) {
+        val title = "Session Timer"
+        updateNotification(title, getSessionSubtitle(false), useChronometer, isPaused = false)
     }
 
     private fun pauseTracking() {
@@ -199,8 +216,8 @@ class ScreenTimeService : Service() {
         trackingJob = null
         val minutes = sessionSeconds / 60
         val secs = sessionSeconds % 60
-        val timeStr = String.format("%02d:%02d", minutes, secs)
-        updateNotification("Session Timer: $timeStr (Paused)", getSessionSubtitle(true))
+        val timeStr = String.format(Locale.US, "%02d:%02d", minutes, secs)
+        updateNotification("Session Timer: $timeStr (Paused)", getSessionSubtitle(true), useChronometer = false, isPaused = true)
     }
 
     private fun stopTracking() {
@@ -208,7 +225,7 @@ class ScreenTimeService : Service() {
         trackingJob = null
 
         val endTime = System.currentTimeMillis()
-        val duration = ((endTime - sessionStartTime) / 1000).toInt()
+        val duration = if (sessionSeconds > 0) sessionSeconds else ((endTime - sessionStartTime) / 1000).toInt()
 
         if (duration > 5) {
             serviceScope.launch {
@@ -276,7 +293,7 @@ class ScreenTimeService : Service() {
             val alert = NotificationCompat.Builder(this, CHANNEL_INTERVAL_ID)
                 .setContentTitle("Session Alert: $minutesElapsed min")
                 .setContentText("You've been using Instagram for $minutesElapsed minutes. Stay mindful.")
-                .setSmallIcon(R.drawable.ic_notification)
+                .setSmallIcon(R.drawable.ic_clock_notification)
                 .setContentIntent(pendingIntent)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setDefaults(NotificationCompat.DEFAULT_ALL)
@@ -290,7 +307,12 @@ class ScreenTimeService : Service() {
         }
     }
 
-    private fun buildNotification(title: String, content: String): Notification {
+    private fun buildNotification(
+        title: String,
+        content: String,
+        useChronometer: Boolean = false,
+        isPaused: Boolean = false
+    ): Notification {
         val launchIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
@@ -301,10 +323,12 @@ class ScreenTimeService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+        val iconRes = if (isPaused) R.drawable.ic_pause_notification else R.drawable.ic_clock_notification
+
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(content)
-            .setSmallIcon(R.drawable.ic_notification)
+            .setSmallIcon(iconRes)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setAutoCancel(false)
@@ -312,15 +336,26 @@ class ScreenTimeService : Service() {
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
+
+        if (useChronometer && sessionStartTime > 0L) {
+            builder.setUsesChronometer(true)
+                .setWhen(sessionStartTime)
+        }
+
+        val notification = builder.build()
         notification.flags = notification.flags or Notification.FLAG_ONGOING_EVENT or Notification.FLAG_NO_CLEAR
         return notification
     }
 
-    private fun updateNotification(title: String, content: String) {
+    private fun updateNotification(
+        title: String,
+        content: String,
+        useChronometer: Boolean = false,
+        isPaused: Boolean = false
+    ) {
         try {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.notify(NOTIFICATION_ID, buildNotification(title, content))
+            manager.notify(NOTIFICATION_ID, buildNotification(title, content, useChronometer, isPaused))
         } catch (e: Exception) {
             Log.w(TAG, "Failed to update notification: ${e.message}")
         }
@@ -347,6 +382,10 @@ class ScreenTimeService : Service() {
 
         fun startSession(context: Context, isReels: Boolean = false, initialSeconds: Int = 0, sessionDurationMinutes: Int = 15) {
             try {
+                if (!androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+                    Log.d(TAG, "Notifications disabled at system level; skipping ScreenTimeService startup.")
+                    return
+                }
                 val intent = Intent(context, ScreenTimeService::class.java).apply {
                     action = ACTION_START
                     putExtra(EXTRA_IS_REELS, isReels)

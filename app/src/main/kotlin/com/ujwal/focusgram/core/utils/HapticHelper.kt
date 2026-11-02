@@ -141,4 +141,30 @@ object HapticHelper {
             Log.e(TAG, "Failed to vibrate success pulse: ${e.message}", e)
         }
     }
+
+    /**
+     * Safe platform confirmation haptic feedback with backward compatibility for API < 30.
+     */
+    fun performConfirm(view: View?) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                view?.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+            } else {
+                view?.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            }
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * Safe platform rejection haptic feedback with backward compatibility for API < 30.
+     */
+    fun performReject(view: View?) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                view?.performHapticFeedback(HapticFeedbackConstants.REJECT)
+            } else {
+                view?.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            }
+        } catch (_: Exception) {}
+    }
 }

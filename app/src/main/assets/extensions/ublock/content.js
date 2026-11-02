@@ -6,19 +6,35 @@
 'use strict';
 
 (function () {
+    // Skip entirely in the headless background direct message session to eliminate
+    // 300ms cosmetic filtering intervals and preserve battery in the background.
+    try {
+        const href = (window.location.href || '').toLowerCase();
+        if (href.includes('focusgram_bg_dm=1')) {
+            return;
+        }
+    } catch (_) {}
+
     const COSMETIC_STYLE_ID = 'focusgram-cosmetic-filters';
     let adBlockingEnabled = true;
 
     function isAuthPage() {
         try {
+            const host = (window.location.hostname || '').toLowerCase();
+            if (host.includes('facebook.com') || host.includes('accountscenter.') || host.includes('meta.com')) {
+                return true;
+            }
             const path = (window.location.pathname || '').toLowerCase();
             if (path.includes('/accounts/edit')) {
                 return false;
             }
-            if (path.startsWith('/accounts') || path.startsWith('/login') || path.startsWith('/signup') || path.startsWith('/two_factor') || path.startsWith('/challenge')) {
+            if (path.startsWith('/accounts') || path.startsWith('/login') || path.startsWith('/signup') ||
+                path.startsWith('/two_factor') || path.startsWith('/challenge') || path.startsWith('/onetap') ||
+                path.startsWith('/privacy')) {
                 return true;
             }
-            if (document.getElementById('loginForm') || document.querySelector('form[action*="login"], form input[type="password"]')) {
+            if (document.getElementById('loginForm') ||
+                document.querySelector('form[action*="login"], form[action*="signup"], form input[type="password"], input[name="password"]')) {
                 return true;
             }
         } catch (_) {}
@@ -197,10 +213,10 @@
     });
 
     setInterval(() => {
-        if (adBlockingEnabled) {
+        if (adBlockingEnabled && !document.hidden) {
             filterDynamicSponsoredPosts();
         }
-    }, 300);
+    }, 1000);
 
     function init() {
         updateCosmeticFilters();

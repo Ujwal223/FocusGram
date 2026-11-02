@@ -168,6 +168,14 @@ object MediaDownloadHelper {
             return
         }
 
+        val uri = try { Uri.parse(url) } catch (_: Exception) { null }
+        val scheme = uri?.scheme?.lowercase() ?: ""
+        if (scheme != "http" && scheme != "https" && !url.startsWith("data:")) {
+            Log.w(TAG, "Rejected download request with unsafe scheme: $scheme")
+            triggerDownloadFailure(context, "Invalid or unsupported download URL scheme")
+            return
+        }
+
         val now = System.currentTimeMillis()
         if (url == lastDownloadUrl && (now - lastDownloadTimestamp) < 1500L) {
             Log.d(TAG, "Ignoring duplicate download trigger within debounce window")
@@ -204,8 +212,14 @@ object MediaDownloadHelper {
                 }
             }
 
-            val uri = Uri.parse(url)
-            val request = DownloadManager.Request(uri).apply {
+            // For videos, direct in-process HTTP streaming bypasses DownloadManager service queue delays,
+            // reliably follows Instagram CDN tokens, streams perimeter progress, and saves directly via MediaStore
+            if (isVideo) {
+                downloadDirectHttp(context, url, targetFilename, isVideo = true)
+                return
+            }
+
+            val request = DownloadManager.Request(uri!!).apply {
                 setTitle(targetFilename)
                 setDescription("FocusGram Media Download")
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
@@ -303,30 +317,17 @@ object MediaDownloadHelper {
                                 }
                             } else {
                                 cursor?.close()
-                                if (lastProgress >= 0.7f) {
-                                    isDone = true
-                                    _downloadProgressFlow.value = DownloadProgressState(
-                                        isDownloading = false,
-                                        progress = 1.0f,
-                                        filename = targetFilename,
-                                        isCompleted = true,
-                                        isFailed = false
-                                    )
-                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                                        Toast.makeText(context, "Download complete", Toast.LENGTH_SHORT).show()
-                                    }
-                                    delay(1200L)
-                                    _downloadProgressFlow.value = DownloadProgressState(
-                                        isDownloading = false,
-                                        progress = 0f,
-                                        filename = "",
-                                        isCompleted = false
-                                    )
-                                }
+                                isDone = true
+                                Log.w(TAG, "DownloadManager query cursor unavailable, falling back to direct HTTP")
+                                downloadDirectHttp(context, url, targetFilename, isVideo)
                             }
                         } catch (e: Exception) {
                             Log.w(TAG, "Error checking download progress: ${e.message}")
                         }
+                    }
+                    if (!isDone) {
+                        Log.w(TAG, "DownloadManager timed out after 60s, falling back to direct HTTP")
+                        downloadDirectHttp(context, url, targetFilename, isVideo)
                     }
                 }
             } else {
@@ -350,41 +351,52 @@ object MediaDownloadHelper {
                     isCompleted = false,
                     isFailed = false
                 )
-                val connection = (java.net.URL(url).openConnection() as java.net.HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 15000
-                    readTimeout = 30000
-                    setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36")
-                    setRequestProperty("Referer", "https://www.instagram.com/")
-                    setRequestProperty("Accept", "*/*")
-                    instanceFollowRedirects = true
-                }
-                connection.connect()
-                val code = connection.responseCode
-                if (code in 200..299) {
-                    val contentLength = connection.contentLengthLong
-                    val bytesOut = java.io.ByteArrayOutputStream()
-                    connection.inputStream.use { input ->
-                        val buffer = ByteArray(8192)
-                        var read: Int
-                        var downloaded = 0L
-                        while (input.read(buffer).also { read = it } != -1) {
-                            bytesOut.write(buffer, 0, read)
-                            downloaded += read
-                            if (contentLength > 0) {
-                                val prog = (downloaded.toFloat() / contentLength.toFloat()).coerceIn(0.08f, 0.98f)
-                                _downloadProgressFlow.value = DownloadProgressState(
-                                    isDownloading = true,
-                                    progress = prog,
-                                    filename = targetFilename,
-                                    isCompleted = false,
-                                    isFailed = false
-                                )
-                            }
+                var currentUrl = url
+                var redirects = 0
+                var connection: java.net.HttpURLConnection
+                var code: Int
+                while (true) {
+                    connection = (java.net.URL(currentUrl).openConnection() as java.net.HttpURLConnection).apply {
+                        requestMethod = "GET"
+                        connectTimeout = 15000
+                        readTimeout = 30000
+                        setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36")
+                        setRequestProperty("Referer", "https://www.instagram.com/")
+                        setRequestProperty("Accept", "*/*")
+                        instanceFollowRedirects = true
+                    }
+                    connection.connect()
+                    code = connection.responseCode
+                    if (code in 300..399 && redirects < 5) {
+                        val location = connection.getHeaderField("Location")
+                        if (!location.isNullOrBlank()) {
+                            currentUrl = location
+                            redirects++
+                            connection.disconnect()
+                            continue
                         }
                     }
-                    val data = bytesOut.toByteArray()
-                    saveBytesToDownloads(context, data, targetFilename, isVideo)
+                    break
+                }
+                if (code in 200..299) {
+                    val contentLength = connection.contentLengthLong
+                    connection.inputStream.use { rawInput ->
+                        saveStreamToDownloads(
+                            context = context,
+                            input = rawInput,
+                            filename = targetFilename,
+                            isVideo = isVideo,
+                            contentLength = contentLength
+                        ) { prog ->
+                            _downloadProgressFlow.value = DownloadProgressState(
+                                isDownloading = true,
+                                progress = prog,
+                                filename = targetFilename,
+                                isCompleted = false,
+                                isFailed = false
+                            )
+                        }
+                    }
                     _downloadProgressFlow.value = DownloadProgressState(
                         isDownloading = false,
                         progress = 1.0f,
@@ -403,16 +415,50 @@ object MediaDownloadHelper {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Direct HTTP download error: ${e.message}", e)
+                val dmUri = try { Uri.parse(url) } catch (_: Exception) { null }
+                if (dmUri != null) {
+                    try {
+                        val request = DownloadManager.Request(dmUri).apply {
+                            setTitle(targetFilename)
+                            setDescription("FocusGram Media Download")
+                            setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                            setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, targetFilename)
+                            setAllowedOverMetered(true)
+                            setAllowedOverRoaming(true)
+                            addRequestHeader("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36")
+                            addRequestHeader("Referer", "https://www.instagram.com/")
+                            addRequestHeader("Accept", "*/*")
+                        }
+                        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+                        manager?.enqueue(request)
+                        Log.i(TAG, "Fell back to DownloadManager for $targetFilename")
+                        return@launch
+                    } catch (dmEx: Exception) {
+                        Log.w(TAG, "DownloadManager fallback failed: ${dmEx.message}")
+                    }
+                }
                 triggerDownloadFailure(context, "Download failed: ${e.message ?: "Network error"}")
             }
         }
     }
 
-    private fun saveBytesToDownloads(context: Context, bytes: ByteArray, filename: String, isVideo: Boolean) {
-        // Inspect header magic bytes (JPEG SOI 0xFFD8FF or PNG 0x89504E47) to guard against misidentified media
-        val isActuallyImage = bytes.size >= 4 && (
-            (bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()) ||
-            (bytes[0] == 0x89.toByte() && bytes[1] == 0x50.toByte() && bytes[2] == 0x4E.toByte() && bytes[3] == 0x47.toByte())
+    private fun saveStreamToDownloads(
+        context: Context,
+        input: java.io.InputStream,
+        filename: String,
+        isVideo: Boolean,
+        contentLength: Long,
+        onProgress: ((Float) -> Unit)? = null
+    ) {
+        val bufferedInput = java.io.BufferedInputStream(input)
+        bufferedInput.mark(8)
+        val header = ByteArray(4)
+        val headerRead = bufferedInput.read(header, 0, 4)
+        bufferedInput.reset()
+
+        val isActuallyImage = headerRead >= 3 && (
+            (header[0] == 0xFF.toByte() && header[1] == 0xD8.toByte() && header[2] == 0xFF.toByte()) ||
+            (headerRead >= 4 && header[0] == 0x89.toByte() && header[1] == 0x50.toByte() && header[2] == 0x4E.toByte() && header[3] == 0x47.toByte())
         )
         val resolvedIsVideo = if (isActuallyImage) false else isVideo
         val resolvedFilename = if (isActuallyImage && filename.endsWith(".mp4", ignoreCase = true)) {
@@ -422,26 +468,82 @@ object MediaDownloadHelper {
         }
         val mimeType = if (resolvedIsVideo) "video/mp4" else "image/jpeg"
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        var finalItemUri: Uri? = null
+        val outputStream: java.io.OutputStream? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, resolvedFilename)
                 put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
                 put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
-            val collection = if (resolvedIsVideo) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-            val itemUri = context.contentResolver.insert(collection, values)
+            val itemUri = try {
+                context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed inserting into MediaStore.Downloads: ${e.message}")
+                null
+            }
+            finalItemUri = itemUri
             if (itemUri != null) {
-                context.contentResolver.openOutputStream(itemUri)?.use { out ->
-                    out.write(bytes)
+                context.contentResolver.openOutputStream(itemUri)
+            } else {
+                // Secondary fallback on Q+
+                val fallbackValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, resolvedFilename)
+                    put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, if (resolvedIsVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES)
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
+                val fallbackCollection = if (resolvedIsVideo) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                val fallbackUri = try {
+                    context.contentResolver.insert(fallbackCollection, fallbackValues)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed inserting into fallback collection: ${e.message}")
+                    null
+                }
+                finalItemUri = fallbackUri
+                if (fallbackUri != null) context.contentResolver.openOutputStream(fallbackUri) else null
             }
         } else {
             @Suppress("DEPRECATION")
             val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
             val file = File(downloadsDir, resolvedFilename)
-            FileOutputStream(file).use { out ->
-                out.write(bytes)
+            FileOutputStream(file)
+        }
+
+        outputStream?.use { out ->
+            val buffer = ByteArray(8192)
+            var read: Int
+            var downloaded = 0L
+            while (bufferedInput.read(buffer).also { read = it } != -1) {
+                out.write(buffer, 0, read)
+                downloaded += read
+                if (contentLength > 0 && onProgress != null) {
+                    val prog = (downloaded.toFloat() / contentLength.toFloat()).coerceIn(0.08f, 0.98f)
+                    onProgress(prog)
+                }
+            }
+            out.flush()
+        } ?: throw java.io.IOException("Unable to open output stream in Downloads directory")
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && finalItemUri != null) {
+            try {
+                val completedValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.IS_PENDING, 0)
+                }
+                context.contentResolver.update(finalItemUri, completedValues, null, null)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed updating IS_PENDING: ${e.message}")
             }
         }
+    }
+
+    private fun saveBytesToDownloads(context: Context, bytes: ByteArray, filename: String, isVideo: Boolean) {
+        saveStreamToDownloads(
+            context = context,
+            input = java.io.ByteArrayInputStream(bytes),
+            filename = filename,
+            isVideo = isVideo,
+            contentLength = bytes.size.toLong()
+        )
     }
 }

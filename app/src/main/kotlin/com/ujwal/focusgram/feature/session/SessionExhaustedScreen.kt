@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,6 +41,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ujwal.focusgram.core.ui.theme.PureBlack
+import com.ujwal.focusgram.core.ui.theme.PureWhite
 import com.ujwal.focusgram.core.utils.HapticHelper
 import com.ujwal.focusgram.core.utils.TimeFormatters
 
@@ -54,8 +56,8 @@ fun SessionExhaustedScreen(
     extensionsRemaining: Int,
     onExit: () -> Unit,
     onWatchAdToExtend: () -> Unit,
-    onDebugBypass: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onDebugBypass: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
 
@@ -68,10 +70,12 @@ fun SessionExhaustedScreen(
         onExit()
     }
 
+    val isDark = isSystemInDarkTheme()
+
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(PureBlack)
+            .background(if (isDark) PureBlack else PureWhite)
             // Consumes all touches so clicks never bleed through to GeckoView underneath
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -91,14 +95,14 @@ fun SessionExhaustedScreen(
                 modifier = Modifier
                     .size(64.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF1C1C1E))
-                    .border(1.dp, Color(0xFF2C2C2E), CircleShape),
+                    .background(if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
+                    .border(1.dp, if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.HourglassTop,
                     contentDescription = null,
-                    tint = Color.White,
+                    tint = if (isDark) Color.White else PureBlack,
                     modifier = Modifier.size(30.dp)
                 )
             }
@@ -107,7 +111,7 @@ fun SessionExhaustedScreen(
 
             Text(
                 text = "Time Reached",
-                color = Color.White,
+                color = if (isDark) Color.White else Color(0xFF111115),
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = (-0.5).sp
@@ -117,7 +121,7 @@ fun SessionExhaustedScreen(
 
             Text(
                 text = "Your planned Instagram session has ended.\nTake a mindful break from screens.",
-                color = Color(0xFF8E8E93),
+                color = if (isDark) Color(0xFF8E8E93) else Color(0xFF6C6C70),
                 fontSize = 15.sp,
                 textAlign = TextAlign.Center,
                 lineHeight = 20.sp,
@@ -144,8 +148,8 @@ fun SessionExhaustedScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xFF1C1C1E))
-                    .border(0.5.dp, Color(0xFF2C2C2E), RoundedCornerShape(16.dp))
+                    .background(if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
+                    .border(0.5.dp, if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA), RoundedCornerShape(16.dp))
                     .padding(horizontal = 16.dp, vertical = 14.dp)
             ) {
                 Column {
@@ -156,19 +160,19 @@ fun SessionExhaustedScreen(
                     ) {
                         Text(
                             text = "Session Duration",
-                            color = Color(0xFF8E8E93),
+                            color = if (isDark) Color(0xFF8E8E93) else Color(0xFF6C6C70),
                             fontSize = 14.sp
                         )
                         Text(
                             text = "${TimeFormatters.formatMinutes(elapsedMinutes)} completed",
-                            color = Color.White,
+                            color = if (isDark) Color.White else Color(0xFF111115),
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
 
                     HorizontalDivider(
-                        color = Color(0xFF2C2C2E),
+                        color = if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA),
                         thickness = 0.5.dp,
                         modifier = Modifier.padding(vertical = 12.dp)
                     )
@@ -180,12 +184,12 @@ fun SessionExhaustedScreen(
                     ) {
                         Text(
                             text = "Extensions Available",
-                            color = Color(0xFF8E8E93),
+                            color = if (isDark) Color(0xFF8E8E93) else Color(0xFF6C6C70),
                             fontSize = 14.sp
                         )
                         Text(
                             text = "$extensionsRemaining / 3 remaining",
-                            color = if (extensionsRemaining > 0) Color.White else Color(0xFFFF453A),
+                            color = if (extensionsRemaining > 0) (if (isDark) Color.White else Color(0xFF111115)) else Color(0xFFFF453A),
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -202,13 +206,13 @@ fun SessionExhaustedScreen(
                     .height(52.dp),
                 shape = RoundedCornerShape(26.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.White,
-                    contentColor = Color.Black
+                    containerColor = if (isDark) Color.White else PureBlack,
+                    contentColor = if (isDark) Color.Black else PureWhite
                 )
             ) {
                 Text(
                     text = "Close Instagram",
-                    color = Color.Black,
+                    color = if (isDark) Color.Black else PureWhite,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -223,10 +227,10 @@ fun SessionExhaustedScreen(
                         .fillMaxWidth()
                         .height(52.dp),
                     shape = RoundedCornerShape(26.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF2C2C2E)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)),
                     colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = Color(0xFF1C1C1E),
-                        contentColor = Color.White
+                        containerColor = if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7),
+                        contentColor = if (isDark) Color.White else PureBlack
                     )
                 ) {
                     Row(
@@ -236,13 +240,13 @@ fun SessionExhaustedScreen(
                         Icon(
                             imageVector = Icons.Default.PlayArrow,
                             contentDescription = null,
-                            tint = Color.White,
+                            tint = if (isDark) Color.White else PureBlack,
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "Watch Ad to Extend (+3 min)",
-                            color = Color.White,
+                            color = if (isDark) Color.White else PureBlack,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold
                         )

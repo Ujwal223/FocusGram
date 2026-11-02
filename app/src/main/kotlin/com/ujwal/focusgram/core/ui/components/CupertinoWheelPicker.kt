@@ -13,6 +13,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -44,6 +45,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ujwal.focusgram.core.ui.theme.PureBlack
+import com.ujwal.focusgram.core.ui.theme.PureWhite
 import kotlin.math.abs
 
 /**
@@ -102,6 +104,13 @@ fun CupertinoWheelPicker(
             }
     }
 
+    val isDark = isSystemInDarkTheme()
+    val fadeColor = if (isDark) PureBlack else PureWhite
+    val centerHighlightBg = if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f)
+    val centerHighlightBorder = if (isDark) Color.White.copy(alpha = 0.15f) else Color.Black.copy(alpha = 0.10f)
+    val selectedTextColor = if (isDark) Color.White else Color(0xFF111115)
+    val selectedLabelColor = if (isDark) Color.White.copy(alpha = 0.85f) else Color(0xFF111115).copy(alpha = 0.85f)
+
     Box(
         modifier = modifier
             .height(totalHeight)
@@ -113,10 +122,10 @@ fun CupertinoWheelPicker(
                 .fillMaxWidth()
                 .height(itemHeight)
                 .clip(RoundedCornerShape(8.dp))
-                .background(Color.White.copy(alpha = 0.08f))
+                .background(centerHighlightBg)
                 .border(
                     width = 0.5.dp,
-                    color = Color.White.copy(alpha = 0.15f),
+                    color = centerHighlightBorder,
                     shape = RoundedCornerShape(8.dp)
                 )
         )
@@ -166,7 +175,7 @@ fun CupertinoWheelPicker(
                     val displayText = labelProvider?.invoke(itemValue) ?: itemValue.toString()
                     Text(
                         text = displayText,
-                        color = if (isSelected) Color.White else Color(0xFF8E8E93),
+                        color = if (isSelected) selectedTextColor else Color(0xFF8E8E93),
                         fontSize = if (isSelected) 30.sp else 24.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                         textAlign = TextAlign.Center
@@ -174,7 +183,7 @@ fun CupertinoWheelPicker(
                     if (label.isNotBlank() && labelProvider == null) {
                         Text(
                             text = " $label",
-                            color = if (isSelected) Color.White.copy(alpha = 0.85f) else Color(0xFF636366),
+                            color = if (isSelected) selectedLabelColor else Color(0xFF636366),
                             fontSize = if (isSelected) 17.sp else 14.sp,
                             fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                             modifier = Modifier.padding(start = 4.dp, top = 2.dp)
@@ -193,8 +202,8 @@ fun CupertinoWheelPicker(
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                PureBlack,
-                                PureBlack.copy(alpha = 0.85f),
+                                fadeColor,
+                                fadeColor.copy(alpha = 0.85f),
                                 Color.Transparent
                             )
                         )
@@ -210,8 +219,8 @@ fun CupertinoWheelPicker(
                         Brush.verticalGradient(
                             colors = listOf(
                                 Color.Transparent,
-                                PureBlack.copy(alpha = 0.85f),
-                                PureBlack
+                                fadeColor.copy(alpha = 0.85f),
+                                fadeColor
                             )
                         )
                     )
@@ -272,6 +281,12 @@ fun <T> CupertinoOptionWheelPicker(
             }
     }
 
+    val isDark = isSystemInDarkTheme()
+    val fadeColor = if (isDark) PureBlack else PureWhite
+    val centerHighlightBg = if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f)
+    val centerHighlightBorder = if (isDark) Color.White.copy(alpha = 0.15f) else Color.Black.copy(alpha = 0.10f)
+    val selectedTextColor = if (isDark) Color.White else Color(0xFF111115)
+
     Box(
         modifier = modifier
             .height(totalHeight)
@@ -283,10 +298,10 @@ fun <T> CupertinoOptionWheelPicker(
                 .fillMaxWidth()
                 .height(itemHeight)
                 .clip(RoundedCornerShape(8.dp))
-                .background(Color.White.copy(alpha = 0.08f))
+                .background(centerHighlightBg)
                 .border(
                     width = 0.5.dp,
-                    color = Color.White.copy(alpha = 0.15f),
+                    color = centerHighlightBorder,
                     shape = RoundedCornerShape(8.dp)
                 )
         )
@@ -335,7 +350,7 @@ fun <T> CupertinoOptionWheelPicker(
                 ) {
                     Text(
                         text = displayLabel,
-                        color = if (isSelected) Color.White else Color(0xFF8E8E93),
+                        color = if (isSelected) selectedTextColor else Color(0xFF8E8E93),
                         fontSize = if (isSelected) 18.sp else 14.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                         textAlign = TextAlign.Center
@@ -353,8 +368,8 @@ fun <T> CupertinoOptionWheelPicker(
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                PureBlack,
-                                PureBlack.copy(alpha = 0.75f),
+                                fadeColor,
+                                fadeColor.copy(alpha = 0.75f),
                                 Color.Transparent
                             )
                         )
@@ -370,8 +385,8 @@ fun <T> CupertinoOptionWheelPicker(
                         Brush.verticalGradient(
                             colors = listOf(
                                 Color.Transparent,
-                                PureBlack.copy(alpha = 0.75f),
-                                PureBlack
+                                fadeColor.copy(alpha = 0.75f),
+                                fadeColor
                             )
                         )
                     )

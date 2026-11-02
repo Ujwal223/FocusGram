@@ -7,52 +7,586 @@
 'use strict';
 
 (function () {
+    // Only execute in the top-level browsing context
+    if (window !== window.top) return;
+
+    // If running in the headless background direct message session, bail out immediately.
+    // The background session only monitors incoming DMs via dm_watcher.js and must never
+    // inject foreground UI bars, report URL changes, trigger theme changes, or hijack ports.
+    try {
+        const ua = navigator.userAgent || '';
+        const href = (window.location.href || '').toLowerCase();
+        if (ua.includes('FocusGramBgDm') || href.includes('focusgram_bg_dm=1')) {
+            return;
+        }
+    } catch (_) {}
+
     function postToNative(message) {
         if (!message) return;
         try {
             if (typeof browser !== 'undefined' && browser.runtime) {
-                if (browser.runtime.sendNativeMessage) {
-                    browser.runtime.sendNativeMessage("focusgram", message).catch(() => {});
-                }
-                if (browser.runtime.sendMessage) {
-                    browser.runtime.sendMessage(message).catch(() => {});
+                // Deliver directly to Android from this tab's GeckoSession. The
+                // background-port route remains a fallback for Gecko versions that
+                // don't expose native messaging to content scripts.
+                const forwardToBackground = function () {
+                    if (typeof browser.runtime.sendMessage === 'function') {
+                        browser.runtime.sendMessage(message).catch(() => {});
+                    }
+                };
+                if (typeof browser.runtime.sendNativeMessage === 'function') {
+                    try {
+                        browser.runtime.sendNativeMessage('focusgram', message).catch(forwardToBackground);
+                    } catch (_) {
+                        forwardToBackground();
+                    }
+                } else if (typeof browser.runtime.sendMessage === 'function') {
+                    forwardToBackground();
                 }
             }
         } catch (_) {}
     }
 
+    // Content scripts run in an isolated world, so replacing navigator.clipboard
+    // directly does not see calls made by Instagram itself. Install this bridge in
+    // the page world at document_start using window.wrappedJSObject and exportFunction.
+    // The page world only forwards text to Android; Android performs
+    // the actual system-clipboard write through the native-message host.
+    (function installPageClipboardBridge() {
+        const bridgeType = 'focusgram:page-clipboard-copy';
+
+        function sanitizeUrlsInText(raw) {
+            if (!raw || typeof raw !== 'string') return raw;
+            try {
+                return raw.replace(/https?:\/\/[^\s"'<>]+/gi, function (match) {
+                    try {
+                        const u = new URL(match);
+                        const trackingNames = [
+                            'igsh', 'igshid', 'fbclid', 'ref', 'hl', 'taken-by',
+                            'source_ve_path', 'ig_rid'
+                        ];
+                        let changed = false;
+                        const params = new URLSearchParams(u.search);
+                        const keys = Array.from(params.keys());
+                        for (let i = 0; i < keys.length; i++) {
+                            const k = keys[i];
+                            const lowerK = k.toLowerCase().trim();
+                            if (lowerK.startsWith('utm_') || trackingNames.includes(lowerK)) {
+                                params.delete(k);
+                                changed = true;
+                            }
+                        }
+                        if (changed) {
+                            const newSearch = params.toString();
+                            u.search = newSearch ? ('?' + newSearch) : '';
+                            return u.toString();
+                        }
+                    } catch (_) {}
+                    return match;
+                });
+            } catch (_) {
+                return raw;
+            }
+        }
+
+        function isBareInstagramRootUrl(val) {
+            if (!val || typeof val !== 'string') return false;
+            try {
+                const trimmed = val.trim();
+                if (trimmed === 'https://www.instagram.com/' || trimmed === 'https://www.instagram.com' ||
+                    trimmed === 'http://www.instagram.com/' || trimmed === 'http://www.instagram.com' ||
+                    trimmed === 'https://instagram.com/' || trimmed === 'https://instagram.com') {
+                    return true;
+                }
+                const u = new URL(trimmed);
+                const host = u.hostname.toLowerCase();
+                if (host === 'instagram.com' || host === 'www.instagram.com') {
+                    const p = u.pathname.replace(/\/+$/, '');
+                    if (p === '' || p === '/') return true;
+                }
+            } catch (_) {}
+            return false;
+        }
+
+        let lastReportedText = '';
+        let lastReportedTime = 0;
+
+        function report(value) {
+            if (value === null || value === undefined) return;
+            const text = sanitizeUrlsInText(String(value));
+            const trimmed = text.trim();
+            if (!trimmed || isBareInstagramRootUrl(trimmed)) return;
+            const now = Date.now();
+            if (trimmed === lastReportedText && (now - lastReportedTime) < 1000) {
+                return;
+            }
+            lastReportedText = trimmed;
+            lastReportedTime = now;
+            postToNative({ action: 'clipboardCopy', text: trimmed });
+            try {
+                window.location.href = 'focusgram-clipboard://copy?text=' + encodeURIComponent(trimmed);
+            } catch (_) {}
+        }
+
+        window.addEventListener('message', function (event) {
+            try {
+                if (!event || !event.data) return;
+                if (event.data.type === bridgeType || event.data.type === 'focusgram_clipboard_copy') {
+                    if (typeof event.data.text === 'string' && event.data.text.trim()) {
+                        report(event.data.text);
+                    }
+                }
+            } catch (_) {}
+        }, true);
+
+        window.addEventListener('focusgram_clipboard_copy', function (event) {
+            try {
+                if (event && event.detail && typeof event.detail.text === 'string' && event.detail.text.trim()) {
+                    report(event.detail.text);
+                }
+            } catch (_) {}
+        }, true);
+
+        const pageWin = window.wrappedJSObject || window;
+
+        function hookClipboard(targetClipboard) {
+            if (!targetClipboard) return;
+            try {
+                if (Object.prototype.hasOwnProperty.call(targetClipboard, '__focusgramPatched')) return;
+                Object.defineProperty(targetClipboard, '__focusgramPatched', { value: true, configurable: true, writable: true });
+            } catch (_) {}
+
+            let originalWriteText;
+            try { originalWriteText = targetClipboard.writeText; } catch (_) {}
+
+            const bridgedWriteText = function (text) {
+                try {
+                    if (text !== null && text !== undefined) {
+                        const s = String(text);
+                        if (s.trim()) {
+                            report(s);
+                            try {
+                                window.postMessage({ type: bridgeType, text: s }, '*');
+                                window.postMessage({ type: 'focusgram_clipboard_copy', text: s }, '*');
+                            } catch (_) {}
+                            try {
+                                window.dispatchEvent(new CustomEvent('focusgram_clipboard_copy', { detail: { text: s } }));
+                            } catch (_) {}
+                        }
+                    }
+                } catch (_) {}
+                if (typeof originalWriteText === 'function') {
+                    try {
+                        return originalWriteText.apply(this, arguments);
+                    } catch (_) {}
+                }
+                if (pageWin.Promise && typeof pageWin.Promise === 'function') {
+                    return pageWin.Promise.resolve();
+                }
+                return Promise.resolve();
+            };
+
+            let exportedWriteText = bridgedWriteText;
+            if (typeof exportFunction === 'function') {
+                try {
+                    exportedWriteText = exportFunction(bridgedWriteText, pageWin);
+                } catch (_) {}
+            }
+            try {
+                Object.defineProperty(targetClipboard, 'writeText', {
+                    value: exportedWriteText,
+                    configurable: true,
+                    writable: true
+                });
+            } catch (_) {
+                try { targetClipboard.writeText = exportedWriteText; } catch (_) {}
+            }
+
+            let originalWrite;
+            try { originalWrite = targetClipboard.write; } catch (_) {}
+            const bridgedWrite = function (items) {
+                try {
+                    if (items && items.length) {
+                        for (let i = 0; i < items.length; i++) {
+                            const item = items[i];
+                            if (item && item.types && item.types.includes('text/plain')) {
+                                item.getType('text/plain').then(function (blob) {
+                                    return blob.text();
+                                }).then(function (text) {
+                                    if (text && text.trim()) {
+                                        try {
+                                            window.postMessage({ type: bridgeType, text: text }, '*');
+                                        } catch (_) {}
+                                    }
+                                }).catch(function () {});
+                            }
+                        }
+                    }
+                } catch (_) {}
+                if (typeof originalWrite === 'function') {
+                    try {
+                        return originalWrite.apply(this, arguments);
+                    } catch (_) {}
+                }
+                if (pageWin.Promise && typeof pageWin.Promise === 'function') {
+                    return pageWin.Promise.resolve();
+                }
+                return Promise.resolve();
+            };
+
+            let exportedWrite = bridgedWrite;
+            if (typeof exportFunction === 'function') {
+                try {
+                    exportedWrite = exportFunction(bridgedWrite, pageWin);
+                } catch (_) {}
+            }
+            try {
+                Object.defineProperty(targetClipboard, 'write', {
+                    value: exportedWrite,
+                    configurable: true,
+                    writable: true
+                });
+            } catch (_) {
+                try { targetClipboard.write = exportedWrite; } catch (_) {}
+            }
+        }
+
+        function hookExecCommand(targetDoc) {
+            if (!targetDoc || typeof targetDoc.execCommand !== 'function') return;
+            try {
+                if (Object.prototype.hasOwnProperty.call(targetDoc, '__focusgramExecPatched')) return;
+                Object.defineProperty(targetDoc, '__focusgramExecPatched', { value: true, configurable: true, writable: true });
+            } catch (_) {}
+
+            const origExec = targetDoc.execCommand;
+            const bridgedExec = function (cmd) {
+                if (String(cmd).toLowerCase() === 'copy') {
+                    try {
+                        let text = '';
+                        if (pageWin.document && pageWin.document.activeElement) {
+                            const active = pageWin.document.activeElement;
+                            if (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA') {
+                                text = active.value || '';
+                            }
+                        }
+                        if (!text && pageWin.getSelection) {
+                            const sel = pageWin.getSelection();
+                            if (sel) text = sel.toString();
+                        }
+                        if (text) {
+                            try {
+                                window.postMessage({ type: bridgeType, text: text }, '*');
+                            } catch (_) {}
+                            report(text);
+                        }
+                    } catch (_) {}
+                }
+                return origExec.apply(this, arguments);
+            };
+
+            let exportedExec = bridgedExec;
+            if (typeof exportFunction === 'function') {
+                try {
+                    exportedExec = exportFunction(bridgedExec, pageWin);
+                } catch (_) {}
+            }
+            try {
+                Object.defineProperty(targetDoc, 'execCommand', {
+                    value: exportedExec,
+                    configurable: true,
+                    writable: true
+                });
+            } catch (_) {
+                try { targetDoc.execCommand = exportedExec; } catch (_) {}
+            }
+        }
+
+        function hookDataTransfer(proto) {
+            if (!proto || typeof proto.setData !== 'function') return;
+            try {
+                if (Object.prototype.hasOwnProperty.call(proto, '__fgSetDataPatched')) return;
+                Object.defineProperty(proto, '__fgSetDataPatched', { value: true, configurable: true, writable: true });
+            } catch (_) {}
+
+            const origSetData = proto.setData;
+            const bridgedSetData = function (format, data) {
+                try {
+                    if (data && (!format || String(format).toLowerCase().includes('text'))) {
+                        const s = String(data);
+                        try {
+                            window.postMessage({ type: bridgeType, text: s }, '*');
+                        } catch (_) {}
+                        report(s);
+                    }
+                } catch (_) {}
+                return origSetData.apply(this, arguments);
+            };
+
+            let exportedSetData = bridgedSetData;
+            if (typeof exportFunction === 'function') {
+                try {
+                    exportedSetData = exportFunction(bridgedSetData, pageWin);
+                } catch (_) {}
+            }
+            try {
+                Object.defineProperty(proto, 'setData', {
+                    value: exportedSetData,
+                    configurable: true,
+                    writable: true
+                });
+            } catch (_) {
+                try { proto.setData = exportedSetData; } catch (_) {}
+            }
+        }
+
+        function hookShare(targetNav) {
+            if (!targetNav || typeof targetNav.share !== 'function') return;
+            try {
+                if (Object.prototype.hasOwnProperty.call(targetNav, '__fgSharePatched')) return;
+                Object.defineProperty(targetNav, '__fgSharePatched', { value: true, configurable: true, writable: true });
+            } catch (_) {}
+
+            const origShare = targetNav.share;
+            const bridgedShare = function (data) {
+                try {
+                    if (data) {
+                        const val = data.url || data.text || '';
+                        if (val) {
+                            const s = String(val);
+                            try {
+                                window.postMessage({ type: bridgeType, text: s }, '*');
+                            } catch (_) {}
+                            report(s);
+                        }
+                    }
+                } catch (_) {}
+                return origShare.apply(this, arguments);
+            };
+
+            let exportedShare = bridgedShare;
+            if (typeof exportFunction === 'function') {
+                try {
+                    exportedShare = exportFunction(bridgedShare, pageWin);
+                } catch (_) {}
+            }
+            try {
+                Object.defineProperty(targetNav, 'share', {
+                    value: exportedShare,
+                    configurable: true,
+                    writable: true
+                });
+            } catch (_) {
+                try { targetNav.share = exportedShare; } catch (_) {}
+            }
+        }
+
+        function applyHooks() {
+            try {
+                if (pageWin.navigator && pageWin.navigator.clipboard) {
+                    hookClipboard(pageWin.navigator.clipboard);
+                }
+                if (pageWin.Clipboard && pageWin.Clipboard.prototype) {
+                    hookClipboard(pageWin.Clipboard.prototype);
+                }
+                if (pageWin.document) {
+                    hookExecCommand(pageWin.document);
+                }
+                if (pageWin.Document && pageWin.Document.prototype) {
+                    hookExecCommand(pageWin.Document.prototype);
+                }
+                if (pageWin.DataTransfer && pageWin.DataTransfer.prototype) {
+                    hookDataTransfer(pageWin.DataTransfer.prototype);
+                }
+                if (pageWin.navigator) {
+                    hookShare(pageWin.navigator);
+                }
+            } catch (_) {}
+        }
+
+        applyHooks();
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', applyHooks);
+        }
+        window.addEventListener('load', applyHooks);
+
+        const handleCopy = function (event) {
+            try {
+                if (event && event.clipboardData) {
+                    const cd = event.clipboardData;
+                    const origSet = cd.setData;
+                    if (typeof origSet === 'function' && !cd.__fgSetDataHooked) {
+                        cd.__fgSetDataHooked = true;
+                        cd.setData = function (format, data) {
+                            try {
+                                if (data && (!format || String(format).toLowerCase().includes('text'))) {
+                                    report(String(data));
+                                }
+                            } catch (_) {}
+                            return origSet.apply(this, arguments);
+                        };
+                    }
+                }
+                let text = '';
+                if (window.getSelection) {
+                    const sel = window.getSelection();
+                    if (sel) text = sel.toString();
+                }
+                if (!text && pageWin.getSelection) {
+                    const sel = pageWin.getSelection();
+                    if (sel) text = sel.toString();
+                }
+                if (!text && document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+                    text = document.activeElement.value || '';
+                }
+                if (text) report(text);
+            } catch (_) {}
+        };
+        document.addEventListener('copy', handleCopy, true);
+        window.addEventListener('copy', handleCopy, true);
+        if (pageWin !== window) {
+            try {
+                pageWin.document.addEventListener('copy', handleCopy, true);
+                pageWin.addEventListener('copy', handleCopy, true);
+            } catch (_) {}
+        }
+    })();
+
+    function isBareInstagramRootUrl(val) {
+        if (!val || typeof val !== 'string') return true;
+        try {
+            const trimmed = val.trim();
+            if (!trimmed) return true;
+            const base = trimmed.split('?')[0].split('#')[0].replace(/\/+$/, '');
+            if (base === 'https://www.instagram.com' || base === 'http://www.instagram.com' ||
+                base === 'https://instagram.com' || base === 'http://instagram.com' ||
+                base === '') {
+                return true;
+            }
+            const u = new URL(trimmed);
+            const host = u.hostname.toLowerCase();
+            if (host === 'instagram.com' || host === 'www.instagram.com') {
+                const p = u.pathname.replace(/\/+$/, '');
+                if (p === '' || p === '/') return true;
+            }
+        } catch (_) {}
+        return false;
+    }
+
+    function extractUrlFromDialog(dialog) {
+        if (!dialog) return '';
+        try {
+            const inputs = dialog.querySelectorAll('input, textarea');
+            for (let i = 0; i < inputs.length; i++) {
+                const inp = inputs[i];
+                const val = (inp.value || inp.getAttribute('value') || inp.placeholder || '').trim();
+                if (val && !isBareInstagramRootUrl(val)) {
+                    if (val.includes('/p/') || val.includes('/reel/') || val.includes('/reels/') || val.includes('/stories/') || val.includes('instagram.com/')) {
+                        return val;
+                    }
+                }
+            }
+            const links = dialog.querySelectorAll('a[href*="/p/"], a[href*="/reel/"], a[href*="/reels/"], a[href*="/stories/"], a[href*="instagram.com/"]');
+            for (let i = 0; i < links.length; i++) {
+                const h = (links[i].href || links[i].getAttribute('href') || '').trim();
+                if (h && !isBareInstagramRootUrl(h)) {
+                    return h;
+                }
+            }
+            const html = dialog.innerHTML || '';
+            const match = html.match(/https?:\/\/(?:www\.)?instagram\.com\/(?:p|reel|reels|stories)\/[A-Za-z0-9_-]+(?:\/[^\s"'<>]*)?/i);
+            if (match && match[0] && !isBareInstagramRootUrl(match[0])) {
+                return match[0];
+            }
+            const text = dialog.textContent || '';
+            const textMatch = text.match(/https?:\/\/[^\s"'<>]+/i);
+            if (textMatch && textMatch[0] && !isBareInstagramRootUrl(textMatch[0])) {
+                return textMatch[0];
+            }
+        } catch (_) {}
+        return '';
+    }
+
+    let lastActiveMediaUrl = '';
+    let lastActiveMediaTimestamp = 0;
+
+    ['pointerdown', 'touchstart', 'mousedown'].forEach(function (evt) {
+        document.addEventListener(evt, function (e) {
+            try {
+                const target = e.target;
+                if (!target) return;
+                const article = target.closest('article, [role="article"], div[data-testid*="post"]');
+                if (article) {
+                    const link = article.querySelector('a[href*="/p/"], a[href*="/reel/"], a[href*="/reels/"]');
+                    if (link && link.href) {
+                        const clean = link.href.split('?')[0].replace(/\/comments\/?.*$/, '/');
+                        if (!isBareInstagramRootUrl(clean)) {
+                            lastActiveMediaUrl = clean;
+                            lastActiveMediaTimestamp = Date.now();
+                        }
+                    }
+                }
+            } catch (_) {}
+        }, { capture: true, passive: true });
+    });
+
+    const AUTH_PREFIXES = [
+        '/accounts/login',
+        '/accounts/emailsignup',
+        '/accounts/signup',
+        '/accounts/two_factor',
+        '/accounts/password',
+        '/accounts/suspended',
+        '/accounts/challenge',
+        '/login',
+        '/signup',
+        '/two_factor',
+        '/challenge',
+        '/onetap',
+        '/privacy'
+    ];
+
     function isAuthPage() {
         try {
             const host = (window.location.hostname || '').toLowerCase();
-            if (host.includes('facebook.com') || host.includes('accountscenter.')) {
+            if (host.includes('facebook.com') || host.includes('accountscenter.') || host.includes('meta.com')) {
                 return true;
             }
             const path = (window.location.pathname || '').toLowerCase();
-            if (path.includes('/accounts/edit')) {
-                return false;
+            for (let i = 0; i < AUTH_PREFIXES.length; i++) {
+                if (path.startsWith(AUTH_PREFIXES[i])) {
+                    return true;
+                }
             }
-            if (path.startsWith('/accounts') || path.startsWith('/login') || path.startsWith('/signup') ||
-                path.startsWith('/two_factor') || path.startsWith('/challenge') || path.startsWith('/onetap')) {
-                return true;
-            }
-            if (document.getElementById('loginForm') || document.querySelector('form[action*="login"], form input[type="password"]')) {
+            if (document.getElementById('loginForm') ||
+                document.querySelector('form[action*="login"], form[action*="signup"], form input[type="password"], input[name="password"]')) {
                 return true;
             }
         } catch (_) {}
         return false;
     }
 
+    // Absolute black-box boundary: if on any auth/login page,
+    // do NOT touch the DOM, do NOT inject styles, do NOT install interceptors.
     if (isAuthPage()) {
         postToNative({ action: 'authStateChanged', isAuthenticated: false, isAuthPage: true });
         let authCheckInterval = setInterval(() => {
             if (!isAuthPage()) {
                 clearInterval(authCheckInterval);
+                postToNative({ action: 'authStateChanged', isAuthenticated: true, isAuthPage: false });
                 window.location.reload();
             }
         }, 1000);
         return;
     } else {
         postToNative({ action: 'authStateChanged', isAuthenticated: true, isAuthPage: false });
+    }
+
+    // Re-verify login form presence when DOM content finishes loading on root path
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+            if (isAuthPage()) {
+                postToNative({ action: 'authStateChanged', isAuthenticated: false, isAuthPage: true });
+            }
+        }, { once: true });
     }
 
     console.log('[FocusGram] In-page controller initialized.');
@@ -94,6 +628,9 @@
         hideFollowerCounts: false,
         hideSuggestedPosts: false,
         hideShopTab: false,
+        hideNotesTray: false,
+        hideFeedPosts: false,
+        minimalMode: false,
         noAutoplay: false,
         grayscale: false,
         videoDownloadEnabled: false,
@@ -143,8 +680,15 @@
 
             function shouldBlockAutoplay() {
                 if (isReelVideo()) return false;
-                const cfg = window.__fgFilterConfig;
-                return cfg && cfg.blockAutoplay !== false;
+                // If "Block Reels & Short Videos" is active, always block home feed autoplay
+                const isHome = (window.location.pathname === '/' || window.location.pathname === '' || document.documentElement.hasAttribute('data-fg-feed'));
+                if (isHome && currentSettings.noReels) {
+                    return true;
+                }
+                if (window.__fgFilterConfig && typeof window.__fgFilterConfig.blockAutoplay === 'boolean') {
+                    return window.__fgFilterConfig.blockAutoplay;
+                }
+                return currentSettings.noAutoplay !== false;
             }
 
             if (window.HTMLVideoElement && HTMLVideoElement.prototype.play) {
@@ -173,6 +717,11 @@
                     document.addEventListener(eventType, function(e) {
                         if (!e.isTrusted) return;
                         if (e.target.closest('button[aria-label="Like"], button[aria-label="Comment"], button[aria-label="Share"], a[role="link"]:not(:has(video))')) return;
+                        // If "Block Reels & Short Videos" is active, do not allow manual tap-to-play on home feed
+                        const isHome = (window.location.pathname === '/' || window.location.pathname === '' || document.documentElement.hasAttribute('data-fg-feed'));
+                        if (isHome && currentSettings.noReels) {
+                            return;
+                        }
                         const v = e.target.tagName === 'VIDEO' ? e.target : (e.target.closest('video') || (e.target.querySelector ? e.target.querySelector('video') : null));
                         if (v) {
                             allowedVideos.add(v);
@@ -181,6 +730,602 @@
                     }, true);
                 });
             }
+
+            // Clipboard bridge: intercept copy events and navigator.clipboard.writeText so copied links reach Android system clipboard
+            (function setupClipboardBridge() {
+                function sanitizeUrlsInText(raw) {
+                    if (!raw || typeof raw !== 'string') return raw;
+                    try {
+                        return raw.replace(/https?:\/\/[^\s"'<>]+/gi, function (match) {
+                            try {
+                                const u = new URL(match);
+                                const trackingNames = [
+                                    'igsh', 'igshid', 'fbclid', 'ref', 'hl', 'taken-by',
+                                    'source_ve_path', 'ig_rid'
+                                ];
+                                let changed = false;
+                                const params = new URLSearchParams(u.search);
+                                const keys = Array.from(params.keys());
+                                for (let i = 0; i < keys.length; i++) {
+                                    const k = keys[i];
+                                    const lowerK = k.toLowerCase().trim();
+                                    if (lowerK.startsWith('utm_') || trackingNames.includes(lowerK)) {
+                                        params.delete(k);
+                                        changed = true;
+                                    }
+                                }
+                                if (changed) {
+                                    const newSearch = params.toString();
+                                    u.search = newSearch ? ('?' + newSearch) : '';
+                                    return u.toString();
+                                }
+                            } catch (_) {}
+                            return match;
+                        });
+                    } catch (_) {
+                        return raw;
+                    }
+                }
+
+                function isBareInstagramRootUrl(val) {
+                    if (!val || typeof val !== 'string') return false;
+                    try {
+                        const trimmed = val.trim();
+                        if (trimmed === 'https://www.instagram.com/' || trimmed === 'https://www.instagram.com' ||
+                            trimmed === 'http://www.instagram.com/' || trimmed === 'http://www.instagram.com' ||
+                            trimmed === 'https://instagram.com/' || trimmed === 'https://instagram.com') {
+                            return true;
+                        }
+                        const u = new URL(trimmed);
+                        const host = u.hostname.toLowerCase();
+                        if (host === 'instagram.com' || host === 'www.instagram.com') {
+                            const p = u.pathname.replace(/\/+$/, '');
+                            if (p === '' || p === '/') return true;
+                        }
+                    } catch (_) {}
+                    return false;
+                }
+
+                let lastInPageCopy = '';
+                let lastInPageCopyTime = 0;
+                function forwardToNative(raw) {
+                    if (raw === null || raw === undefined) return;
+                    const text = sanitizeUrlsInText(String(raw));
+                    const trimmed = text.trim();
+                    if (!trimmed || isBareInstagramRootUrl(trimmed)) return;
+                    const now = Date.now();
+                    if (trimmed === lastInPageCopy && (now - lastInPageCopyTime) < 1000) {
+                        return;
+                    }
+                    lastInPageCopy = trimmed;
+                    lastInPageCopyTime = now;
+                    try {
+                        window.postMessage({ type: 'focusgram:page-clipboard-copy', text: trimmed }, '*');
+                        window.postMessage({ type: 'focusgram_clipboard_copy', text: trimmed }, '*');
+                    } catch (_) {}
+                    try {
+                        window.dispatchEvent(new CustomEvent('focusgram_clipboard_copy', { detail: { text: trimmed } }));
+                    } catch (_) {}
+                    try {
+                        window.location.href = 'focusgram-clipboard://copy?text=' + encodeURIComponent(trimmed);
+                    } catch (_) {}
+                }
+
+                function extractUrlFromDialog(dialog) {
+                    if (!dialog) return '';
+                    try {
+                        const inputs = dialog.querySelectorAll('input, textarea');
+                        for (let i = 0; i < inputs.length; i++) {
+                            const inp = inputs[i];
+                            const val = (inp.value || inp.getAttribute('value') || inp.placeholder || '').trim();
+                            if (val && !isBareInstagramRootUrl(val)) {
+                                if (val.includes('/p/') || val.includes('/reel/') || val.includes('/reels/') || val.includes('/stories/') || val.includes('instagram.com/')) {
+                                    return val;
+                                }
+                            }
+                        }
+                        const links = dialog.querySelectorAll('a[href*="/p/"], a[href*="/reel/"], a[href*="/reels/"], a[href*="/stories/"], a[href*="instagram.com/"]');
+                        for (let i = 0; i < links.length; i++) {
+                            const h = (links[i].href || links[i].getAttribute('href') || '').trim();
+                            if (h && !isBareInstagramRootUrl(h)) {
+                                return h;
+                            }
+                        }
+                        const html = dialog.innerHTML || '';
+                        const match = html.match(/https?:\/\/(?:www\.)?instagram\.com\/(?:p|reel|reels|stories)\/[A-Za-z0-9_-]+(?:\/[^\s"'<>]*)?/i);
+                        if (match && match[0] && !isBareInstagramRootUrl(match[0])) {
+                            return match[0];
+                        }
+                        const text = dialog.textContent || '';
+                        const textMatch = text.match(/https?:\/\/[^\s"'<>]+/i);
+                        if (textMatch && textMatch[0] && !isBareInstagramRootUrl(textMatch[0])) {
+                            return textMatch[0];
+                        }
+                    } catch (_) {}
+                    return '';
+                }
+
+                function transformLinkModal() {
+                    try {
+                        const dialogs = document.querySelectorAll('div[role="dialog"]');
+                        if (!dialogs || dialogs.length === 0) return;
+
+                        let linkDialog = null;
+                        const otherDialogs = [];
+
+                        for (let i = 0; i < dialogs.length; i++) {
+                            const d = dialogs[i];
+                            const input = d.querySelector('input[type="text"], input:not([type]), input[readonly], textarea');
+                            const dText = (d.textContent || '').toLowerCase();
+                            let isLinkModal = false;
+                            if (input) {
+                                const val = (input.value || input.getAttribute('value') || '').toLowerCase();
+                                if (val.includes('instagram.com') || val.startsWith('http') || val.length > 5) {
+                                    isLinkModal = true;
+                                }
+                            }
+                            if (!isLinkModal) {
+                                if (dText.includes('select post link') || 
+                                    dText.includes('select profile link') || 
+                                    dText.includes('select link') || 
+                                    dText.includes('select text') || 
+                                    (input && dText.includes('select'))) {
+                                    isLinkModal = true;
+                                }
+                            }
+                            if (!isLinkModal) {
+                                const btns = d.querySelectorAll('button, [role="button"]');
+                                for (let b = 0; b < btns.length; b++) {
+                                    const txt = (btns[b].textContent || '').toLowerCase().trim();
+                                    if (txt.includes('select') || txt.includes('auswählen') || txt.includes('seleccionar')) {
+                                        isLinkModal = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (isLinkModal) {
+                                linkDialog = d;
+                            } else {
+                                otherDialogs.push(d);
+                            }
+                        }
+
+                        if (linkDialog) {
+                            // 1. Hide the background "Share to..." or 3-dots action sheet completely so it doesn't appear beside/behind it
+                            for (let j = 0; j < otherDialogs.length; j++) {
+                                try {
+                                    const od = otherDialogs[j];
+                                    od.style.setProperty('display', 'none', 'important');
+                                    const pres = od.closest('[role="presentation"]');
+                                    if (pres && pres !== linkDialog.closest('[role="presentation"]')) {
+                                        pres.style.setProperty('display', 'none', 'important');
+                                    }
+                                } catch (_) {}
+                            }
+
+                            // Also hide any floating share sheets or backdrops that are beside it
+                            const shareSheets = document.querySelectorAll('div[aria-label*="Share" i], div[aria-label*="Share to" i]');
+                            for (let s = 0; s < shareSheets.length; s++) {
+                                const sheet = shareSheets[s];
+                                if (sheet !== linkDialog && !sheet.contains(linkDialog)) {
+                                    sheet.style.setProperty('display', 'none', 'important');
+                                }
+                            }
+
+                            // 2. Elevate link dialog and presentation wrapper to topmost z-index
+                            const pres = linkDialog.closest('[role="presentation"]') || linkDialog;
+                            pres.style.setProperty('z-index', '2147483647', 'important');
+                            linkDialog.style.setProperty('position', 'fixed', 'important');
+                            linkDialog.style.setProperty('top', '50%', 'important');
+                            linkDialog.style.setProperty('left', '50%', 'important');
+                            linkDialog.style.setProperty('transform', 'translate(-50%, -50%)', 'important');
+                            linkDialog.style.setProperty('z-index', '2147483647', 'important');
+
+                            // 3. Compact modern modal styling (reduce size)
+                            linkDialog.style.setProperty('max-width', '320px', 'important');
+                            linkDialog.style.setProperty('width', '88%', 'important');
+                            linkDialog.style.setProperty('max-height', '70vh', 'important');
+                            linkDialog.style.setProperty('border-radius', '20px', 'important');
+                            linkDialog.style.setProperty('box-shadow', '0 12px 36px rgba(0, 0, 0, 0.6)', 'important');
+                            linkDialog.style.setProperty('margin', '0', 'important');
+
+                            // 4. Change "Select Post Link" / "Select text" button to "Copy" and auto-copy on click
+                            const btns = linkDialog.querySelectorAll('button, [role="button"]');
+                            for (let b = 0; b < btns.length; b++) {
+                                const btn = btns[b];
+                                const txt = (btn.textContent || '').toLowerCase().trim();
+                                const isSelectBtn = txt.includes('select post link') ||
+                                                    txt.includes('select profile link') ||
+                                                    txt.includes('select link') ||
+                                                    txt.includes('select text') ||
+                                                    txt.includes('select') ||
+                                                    txt.includes('text auswählen') ||
+                                                    txt.includes('seleccionar texto') ||
+                                                    txt.includes('sélectionner le texte') ||
+                                                    txt.includes('seleziona testo') ||
+                                                    txt.includes('auswählen') ||
+                                                    txt.includes('seleccionar') ||
+                                                    btn.getAttribute('data-fg-transformed') === 'true';
+
+                                const isClose = (btn.getAttribute('aria-label') || '').toLowerCase().includes('close') || 
+                                                txt === 'cancel' || txt === 'close' || txt === '✕' || txt === '×';
+
+                                if (isSelectBtn && !isClose && btn.getAttribute('data-fg-transformed') !== 'true') {
+                                    btn.setAttribute('data-fg-transformed', 'true');
+                                    btn.textContent = 'Copy';
+                                    btn.style.setProperty('font-weight', '600', 'important');
+                                    btn.style.setProperty('cursor', 'pointer', 'important');
+                                    btn.style.setProperty('background-color', '#0095f6', 'important');
+                                    btn.style.setProperty('color', '#ffffff', 'important');
+                                    btn.style.setProperty('border-radius', '8px', 'important');
+
+                                    btn.addEventListener('click', function (e) {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+
+                                        let urlToCopy = extractUrlFromDialog(linkDialog);
+                                        if (!urlToCopy || isBareInstagramRootUrl(urlToCopy)) {
+                                            if (lastActiveMediaUrl && !isBareInstagramRootUrl(lastActiveMediaUrl)) {
+                                                urlToCopy = lastActiveMediaUrl;
+                                            }
+                                        }
+                                        if (!urlToCopy || isBareInstagramRootUrl(urlToCopy)) {
+                                            const path = window.location.pathname || '';
+                                            if (path.startsWith('/p/') || path.startsWith('/reel/')) {
+                                                urlToCopy = window.location.href;
+                                            }
+                                        }
+
+                                        if (urlToCopy && !isBareInstagramRootUrl(urlToCopy)) {
+                                            forwardToNative(urlToCopy);
+                                            btn.textContent = 'Copied!';
+                                            btn.style.setProperty('background-color', '#10b981', 'important');
+                                            btn.style.setProperty('color', '#ffffff', 'important');
+
+                                            setTimeout(function () {
+                                                try {
+                                                    const closeBtn = linkDialog.querySelector('button[aria-label="Close"], svg[aria-label="Close"]')?.closest('button');
+                                                    if (closeBtn) {
+                                                        closeBtn.click();
+                                                    } else {
+                                                        pres.remove();
+                                                    }
+                                                } catch (_) {
+                                                    try { pres.remove(); } catch (_) {}
+                                                }
+                                            }, 300);
+                                        }
+                                    }, true);
+                                }
+                            }
+                        }
+                    } catch (_) {}
+                }
+
+                let lastActiveMediaUrl = '';
+                let lastActiveDmText = '';
+                let lastActiveDmTimestamp = 0;
+
+                function isDmActionSheet(el) {
+                    if (!el) return false;
+                    return !!el.closest('[role="dialog"], [role="menu"], [role="menuitem"], ul[role="menu"]');
+                }
+
+                function captureDmText(e) {
+                    try {
+                        const target = e.target;
+                        if (!target || isDmActionSheet(target)) return;
+
+                        const dirAuto = target.closest('[dir="auto"]');
+                        const EXCLUDED = ['copy', 'copy text', 'copy message', 'reply', 'forward', 'report', 'share', 'like', 'delete', 'cancel', 'seen', 'delivered', 'select'];
+                        if (dirAuto) {
+                            const rawText = (dirAuto.innerText || dirAuto.textContent || '').trim();
+                            const lower = rawText.toLowerCase();
+                            if (rawText && rawText.length > 0 && !EXCLUDED.includes(lower) && !lower.startsWith('active ') && !lower.startsWith('sent ')) {
+                                lastActiveDmText = rawText;
+                                lastActiveDmTimestamp = Date.now();
+                                return;
+                            }
+                        }
+
+                        const row = target.closest('[role="listitem"], [role="row"], [data-testid*="message"], [data-testid*="incoming"], [data-testid*="outgoing"]');
+                        if (row && !isDmActionSheet(row)) {
+                            const nodes = row.querySelectorAll('[dir="auto"]');
+                            for (let i = 0; i < nodes.length; i++) {
+                                const txt = (nodes[i].innerText || nodes[i].textContent || '').trim();
+                                const lower = txt.toLowerCase();
+                                if (txt.length > 0 && !EXCLUDED.includes(lower) && !lower.startsWith('active ') && !lower.startsWith('seen ')) {
+                                    lastActiveDmText = txt;
+                                    lastActiveDmTimestamp = Date.now();
+                                    return;
+                                }
+                            }
+                        }
+                    } catch (_) {}
+                }
+
+                function captureMediaUrl(e) {
+                    try {
+                        const target = e.target;
+                        if (!target) return;
+                        const article = target.closest('article, [role="article"], div[data-testid*="post"]');
+                        if (article) {
+                            const mediaLink = article.querySelector('a[href*="/p/"], a[href*="/reel/"], a[href*="/reels/"]');
+                            if (mediaLink && mediaLink.href) {
+                                const clean = mediaLink.href.split('?')[0].replace(/\/comments\/?.*$/, '/');
+                                if (!isBareInstagramRootUrl(clean)) {
+                                    lastActiveMediaUrl = clean;
+                                }
+                            }
+                        }
+                    } catch (_) {}
+                }
+
+                ['pointerdown', 'touchstart', 'mousedown'].forEach(function(evt) {
+                    document.addEventListener(evt, function(e) {
+                        try {
+                            captureDmText(e);
+                            captureMediaUrl(e);
+                        } catch (_) {}
+                    }, { capture: true, passive: true });
+                });
+
+                document.addEventListener('copy', function (e) {
+                    try {
+                        if (e && e.clipboardData && typeof e.clipboardData.setData === 'function') {
+                            const origSet = e.clipboardData.setData;
+                            e.clipboardData.setData = function (format, data) {
+                                if (data && (!format || String(format).toLowerCase().includes('text'))) {
+                                    forwardToNative(String(data));
+                                }
+                                return origSet.apply(this, arguments);
+                            };
+                        }
+                        let text = '';
+                        if (window.getSelection) {
+                            const sel = window.getSelection();
+                            if (sel) text = sel.toString();
+                        }
+                        if (!text && document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+                            text = document.activeElement.value || '';
+                        }
+                        if (!text && lastActiveDmText && window.location.pathname.startsWith('/direct')) {
+                            text = lastActiveDmText;
+                        }
+                        if (text) forwardToNative(text);
+                    } catch (_) {}
+                }, true);
+
+                window.addEventListener('focusgram_clipboard_copy', function (e) {
+                    try {
+                        if (e && e.detail && e.detail.text) {
+                            forwardToNative(e.detail.text);
+                        }
+                    } catch (_) {}
+                }, true);
+
+                document.addEventListener('focusgram_clipboard_copy', function (e) {
+                    try {
+                        if (e && e.detail && e.detail.text) {
+                            forwardToNative(e.detail.text);
+                        }
+                    } catch (_) {}
+                }, true);
+
+                window.addEventListener('message', function (e) {
+                    try {
+                        if (e && e.data && e.data.type === 'focusgram_clipboard_copy' && e.data.text) {
+                            forwardToNative(e.data.text);
+                        }
+                    } catch (_) {}
+                }, true);
+
+                document.addEventListener('click', function (e) {
+                    try {
+                        const target = e.target;
+                        if (!target) return;
+
+                        // Track active article media link on click
+                        const clickedArticle = target.closest('article');
+                        if (clickedArticle) {
+                            const mediaLink = clickedArticle.querySelector('a[href*="/p/"], a[href*="/reel/"]');
+                            if (mediaLink && mediaLink.href) {
+                                lastActiveMediaUrl = mediaLink.href;
+                            }
+                        }
+
+                        const btn = target.closest('button, [role="button"], [role="menuitem"], a, li');
+                        if (!btn) return;
+                        const label = (btn.innerText || btn.textContent || btn.getAttribute('aria-label') || '').toLowerCase();
+                        const cleanLabel = label.trim();
+
+                        const isProfilePath = window.location.pathname.length > 2 &&
+                            !window.location.pathname.startsWith('/p/') &&
+                            !window.location.pathname.startsWith('/reel') &&
+                            !window.location.pathname.startsWith('/direct') &&
+                            !window.location.pathname.startsWith('/explore') &&
+                            !window.location.pathname.startsWith('/stories');
+
+                        // 1. Copy profile link / profile URL
+                        if (isProfilePath && (label.includes('copy link') || cleanLabel.includes('copy link') || label.includes('copy profile') || cleanLabel.includes('copy profile') || cleanLabel.includes('profil-url') || cleanLabel.includes('profil-link') || cleanLabel.includes('enlace del perfil') || cleanLabel.includes('lien du profil'))) {
+                            setTimeout(function () {
+                                const currentUrl = window.location.origin + window.location.pathname.replace(/\/+$/, '') + '/';
+                                forwardToNative(currentUrl);
+                                transformLinkModal();
+                            }, 50);
+                            setTimeout(transformLinkModal, 150);
+                            setTimeout(transformLinkModal, 300);
+                            return;
+                        }
+
+                        // 2. Copy post / reel link
+                        if (label.includes('copy link') || cleanLabel.includes('copy link') || cleanLabel.includes('link kopieren') || cleanLabel.includes('copiar enlace') || cleanLabel.includes('copier le lien') || cleanLabel.includes('copia link') || cleanLabel.includes('скопировать ссылку') || cleanLabel.includes('リンクをコピー')) {
+                            // Find target URL from multiple potential DOM sources
+                            setTimeout(function () {
+                                let foundUrl = '';
+                                const openDialog = document.querySelector('div[role="dialog"]');
+                                if (openDialog) {
+                                    foundUrl = extractUrlFromDialog(openDialog);
+                                }
+                                if (!foundUrl || isBareInstagramRootUrl(foundUrl)) {
+                                    if (lastActiveMediaUrl && !isBareInstagramRootUrl(lastActiveMediaUrl)) {
+                                        foundUrl = lastActiveMediaUrl;
+                                    }
+                                }
+                                if (!foundUrl || isBareInstagramRootUrl(foundUrl)) {
+                                    const currentUrl = window.location.href;
+                                    if (currentUrl.includes('/p/') || currentUrl.includes('/reel/') || currentUrl.includes('/stories/')) {
+                                        foundUrl = currentUrl;
+                                    }
+                                }
+                                if (foundUrl && !isBareInstagramRootUrl(foundUrl)) {
+                                    forwardToNative(foundUrl);
+                                }
+                                transformLinkModal();
+                            }, 50);
+                            setTimeout(transformLinkModal, 150);
+                            setTimeout(transformLinkModal, 300);
+                            return;
+                        }
+
+                        // 2b. Select text / Select Post Link button inside link/share modals: copy link directly to Android clipboard
+                        if (label.includes('select post link') || cleanLabel.includes('select post link') || label.includes('select link') || cleanLabel.includes('select link') || label.includes('select text') || cleanLabel.includes('select text') || cleanLabel.includes('text auswählen') || cleanLabel.includes('seleccionar texto') || cleanLabel.includes('sélectionner le texte') || cleanLabel.includes('seleziona testo')) {
+                            setTimeout(function () {
+                                const dialog = target.closest('[role="dialog"]') || document.querySelector('div[role="dialog"]');
+                                let foundUrl = '';
+                                if (dialog) {
+                                    foundUrl = extractUrlFromDialog(dialog);
+                                }
+                                if (!foundUrl || isBareInstagramRootUrl(foundUrl)) {
+                                    foundUrl = lastActiveMediaUrl;
+                                }
+                                if (foundUrl && !isBareInstagramRootUrl(foundUrl)) {
+                                    forwardToNative(foundUrl);
+                                }
+                                transformLinkModal();
+                            }, 50);
+                            setTimeout(transformLinkModal, 150);
+                            return;
+                        }
+
+                        // 3. Copy text (DM message text, comment text, Copy button in DMs or Bio/Profile)
+                        if (cleanLabel === 'copy' || cleanLabel === 'copy text' || cleanLabel === 'copy message' || cleanLabel === 'kopieren' || cleanLabel === 'copiar' || cleanLabel === 'copier' || cleanLabel === 'copia' || cleanLabel.includes('copy text') || cleanLabel.includes('copy message') || cleanLabel.includes('text kopieren') || cleanLabel.includes('copier le texte') || cleanLabel.includes('copiar texto') || cleanLabel.includes('copiar mensaje')) {
+                            setTimeout(function () {
+                                let foundText = '';
+                                if (lastActiveDmText && (Date.now() - lastActiveDmTimestamp < 30000)) {
+                                    foundText = lastActiveDmText;
+                                }
+                                if (!foundText && window.location.pathname.startsWith('/direct') && lastActiveDmText) {
+                                    foundText = lastActiveDmText;
+                                }
+                                if (!foundText) {
+                                    const row = target.closest('[role="listitem"], [role="row"], [data-testid*="message"]');
+                                    if (row && !isDmActionSheet(row)) {
+                                        const dirAuto = row.querySelector('[dir="auto"]');
+                                        if (dirAuto) foundText = (dirAuto.innerText || dirAuto.textContent || '').trim();
+                                    }
+                                }
+                                if (!foundText && window.getSelection) {
+                                    const sel = window.getSelection().toString();
+                                    if (sel && sel.trim()) foundText = sel.trim();
+                                }
+                                if (foundText) {
+                                    forwardToNative(foundText);
+                                }
+                            }, 50);
+                        }
+                    } catch (_) {}
+                }, true);
+
+                try {
+                    const modalObserver = new MutationObserver(function () {
+                        transformLinkModal();
+                    });
+                    const rootEl = document.body || document.documentElement;
+                    if (rootEl) {
+                        modalObserver.observe(rootEl, { childList: true, subtree: true });
+                    }
+                    setInterval(transformLinkModal, 250);
+                } catch (_) {}
+
+                try {
+                    const pageWin = window.wrappedJSObject || window;
+                    const nav = pageWin && pageWin.navigator;
+                    if (nav && nav.clipboard) {
+                        const proto = (pageWin.Clipboard && pageWin.Clipboard.prototype) || Object.getPrototypeOf(nav.clipboard);
+                        const patchWriteText = function (target) {
+                            if (!target) return false;
+                            try { if (target.__focusgramNativeClipboardPatched) return true; } catch (_) {}
+                            let originalWriteText;
+                            try { originalWriteText = target.writeText; } catch (_) { return false; }
+                            if (typeof originalWriteText !== 'function') return false;
+                            const bridgedWriteText = function (text) {
+                                forwardToNative(text);
+                                if (pageWin.Promise && typeof pageWin.Promise === 'function') {
+                                    return new pageWin.Promise(function (resolve) {
+                                        try {
+                                            if (typeof originalWriteText === 'function') {
+                                                originalWriteText.apply(this, arguments).then(resolve, resolve);
+                                                return;
+                                            }
+                                        } catch (_) {}
+                                        resolve();
+                                    });
+                                }
+                                return Promise.resolve();
+                            };
+                            if (typeof exportFunction === 'function') {
+                                try {
+                                    exportFunction(bridgedWriteText, target, { defineAs: 'writeText' });
+                                    target.__focusgramNativeClipboardPatched = true;
+                                    return true;
+                                } catch (_) {
+                                    try {
+                                        target.writeText = exportFunction(bridgedWriteText, pageWin);
+                                        target.__focusgramNativeClipboardPatched = true;
+                                        return true;
+                                    } catch (_) {}
+                                }
+                            }
+                            try {
+                                Object.defineProperty(target, 'writeText', {
+                                    value: bridgedWriteText,
+                                    configurable: true,
+                                    writable: true
+                                });
+                                Object.defineProperty(target, '__focusgramNativeClipboardPatched', { value: true });
+                                return target.writeText === bridgedWriteText;
+                            } catch (_) {
+                                try {
+                                    target.writeText = bridgedWriteText;
+                                    return target.writeText === bridgedWriteText;
+                                } catch (_) { return false; }
+                            }
+                        };
+                        if (!patchWriteText(proto)) patchWriteText(nav.clipboard);
+                    }
+                    if (pageWin && pageWin.DataTransfer && pageWin.DataTransfer.prototype) {
+                        const origSetData = pageWin.DataTransfer.prototype.setData;
+                        const bridgedSetData = function (format, data) {
+                            try {
+                                if (String(format).toLowerCase().includes('text') && data) {
+                                    forwardToNative(data);
+                                }
+                            } catch (_) {}
+                            return origSetData.apply(this, arguments);
+                        };
+                        if (typeof exportFunction === 'function') {
+                            try {
+                                exportFunction(bridgedSetData, pageWin.DataTransfer.prototype, { defineAs: 'setData' });
+                            } catch (_) {
+                                try { pageWin.DataTransfer.prototype.setData = exportFunction(bridgedSetData, pageWin); } catch (_) {}
+                            }
+                        } else {
+                            try { pageWin.DataTransfer.prototype.setData = bridgedSetData; } catch (_) {}
+                        }
+                    }
+                } catch (_) {}
+            })();
 
             window.addEventListener('message', function(e) {
                 if (!e || !e.data) return;
@@ -912,10 +2057,26 @@
                 }
             }, true);
 
-            function checkSuggestedTrap() {
-                if (window.location.pathname.includes('/explore/people')) {
-                    window.__focusgramNavigate('/');
-                }
+            function checkBlockedRoutesAndTraps() {
+                try {
+                    const p = (window.location.pathname || '').toLowerCase();
+                    if (p.includes('/explore/people')) {
+                        window.__focusgramNavigate('/');
+                        return;
+                    }
+                    if (currentSettings.noReels && (p.startsWith('/reel/') || p.startsWith('/reels') || p === '/reel')) {
+                        window.__focusgramNavigate('/');
+                        return;
+                    }
+                    if (currentSettings.noDMs && (p.startsWith('/direct') || p.startsWith('/messages'))) {
+                        window.__focusgramNavigate('/');
+                        return;
+                    }
+                    if (currentSettings.noStories && (p.startsWith('/stories/') || p === '/stories')) {
+                        window.__focusgramNavigate('/');
+                        return;
+                    }
+                } catch (_) {}
             }
 
             // Hook History API in main world context so Instagram React SPA route changes are detected
@@ -924,7 +2085,7 @@
                 const res = _origPushState.apply(this, arguments);
                 try {
                     window.dispatchEvent(new CustomEvent('focusgram:urlchange', { detail: window.location.href }));
-                    checkSuggestedTrap();
+                    checkBlockedRoutesAndTraps();
                 } catch (_) {}
                 return res;
             };
@@ -934,7 +2095,7 @@
                 const res = _origReplaceState.apply(this, arguments);
                 try {
                     window.dispatchEvent(new CustomEvent('focusgram:urlchange', { detail: window.location.href }));
-                    checkSuggestedTrap();
+                    checkBlockedRoutesAndTraps();
                 } catch (_) {}
                 return res;
             };
@@ -1062,6 +2223,86 @@
             /* Safety guardrail: Core application containers must ALWAYS remain visible and full-height */
             html, body, #react-root, main {
                 min-height: 100% !important;
+            }
+
+            /* Block text selection and browser context menus on non-editable elements */
+            *:not(input):not(textarea):not([contenteditable="true"]):not([contenteditable=""]):not([role="textbox"]) {
+                -webkit-user-select: none !important;
+                user-select: none !important;
+                -webkit-touch-callout: none !important;
+            }
+            input, textarea, [contenteditable="true"], [contenteditable=""], [role="textbox"] {
+                -webkit-user-select: text !important;
+                user-select: text !important;
+            }
+
+            /* Whitelisted selectable surfaces: Modals, DM messages, Bio captions, Post captions & comments */
+            div[role="dialog"],
+            div[role="dialog"] *,
+            div[aria-modal="true"],
+            div[aria-modal="true"] *,
+            body.focusgram-modal-open *,
+            /* DM Messages */
+            [role="listitem"] [dir="auto"],
+            [role="listitem"] [dir="auto"] *,
+            [data-testid*="message"],
+            [data-testid*="message"] *,
+            /* Bio Captions */
+            header section [dir="auto"],
+            header section [dir="auto"] *,
+            header div[dir="auto"],
+            header div[dir="auto"] *,
+            header [dir="auto"],
+            [data-fg-bio-text],
+            /* Post Captions & Comments */
+            article [dir="auto"],
+            article [dir="auto"] *,
+            [data-fg-reel-caption],
+            [data-fg-reel-caption] *,
+            ul[class*="comment"] [dir="auto"],
+            ul[class*="comment"] [dir="auto"] * {
+                -webkit-user-select: text !important;
+                user-select: text !important;
+                -webkit-touch-callout: default !important;
+            }
+
+            /* Compact modern modal styling for Instagram link/share/action dialogs */
+            div[role="dialog"]:not([data-fg-comments-sheet]):not(:has(ul[class*="comment"])):not(:has(article)):not(:has(video)) {
+                max-width: 320px !important;
+                width: 88% !important;
+                max-height: 70vh !important;
+                border-radius: 20px !important;
+                margin: auto !important;
+                overflow: hidden !important;
+                box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5) !important;
+            }
+
+            /* Ensure Link Modal renders on top of the 3-dots action sheet */
+            div[role="dialog"]:has(input[type="text"]),
+            div[role="dialog"]:has(input:not([type])),
+            div[role="dialog"]:has(input[readonly]),
+            div[role="dialog"]:has(textarea) {
+                position: fixed !important;
+                top: 50% !important;
+                left: 50% !important;
+                transform: translate(-50%, -50%) !important;
+                z-index: 2147483647 !important;
+                max-width: 320px !important;
+                width: 88% !important;
+                max-height: 70vh !important;
+                border-radius: 20px !important;
+                box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6) !important;
+                margin: 0 !important;
+                overflow: hidden !important;
+            }
+            div[role="presentation"]:has(div[role="dialog"] input) {
+                z-index: 2147483647 !important;
+            }
+            body:has(div[role="dialog"] input) div[role="dialog"]:not(:has(input)) {
+                display: none !important;
+            }
+            body:has(div[role="dialog"] input) div[aria-label*="Share" i]:not(:has(input)) {
+                display: none !important;
             }
 
             /* Route-driven body padding: Only applied when island mode is NORMAL (feed, explore, profile) */
@@ -1249,6 +2490,10 @@
                 [aria-label*="stories"],
                 [role="list"]:has([aria-label*="tory"]),
                 [role="listbox"]:has([aria-label*="tory"]),
+                div[style*="overflow-x"]:has(canvas),
+                div[style*="overflow-x"]:has(img[alt*="story" i]),
+                div[style*="overflow-x"]:has(svg circle),
+                main > div > div:first-child:has(canvas),
                 section > div > div[style*="overflow-x"] {
                     display: none !important;
                     visibility: hidden !important;
@@ -1269,22 +2514,42 @@
                 div:has(> a[href*="/reel"]) {
                     display: none !important;
                 }
+
+                /* Block Reels: permanently blur feed videos & short video containers */
+                html[data-fg-feed] article video,
+                html[data-fg-feed] article div:has(> video),
+                html[data-fg-feed] article div[data-fg-reel-container] {
+                    filter: blur(24px) !important;
+                    pointer-events: none !important;
+                }
             `;
         }
 
         if (currentSettings.blurFeed) {
             css += `
                 /* Feed Carousel Slides & Single Post Media - ONLY blur leaf media elements, NEVER parent wrappers! */
-                html[data-fg-feed] article img:not(header img):not([alt*="profile" i]):not([data-fg-reveal]):not(.fg-unblurred),
+                article img:not(header img):not([data-fg-reveal]):not(.fg-unblurred),
+                article video:not([data-fg-reveal]):not(.fg-unblurred),
+                html[data-fg-feed] article img:not(header img):not([data-fg-reveal]):not(.fg-unblurred),
                 html[data-fg-feed] article video:not([data-fg-reveal]):not(.fg-unblurred),
-                html[data-fg-feed] article canvas:not([data-fg-reveal]):not(.fg-unblurred) {
+                article div[style*="aspect-ratio"]:not([data-fg-reveal]):not(.fg-unblurred),
+                article div:has(> img):not(header *):not([data-fg-reveal]):not(.fg-unblurred),
+                article div:has(> video):not([data-fg-reveal]):not(.fg-unblurred),
+                article ul li:not([data-fg-reveal]):not(.fg-unblurred),
+                article div[role="group"]:not([data-fg-reveal]):not(.fg-unblurred) {
                     filter: blur(28px) !important;
                     transition: filter 0.25s ease-in-out !important;
                 }
 
                 /* Preserve feed header avatars unblurred */
-                html[data-fg-feed] article header img,
-                html[data-fg-feed] article img[alt*="profile" i] {
+                article header img,
+                article header * {
+                    filter: none !important;
+                }
+
+                /* Modal dialog articles must NEVER be blurred */
+                div[role="dialog"] article,
+                div[role="dialog"] article * {
                     filter: none !important;
                 }
             `;
@@ -1322,7 +2587,27 @@
             .fg-unblurred img,
             .fg-unblurred video,
             .fg-unblurred canvas,
-            .fg-unblurred div {
+            .fg-unblurred div,
+            article[data-fg-reveal] img,
+            article[data-fg-reveal] video,
+            article[data-fg-reveal] canvas,
+            article.fg-unblurred img,
+            article.fg-unblurred video,
+            article.fg-unblurred canvas,
+            article li[data-fg-reveal] img,
+            article li[data-fg-reveal] video,
+            article li.fg-unblurred img,
+            article li.fg-unblurred video,
+            article div[role="group"][data-fg-reveal] img,
+            article div[role="group"][data-fg-reveal] video,
+            article div[role="group"].fg-unblurred img,
+            article div[role="group"].fg-unblurred video,
+            html[data-fg-feed] article[data-fg-reveal] img,
+            html[data-fg-feed] article[data-fg-reveal] video,
+            html[data-fg-feed] article[data-fg-reveal] canvas,
+            html[data-fg-feed] article.fg-unblurred img,
+            html[data-fg-feed] article.fg-unblurred video,
+            html[data-fg-feed] article.fg-unblurred canvas {
                 filter: none !important;
             }
 
@@ -1378,6 +2663,25 @@
             `;
         }
 
+        if (currentSettings.hideNotesTray) {
+            css += `
+                div.x1c4vz4f:has(div[role="presentation"][data-interactable] ul),
+                div.x1c4vz4f:has(ul),
+                div[role="presentation"][data-interactable]:has(ul),
+                div:has(> div > div > ul:has(li .xsnw5ke)),
+                div[data-fg-notes-tray="true"] {
+                    display: none !important;
+                    visibility: hidden !important;
+                    height: 0 !important;
+                    min-height: 0 !important;
+                    max-height: 0 !important;
+                    overflow: hidden !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                }
+            `;
+        }
+
         if (currentSettings.grayscale) {
             css += `
                 html {
@@ -1407,11 +2711,37 @@
             `;
         }
 
+        if (currentSettings.hideFeedPosts || currentSettings.minimalMode) {
+            css += `
+                main article:not([role="dialog"] article),
+                div[role="feed"] article,
+                main [data-pagelet="Feed"],
+                div[data-testid="feed-container"],
+                section > main div:has(> article) {
+                    display: none !important;
+                    visibility: hidden !important;
+                    height: 0 !important;
+                    min-height: 0 !important;
+                    max-height: 0 !important;
+                    overflow: hidden !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                }
+            `;
+        }
+
         if (currentSettings.minimalMode) {
             css += `
+                main article:not([role="dialog"] article),
+                div[role="feed"] article,
+                a[href*="/explore"],
+                a[href*="/reels"],
+                div[data-pagelet*="story"],
+                section > div > div[style*="overflow-x"],
                 article footer section + div,
                 div[data-testid="suggested-users"] {
                     display: none !important;
+                    visibility: hidden !important;
                 }
             `;
         }
@@ -1480,6 +2810,17 @@
                     }
                 }
             });
+
+            if (currentSettings.hideNotesTray) {
+                document.querySelectorAll('div.x1c4vz4f, div[role="presentation"][data-interactable]').forEach(container => {
+                    if (container.querySelector('ul') || container.querySelector('.xsnw5ke')) {
+                        container.setAttribute('data-fg-notes-tray', 'true');
+                        container.style.setProperty('display', 'none', 'important');
+                        container.style.setProperty('visibility', 'hidden', 'important');
+                        container.style.setProperty('height', '0px', 'important');
+                    }
+                });
+            }
         } catch (_) {}
     }
 
@@ -1786,6 +3127,8 @@
         }
 
         const reelUrl = 'https://www.instagram.com/reel/' + code + '/';
+        lastActiveMediaUrl = reelUrl;
+        lastActiveMediaTimestamp = Date.now();
 
         // If code hasn't changed, check if metadata became available later
         if (code === lastTrackedReelCode) {
@@ -1858,8 +3201,11 @@
     window.addEventListener('hashchange', checkAndTrackActiveReel);
     window.addEventListener('focusgram:urlchange', checkAndTrackActiveReel);
 
-    // Periodic ticker (every 250ms) to ensure reel transitions are never missed
-    setInterval(checkAndTrackActiveReel, 250);
+    // Event listeners above handle interactive transitions. Keep a low-frequency
+    // safety check for SPA changes without waking the foreground UI four times/sec.
+    setInterval(() => {
+        if (!document.hidden) checkAndTrackActiveReel();
+    }, 1000);
 
     // Ensure clicking 'Post' or 'Story' in the Create dropdown opens file/media picker
     document.addEventListener('click', (e) => {
@@ -2094,19 +3440,40 @@
         }
     }, true);
 
+    function cleanNotesTray() {
+        if (!currentSettings.hideNotesTray) return;
+        try {
+            const notesCandidates = document.querySelectorAll('.xsnw5ke, div[role="presentation"][data-interactable] ul, .x1c4vz4f ul');
+            for (let i = 0; i < notesCandidates.length; i++) {
+                const el = notesCandidates[i];
+                const topTray = el.closest('.x1c4vz4f') || el.closest('[role="presentation"][data-interactable]') || el.closest('ul');
+                if (topTray) {
+                    topTray.setAttribute('data-fg-notes-tray', 'true');
+                    topTray.style.setProperty('display', 'none', 'important');
+                    topTray.style.setProperty('visibility', 'hidden', 'important');
+                    topTray.style.setProperty('height', '0px', 'important');
+                }
+            }
+        } catch (_) {}
+    }
+
     function setupDomObservers() {
         if (!document.getElementById(STYLE_ID)) {
             updateGuardrailsCSS();
         }
         hideNav();
+        cleanNotesTray();
         checkStateAndNotify();
+        transformLinkModalContentScript();
 
         const observer = new MutationObserver(() => {
             if (!document.getElementById(STYLE_ID)) {
                 updateGuardrailsCSS();
             }
             hideNav();
+            cleanNotesTray();
             checkStateAndNotify();
+            transformLinkModalContentScript();
         });
 
         const root = document.body || document.documentElement;
@@ -2123,6 +3490,7 @@
             if (now - lastModalCheckTime >= modalDebounceMs) {
                 lastModalCheckTime = now;
                 checkStateAndNotify();
+                transformLinkModalContentScript();
             }
         });
 
@@ -2135,6 +3503,167 @@
                 attributeOldValue: false
             });
         }
+    }
+
+    function transformLinkModalContentScript() {
+        try {
+            const dialogs = document.querySelectorAll('div[role="dialog"]');
+            if (!dialogs || dialogs.length === 0) return;
+
+            let linkDialog = null;
+            const otherDialogs = [];
+
+            for (let i = 0; i < dialogs.length; i++) {
+                const d = dialogs[i];
+                const input = d.querySelector('input[type="text"], input:not([type]), input[readonly], textarea');
+                const dText = (d.textContent || '').toLowerCase();
+                let isLinkModal = false;
+                if (input) {
+                    const val = (input.value || input.getAttribute('value') || '').toLowerCase();
+                    if (val.includes('instagram.com') || val.startsWith('http') || val.length > 5) {
+                        isLinkModal = true;
+                    }
+                }
+                if (!isLinkModal) {
+                    if (dText.includes('select post link') || 
+                        dText.includes('select profile link') || 
+                        dText.includes('select link') || 
+                        dText.includes('select text') || 
+                        (input && (dText.includes('select') || dText.includes('auswählen') || dText.includes('seleccionar')))) {
+                        isLinkModal = true;
+                    }
+                }
+                if (!isLinkModal) {
+                    const btns = d.querySelectorAll('button, [role="button"]');
+                    for (let b = 0; b < btns.length; b++) {
+                        const txt = (btns[b].textContent || '').toLowerCase().trim();
+                        if (txt.includes('select') || txt.includes('auswählen') || txt.includes('seleccionar') || txt.includes('sélectionner')) {
+                            isLinkModal = true;
+                            break;
+                        }
+                    }
+                }
+                if (isLinkModal) {
+                    linkDialog = d;
+                } else {
+                    otherDialogs.push(d);
+                }
+            }
+
+            if (linkDialog) {
+                // 1. Hide the background "Share to..." or 3-dots action sheet completely so it doesn't appear beside/behind it
+                for (let j = 0; j < otherDialogs.length; j++) {
+                    try {
+                        const od = otherDialogs[j];
+                        od.style.setProperty('display', 'none', 'important');
+                        const pres = od.closest('[role="presentation"]');
+                        if (pres && pres !== linkDialog.closest('[role="presentation"]')) {
+                            pres.style.setProperty('display', 'none', 'important');
+                        }
+                    } catch (_) {}
+                }
+
+                // Also hide any floating share sheets or backdrops that are beside it
+                const shareSheets = document.querySelectorAll('div[aria-label*="Share" i], div[aria-label*="Share to" i]');
+                for (let s = 0; s < shareSheets.length; s++) {
+                    const sheet = shareSheets[s];
+                    if (sheet !== linkDialog && !sheet.contains(linkDialog)) {
+                        sheet.style.setProperty('display', 'none', 'important');
+                    }
+                }
+
+                // 2. Elevate link dialog and presentation wrapper to topmost z-index and center it
+                const pres = linkDialog.closest('[role="presentation"]') || linkDialog;
+                pres.style.setProperty('z-index', '2147483647', 'important');
+                linkDialog.style.setProperty('position', 'fixed', 'important');
+                linkDialog.style.setProperty('top', '50%', 'important');
+                linkDialog.style.setProperty('left', '50%', 'important');
+                linkDialog.style.setProperty('transform', 'translate(-50%, -50%)', 'important');
+                linkDialog.style.setProperty('z-index', '2147483647', 'important');
+
+                // 3. Compact modern modal styling (reduce size)
+                linkDialog.style.setProperty('max-width', '320px', 'important');
+                linkDialog.style.setProperty('width', '88%', 'important');
+                linkDialog.style.setProperty('max-height', '70vh', 'important');
+                linkDialog.style.setProperty('border-radius', '20px', 'important');
+                linkDialog.style.setProperty('box-shadow', '0 12px 36px rgba(0, 0, 0, 0.6)', 'important');
+                linkDialog.style.setProperty('margin', '0', 'important');
+
+                // 4. Change "Select Post Link" / "Select text" button to "Copy" and auto-copy on click
+                const btns = linkDialog.querySelectorAll('button, [role="button"]');
+                for (let b = 0; b < btns.length; b++) {
+                    const btn = btns[b];
+                    const txt = (btn.textContent || '').toLowerCase().trim();
+                    const isClose = (btn.getAttribute('aria-label') || '').toLowerCase().includes('close') || 
+                                    txt === 'cancel' || txt === 'close' || txt === '✕' || txt === '×';
+                    if (isClose) continue;
+
+                    const isSelectBtn = txt.includes('select post link') ||
+                                        txt.includes('select profile link') ||
+                                        txt.includes('select link') ||
+                                        txt.includes('select text') ||
+                                        txt.includes('select') ||
+                                        txt.includes('text auswählen') ||
+                                        txt.includes('seleccionar texto') ||
+                                        txt.includes('sélectionner') ||
+                                        txt.includes('seleziona testo') ||
+                                        txt.includes('auswählen') ||
+                                        txt.includes('seleccionar') ||
+                                        btn.getAttribute('data-fg-transformed') === 'true';
+
+                    if (isSelectBtn && btn.getAttribute('data-fg-transformed') !== 'true') {
+                        btn.setAttribute('data-fg-transformed', 'true');
+                        btn.textContent = 'Copy';
+                        btn.style.setProperty('font-weight', '600', 'important');
+                        btn.style.setProperty('cursor', 'pointer', 'important');
+                        btn.style.setProperty('background-color', '#0095f6', 'important');
+                        btn.style.setProperty('color', '#ffffff', 'important');
+                        btn.style.setProperty('border-radius', '8px', 'important');
+
+                        btn.addEventListener('click', function (e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+
+                            let urlToCopy = extractUrlFromDialog(linkDialog);
+                            if (!urlToCopy || isBareInstagramRootUrl(urlToCopy)) {
+                                if (lastActiveMediaUrl && (Date.now() - lastActiveMediaTimestamp < 60000)) {
+                                    urlToCopy = lastActiveMediaUrl;
+                                }
+                            }
+                            if (!urlToCopy || isBareInstagramRootUrl(urlToCopy)) {
+                                const path = window.location.pathname || '';
+                                if (path.startsWith('/p/') || path.startsWith('/reel/')) {
+                                    urlToCopy = window.location.href;
+                                }
+                            }
+
+                            if (urlToCopy && !isBareInstagramRootUrl(urlToCopy)) {
+                                postToNative({ action: 'clipboardCopy', text: urlToCopy });
+                                try {
+                                    window.location.href = 'focusgram-clipboard://copy?text=' + encodeURIComponent(urlToCopy);
+                                } catch (_) {}
+                                btn.textContent = 'Copied!';
+                                btn.style.setProperty('background-color', '#10b981', 'important');
+                                btn.style.setProperty('color', '#ffffff', 'important');
+
+                                setTimeout(function () {
+                                    try {
+                                        const closeBtn = linkDialog.querySelector('button[aria-label="Close"], svg[aria-label="Close"]')?.closest('button');
+                                        if (closeBtn) {
+                                            closeBtn.click();
+                                        } else {
+                                            linkDialog.style.display = 'none';
+                                            const p = linkDialog.closest('[role="presentation"]');
+                                            if (p) p.style.display = 'none';
+                                        }
+                                    } catch (_) {}
+                                }, 400);
+                            }
+                        }, true);
+                    }
+                }
+            }
+        } catch (_) {}
     }
 
     // SPA route and modal state observer.
@@ -2214,7 +3743,7 @@
     };
 
     // Unblur reveal engine (tap and 350ms hold).
-    const HOLD_MS = 350, MOVE_TOL = 10;
+    const HOLD_MS = 350, MOVE_TOL = 24;
     const root = document.documentElement;
     let timer = 0, sx = 0, sy = 0, swallowUntil = 0;
 
@@ -2243,6 +3772,19 @@
                 return null;
             }
 
+            // The reaction rail shares a section with feed media on current
+            // Instagram markup. Ignore the controls, not their common section.
+            if (el.closest('header, form, [role="button"][aria-label*="Like"], [role="button"][aria-label*="Comment"]')) {
+                return null;
+            }
+
+            // If "Block Reels & Short Videos" is on, feed videos CANNOT be unblurred
+            const isBlockReelsActive = !!currentSettings.noReels;
+            const isVideo = el.tagName === 'VIDEO' || !!el.closest('video') || !!el.querySelector('video') || !!el.closest('article div:has(> video)');
+            if (isBlockReelsActive && isVideo) {
+                return null;
+            }
+
             // 1. Check if clicked inside a specific carousel slide
             const carouselSlide = el.closest('article ul li, article div[role="group"]');
             if (carouselSlide) {
@@ -2252,14 +3794,22 @@
                 return null; // Already unblurred slide; pass through to native Instagram actions
             }
 
-            // 2. Fallback to single post (non-carousel)
+            // 2. Feed post media container or article
+            const mediaContainer = el.closest('div[style*="aspect-ratio"], div:has(> img), div:has(> video)');
+            if (mediaContainer && !mediaContainer.hasAttribute('data-fg-reveal') && !mediaContainer.classList.contains('fg-unblurred')) {
+                return mediaContainer;
+            }
+
+            // 3. Fallback to single post (non-carousel)
             const feedArticle = el.closest('article');
             if (feedArticle && !feedArticle.hasAttribute('data-fg-reveal') && !feedArticle.classList.contains('fg-unblurred')) {
-                const inHeader = !!el.closest('header');
-                const inFooter = !!el.closest('section:has(svg[aria-label="Like"]), section:has(svg[aria-label="Comment"]), form');
-                if (!inHeader && !inFooter) {
-                    return feedArticle;
-                }
+                return feedArticle;
+            }
+
+            // 4. Fallback to direct media element or container
+            const media = el.matches('img, video, canvas') ? el : el.closest('div:has(> img), div:has(> video)');
+            if (media && !media.hasAttribute('data-fg-reveal') && !media.classList.contains('fg-unblurred')) {
+                return media;
             }
         }
 
@@ -2285,14 +3835,37 @@
 
     function revealTarget(target) {
         if (!target) return;
-        target.setAttribute('data-fg-reveal', '1');
-        target.classList.add('fg-unblurred');
         target.style.setProperty('filter', 'none', 'important');
-        target.querySelectorAll('*').forEach(c => {
-            c.setAttribute('data-fg-reveal', '1');
-            c.classList.add('fg-unblurred');
-            c.style.setProperty('filter', 'none', 'important');
-        });
+        const markRevealed = function (element) {
+            element.setAttribute('data-fg-reveal', '1');
+            element.classList.add('fg-unblurred');
+            element.style.setProperty('filter', 'none', 'important');
+        };
+        markRevealed(target);
+        const children = target.querySelectorAll('*');
+        for (let i = 0; i < children.length; i++) {
+            markRevealed(children[i]);
+        }
+        // A feed post has several nested media wrappers, each of which may carry
+        // the blur filter. Reveal matching ancestors all the way to the post.
+        const art = target.closest('article');
+        let ancestor = target.parentElement;
+        while (ancestor && ancestor !== art) {
+            if (ancestor.matches('div[style*="aspect-ratio"], div:has(> img), div:has(> video), li, div[role="group"]')) {
+                markRevealed(ancestor);
+            }
+            ancestor = ancestor.parentElement;
+        }
+
+        // If unblurring inside a single-post article, reveal its media too.
+        if (art && !target.closest('li, [role="group"]')) {
+            art.setAttribute('data-fg-reveal', '1');
+            markRevealed(art);
+            const artChildren = art.querySelectorAll('img, video, canvas, div[style*="aspect-ratio"], div:has(> img), div:has(> video)');
+            for (let i = 0; i < artChildren.length; i++) {
+                markRevealed(artChildren[i]);
+            }
+        }
     }
 
     addEventListener("pointerdown", e => {
@@ -2329,6 +3902,36 @@
 
     addEventListener("contextmenu", e => {
       if (getBlurredTarget(e.target)) e.preventDefault();
+    }, true);
+
+    // Block client-side link navigation when feature toggles (Block Reels, Block DMs, Hide Stories) are active
+    addEventListener("click", e => {
+      // If user is clicking to unblur a blurred target, do not intercept or navigate away
+      if (getBlurredTarget(e.target)) return;
+
+      const link = e.target.closest('a[href]');
+      if (!link) return;
+      const href = (link.getAttribute('href') || '').toLowerCase();
+      if (currentSettings.noReels && (href.startsWith('/reel/') || href.startsWith('/reels') || href === '/reel')) {
+        if (!e.target.closest('article')) {
+          e.preventDefault(); e.stopPropagation();
+          if (typeof window.__focusgramNavigate === 'function') window.__focusgramNavigate('/');
+          else window.location.href = '/';
+          return;
+        }
+      }
+      if (currentSettings.noDMs && (href.startsWith('/direct') || href.startsWith('/messages'))) {
+        e.preventDefault(); e.stopPropagation();
+        if (typeof window.__focusgramNavigate === 'function') window.__focusgramNavigate('/');
+        else window.location.href = '/';
+        return;
+      }
+      if (currentSettings.noStories && (href.startsWith('/stories/') || href === '/stories')) {
+        e.preventDefault(); e.stopPropagation();
+        if (typeof window.__focusgramNavigate === 'function') window.__focusgramNavigate('/');
+        else window.location.href = '/';
+        return;
+      }
     }, true);
 
     // In-page reels metadata extractor.
@@ -3725,11 +5328,9 @@
 
         if (msg.revealMode) {
             mode = msg.revealMode;
-            return;
         }
 
-        if (msg.action === 'revealMode' && msg.revealMode) {
-            mode = msg.revealMode;
+        if (msg.action === 'revealMode') {
             return;
         }
 
@@ -3807,8 +5408,10 @@
             const ghost = event.data.ghost || {};
             Object.assign(currentSettings, {
                 noAds: config.noAds !== undefined ? config.noAds : currentSettings.noAds,
-                noStories: config.hideStories !== undefined ? config.hideStories : currentSettings.noStories,
-                noReels: config.hideReels !== undefined ? config.hideReels : currentSettings.hideReels,
+                noStories: config.noStories !== undefined ? config.noStories : (config.hideStories !== undefined ? config.hideStories : currentSettings.noStories),
+                noReels: config.noReels !== undefined ? config.noReels : (config.hideReels !== undefined ? config.hideReels : currentSettings.noReels),
+                hideFeedPosts: config.hideFeedPosts !== undefined ? config.hideFeedPosts : currentSettings.hideFeedPosts,
+                noAutoplay: config.noAutoplay !== undefined ? config.noAutoplay : currentSettings.noAutoplay,
                 blurExplore: config.blurExplore !== undefined ? config.blurExplore : currentSettings.blurExplore,
                 blurReels: config.blurReels !== undefined ? config.blurReels : currentSettings.blurReels,
                 blurFeed: config.blurFeed !== undefined ? config.blurFeed : currentSettings.blurFeed,
@@ -3818,6 +5421,7 @@
                 hideFollowerCounts: config.hideFollowerCounts !== undefined ? config.hideFollowerCounts : currentSettings.hideFollowerCounts,
                 hideSuggestedPosts: config.hideSuggestedPosts !== undefined ? config.hideSuggestedPosts : currentSettings.hideSuggestedPosts,
                 hideShopTab: config.hideShopTab !== undefined ? config.hideShopTab : currentSettings.hideShopTab,
+                hideNotesTray: config.hideNotesTray !== undefined ? config.hideNotesTray : currentSettings.hideNotesTray,
                 videoDownloadEnabled: config.videoDownloadEnabled !== undefined ? config.videoDownloadEnabled : currentSettings.videoDownloadEnabled,
                 grayscale: config.grayscale !== undefined ? config.grayscale : currentSettings.grayscale,
                 minimalMode: config.minimalMode !== undefined ? config.minimalMode : currentSettings.minimalMode,
@@ -3998,30 +5602,58 @@
         }
     }
 
+    // Establish persistent bidirectional connection to background script (reliable in GeckoView)
+    let bgContentPort = null;
+    function connectToBackgroundPort() {
+        try {
+            if (typeof browser !== 'undefined' && browser.runtime && browser.runtime.connect) {
+                bgContentPort = browser.runtime.connect({ name: 'focusgram-content' });
+                bgContentPort.onMessage.addListener((msg) => {
+                    handleIncomingMessage(msg);
+                });
+                bgContentPort.onDisconnect.addListener(() => {
+                    bgContentPort = null;
+                    setTimeout(connectToBackgroundPort, 2000);
+                });
+            }
+        } catch (_) {}
+    }
+    connectToBackgroundPort();
+
     // Listen for relayed messages from background script as fallback
     if (typeof browser !== 'undefined' && browser.runtime && browser.runtime.onMessage) {
         browser.runtime.onMessage.addListener(handleIncomingMessage);
     }
 
-    // Query initial settings from background
-    if (typeof browser !== 'undefined' && browser.runtime && browser.runtime.sendMessage) {
-        const applyLoadedSettings = (response) => {
-            if (response && response.settings) {
-                Object.assign(currentSettings, response.settings);
-                if (response.settings.unblurMode) {
-                    mode = response.settings.unblurMode;
-                }
-                updateGuardrailsCSS();
-                syncGhostSettings();
-                syncChatLockSettings(response.settings);
+    // Query initial settings from background and native host
+    const applyLoadedSettings = (response) => {
+        if (response && response.settings) {
+            Object.assign(currentSettings, response.settings);
+            if (response.settings.unblurMode) {
+                mode = response.settings.unblurMode;
             }
-        };
+            updateGuardrailsCSS();
+            hideNav();
+            syncGhostSettings();
+            syncChatLockSettings(response.settings);
+        }
+    };
 
+    if (typeof browser !== 'undefined' && browser.runtime && browser.runtime.sendMessage) {
         try {
             const res = browser.runtime.sendMessage({ action: 'getSettings' }, applyLoadedSettings);
             if (res && typeof res.then === 'function') {
                 res.then(applyLoadedSettings).catch(() => {});
             }
+        } catch (_) {}
+    }
+
+    // Direct native messaging query as primary/fallback source
+    if (typeof browser !== 'undefined' && browser.runtime && browser.runtime.sendNativeMessage) {
+        try {
+            browser.runtime.sendNativeMessage("focusgram", { action: "getSettings" }).then((res) => {
+                if (res) applyLoadedSettings(res);
+            }).catch(() => {});
         } catch (_) {}
     }
 
@@ -4035,10 +5667,10 @@
     // Detect and notify native of Instagram's theme (light/dark) with continuous polling
     detectAndSendTheme();
     
-    // Continuous theme polling every 500ms to catch all theme changes
+    // Theme changes are also observed below; this is only an infrequent SPA fallback.
     setInterval(() => {
-        detectAndSendTheme();
-    }, 500);
+        if (!document.hidden) detectAndSendTheme();
+    }, 3000);
     
     // Watch for theme changes via media query
     try {
@@ -4131,7 +5763,6 @@
 
     let activeBioStyle = 'bold';
     let bioToolbarEl = null;
-    let bioCounterEl = null;
     let activeBioTarget = null;
 
     function normalizeChar(char) {
@@ -4185,22 +5816,6 @@
         const path = (window.location.pathname || '').toLowerCase();
         if (path.includes('/accounts/edit') && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT')) return true;
         return false;
-    }
-
-    function updateBioCharCounter() {
-        if (!bioCounterEl || !activeBioTarget) return;
-        const text = activeBioTarget.value || activeBioTarget.textContent || '';
-        const codePoints = Array.from(text).length;
-        const utf16Length = text.length;
-
-        bioCounterEl.textContent = `${codePoints} / 150`;
-        if (codePoints > 140 || utf16Length > 140) {
-            bioCounterEl.style.color = '#ef4444';
-        } else if (codePoints > 120) {
-            bioCounterEl.style.color = '#f59e0b';
-        } else {
-            bioCounterEl.style.color = '#8e8e8e';
-        }
     }
 
     function updateBioToolbarPosition() {
@@ -4294,26 +5909,10 @@
             chipsScroll.appendChild(chip);
         });
 
-        const counter = document.createElement('span');
-        counter.id = 'fg-bio-counter';
-        counter.style.cssText = `
-            font-size: 11px !important;
-            font-weight: 600 !important;
-            color: #8e8e8e !important;
-            white-space: nowrap !important;
-            padding: 4px 8px !important;
-            border-radius: 12px !important;
-            background: rgba(255, 255, 255, 0.05) !important;
-            border: 1px solid rgba(255, 255, 255, 0.08) !important;
-        `;
-        counter.textContent = '0 / 150';
-
         toolbar.appendChild(chipsScroll);
-        toolbar.appendChild(counter);
         (document.body || document.documentElement).appendChild(toolbar);
 
         bioToolbarEl = toolbar;
-        bioCounterEl = counter;
         return toolbar;
     }
 
@@ -4350,8 +5949,6 @@
                 }
                 target.setSelectionRange(start, start + converted.length);
             }
-            // If no text selected, do NOT alter existing text!
-            updateBioCharCounter();
         }
     }
 
@@ -4367,7 +5964,6 @@
         if (bioToolbarEl) {
             updateBioToolbarPosition();
             bioToolbarEl.style.display = 'flex';
-            updateBioCharCounter();
         }
     }
 
@@ -4392,13 +5988,6 @@
             e.preventDefault();
             const converted = convertStringToStyle(e.data, activeBioStyle);
             document.execCommand('insertText', false, converted);
-            updateBioCharCounter();
-        }
-    }, true);
-
-    document.addEventListener('input', (e) => {
-        if (activeBioTarget && (e.target === activeBioTarget || isBioTarget(e.target))) {
-            updateBioCharCounter();
         }
     }, true);
 
@@ -4670,7 +6259,9 @@
         checkAndMountStorySearch();
     });
     viewersObserver.observe(document.documentElement, { childList: true, subtree: true });
-    setInterval(checkAndMountStorySearch, 400);
+    setInterval(() => {
+        if (!document.hidden) checkAndMountStorySearch();
+    }, 1500);
 
     // Dismiss search bar on route change away from stories
     window.addEventListener('focusgram:urlchange', (e) => {

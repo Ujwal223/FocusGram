@@ -11,6 +11,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
@@ -53,7 +55,9 @@ import com.ujwal.focusgram.core.ui.theme.DarkCard
 import com.ujwal.focusgram.core.ui.theme.DarkCardElevated
 import com.ujwal.focusgram.core.ui.theme.FocusGreen
 import com.ujwal.focusgram.core.ui.theme.InstagramBlue
+import com.ujwal.focusgram.core.ui.theme.LightBorder
 import com.ujwal.focusgram.core.ui.theme.PureBlack
+import com.ujwal.focusgram.core.ui.theme.PureWhite
 import com.ujwal.focusgram.core.ui.theme.TextMuted
 import com.ujwal.focusgram.core.ui.theme.TextPrimary
 import com.ujwal.focusgram.core.ui.theme.TextSecondary
@@ -70,14 +74,15 @@ fun UpdateBanner(
 ) {
     val context = LocalContext.current
     val view = LocalView.current
+    val isDark = isSystemInDarkTheme()
     var isExpanded by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(DarkCard)
-            .border(1.dp, DarkBorder, RoundedCornerShape(16.dp))
+            .background(if (isDark) DarkCard else PureWhite)
+            .border(1.dp, if (isDark) DarkBorder else LightBorder, RoundedCornerShape(16.dp))
             .padding(14.dp)
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -117,7 +122,7 @@ fun UpdateBanner(
                         text = "FocusGram v${updateInfo.latestVersion}",
                         style = MaterialTheme.typography.titleSmall.copy(
                             fontWeight = FontWeight.SemiBold,
-                            color = TextPrimary
+                            color = if (isDark) TextPrimary else PureBlack
                         )
                     )
                 }
@@ -132,7 +137,7 @@ fun UpdateBanner(
                     Icon(
                         imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                         contentDescription = if (isExpanded) "Collapse" else "Expand",
-                        tint = TextSecondary,
+                        tint = if (isDark) TextSecondary else Color(0xFF6C6C70),
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -149,7 +154,7 @@ fun UpdateBanner(
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Dismiss update",
-                        tint = TextMuted,
+                        tint = if (isDark) TextMuted else Color(0xFF8E8E93),
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -162,7 +167,7 @@ fun UpdateBanner(
             ) {
                 Column(modifier = Modifier.padding(top = 12.dp)) {
                     HorizontalDivider(
-                        color = DarkBorder,
+                        color = if (isDark) DarkBorder else LightBorder,
                         thickness = 0.5.dp,
                         modifier = Modifier.padding(bottom = 10.dp)
                     )
@@ -171,7 +176,7 @@ fun UpdateBanner(
                         text = "What's New in v${updateInfo.latestVersion}",
                         style = MaterialTheme.typography.labelMedium.copy(
                             fontWeight = FontWeight.Bold,
-                            color = TextPrimary
+                            color = if (isDark) TextPrimary else PureBlack
                         )
                     )
 
@@ -180,13 +185,13 @@ fun UpdateBanner(
                     Text(
                         text = formatReleaseNotes(updateInfo.whatsNew),
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color = TextSecondary,
+                            color = if (isDark) TextSecondary else Color(0xFF6C6C70),
                             lineHeight = 18.sp
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
-                            .background(DarkCardElevated)
+                            .background(if (isDark) DarkCardElevated else Color(0xFFF2F2F7))
                             .padding(10.dp)
                     )
 

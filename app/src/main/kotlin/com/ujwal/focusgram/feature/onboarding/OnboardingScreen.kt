@@ -1,8 +1,11 @@
 package com.ujwal.focusgram.feature.onboarding
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -57,6 +60,8 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.core.view.WindowCompat
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -103,16 +108,56 @@ fun OnboardingScreen(
     modifier: Modifier = Modifier
 ) {
     val view = LocalView.current
+    SideEffect {
+        val window = (view.context as? Activity)?.window ?: return@SideEffect
+        val windowInsetsController = WindowCompat.getInsetsController(window, view)
+        windowInsetsController.isAppearanceLightStatusBars = false
+        windowInsetsController.isAppearanceLightNavigationBars = false
+    }
     val scope = rememberCoroutineScope()
     val totalPages = 6
     val pagerState = rememberPagerState(pageCount = { totalPages })
+    val context = LocalContext.current
 
-    var notificationGranted by remember { mutableStateOf(false) }
+    fun checkNotificationsEnabled(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
+        }
+    }
+
+    var notificationGranted by remember {
+        mutableStateOf(checkNotificationsEnabled())
+    }
+
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                notificationGranted = checkNotificationsEnabled()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+    var permissionRequestedOnce by remember { mutableStateOf(false) }
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         notificationGranted = isGranted
-        view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+        if (isGranted) {
+            scope.launch {
+                settingsRepository.setNotifyPersistent(true)
+                settingsRepository.setNotifySessionEnd(true)
+            }
+        }
+        com.ujwal.focusgram.core.utils.HapticHelper.performConfirm(view)
     }
 
     Box(
@@ -145,6 +190,7 @@ fun OnboardingScreen(
                             view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                             scope.launch {
                                 settingsRepository.setFirstRunCompleted()
+                                settingsRepository.setHasSeenGestureGuide(false)
                                 onComplete()
                             }
                         }
@@ -177,9 +223,55 @@ fun OnboardingScreen(
                         isGranted = notificationGranted,
                         onRequestPermission = {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                val activity = context as? android.app.Activity
+                                val shouldShowRationale = activity?.let {
+                                    androidx.core.app.ActivityCompat.shouldShowRequestPermissionRationale(it, Manifest.permission.POST_NOTIFICATIONS)
+                                } ?: true
+
+                                if (permissionRequestedOnce && !shouldShowRationale) {
+                                    try {
+                                        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {
+                                        try {
+                                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                                data = Uri.fromParts("package", context.packageName, null)
+                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            }
+                                            context.startActivity(intent)
+                                        } catch (_: Exception) {}
+                                    }
+                                } else {
+                                    permissionRequestedOnce = true
+                                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                }
                             } else {
-                                notificationGranted = true
+                                if (androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+                                    notificationGranted = true
+                                    scope.launch {
+                                        settingsRepository.setNotifyPersistent(true)
+                                        settingsRepository.setNotifySessionEnd(true)
+                                    }
+                                } else {
+                                    try {
+                                        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {
+                                        try {
+                                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                                data = Uri.fromParts("package", context.packageName, null)
+                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            }
+                                            context.startActivity(intent)
+                                        } catch (_: Exception) {}
+                                    }
+                                }
                             }
                         }
                     )
@@ -225,6 +317,7 @@ fun OnboardingScreen(
                         scope.launch {
                             if (isLastPage) {
                                 settingsRepository.setFirstRunCompleted()
+                                settingsRepository.setHasSeenGestureGuide(false)
                                 onComplete()
                             } else {
                                 pagerState.animateScrollToPage(
@@ -799,7 +892,7 @@ private fun NotificationSlide(
                     .height(50.dp)
             ) {
                 Text(
-                    text = "Enable Session Notifications",
+                    text = "Allow Notifications",
                     style = MaterialTheme.typography.labelLarge.copy(
                         fontWeight = FontWeight.Bold,
                         color = FocusGreen

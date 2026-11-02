@@ -19,12 +19,28 @@ class EncryptedStorage(context: Context) {
     private val securePrefs: SharedPreferences
 
     init {
-        val masterKey = MasterKey.Builder(context.applicationContext)
+        securePrefs = try {
+            createEncryptedPrefs(context.applicationContext)
+        } catch (e: Exception) {
+            Log.e(TAG, "EncryptedSharedPreferences init failed, resetting corrupted vault: ${e.message}", e)
+            try {
+                // Clear corrupt preferences file and recreate
+                context.applicationContext.getSharedPreferences(SECURE_VAULT_NAME, Context.MODE_PRIVATE).edit().clear().commit()
+                createEncryptedPrefs(context.applicationContext)
+            } catch (fallbackError: Exception) {
+                Log.e(TAG, "Fatal Keystore failure, falling back to private storage: ${fallbackError.message}", fallbackError)
+                context.applicationContext.getSharedPreferences("${SECURE_VAULT_NAME}_compat", Context.MODE_PRIVATE)
+            }
+        }
+    }
+
+    private fun createEncryptedPrefs(appContext: Context): SharedPreferences {
+        val masterKey = MasterKey.Builder(appContext)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
 
-        securePrefs = EncryptedSharedPreferences.create(
-            context.applicationContext,
+        return EncryptedSharedPreferences.create(
+            appContext,
             SECURE_VAULT_NAME,
             masterKey,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
@@ -57,7 +73,10 @@ class EncryptedStorage(context: Context) {
         val storedHash = securePrefs.getString(KEY_PIN_HASH, null) ?: return false
         val enteredHash = hashPin(enteredPin)
 
-        val isValid = storedHash == enteredHash
+        val isValid = MessageDigest.isEqual(
+            storedHash.toByteArray(Charsets.UTF_8),
+            enteredHash.toByteArray(Charsets.UTF_8)
+        )
         if (isValid) {
             resetFailedAttempts()
         } else {
@@ -96,7 +115,10 @@ class EncryptedStorage(context: Context) {
         }
         val storedHash = securePrefs.getString(KEY_CHAT_PIN_HASH, null) ?: return false
         val enteredHash = hashPin("chat_$enteredPin")
-        val isValid = storedHash == enteredHash
+        val isValid = MessageDigest.isEqual(
+            storedHash.toByteArray(Charsets.UTF_8),
+            enteredHash.toByteArray(Charsets.UTF_8)
+        )
         if (isValid) {
             resetFailedAttempts()
         } else {

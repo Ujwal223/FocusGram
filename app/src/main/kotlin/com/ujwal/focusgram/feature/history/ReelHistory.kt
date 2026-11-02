@@ -27,7 +27,10 @@ data class ReelEntry(
  *
  * Keeps up to 500 entries, newest first. Thread-safe via synchronized lock and single-thread executor.
  */
-class ReelHistory(private val file: File) {
+class ReelHistory(
+    private val file: File,
+    private val minRewatchIntervalMs: Long = 0L
+) {
     private val lock = Any()
     private val io = Executors.newSingleThreadExecutor()
     private val sessionCodes = HashSet<String>()
@@ -92,27 +95,23 @@ class ReelHistory(private val file: File) {
             val validCodeA = cleanCodeA.length >= 4 && cleanCodeA !in IGNORED_CODES && cleanCodeA != cleanAuthorA
             val validCodeB = cleanCodeB.length >= 4 && cleanCodeB !in IGNORED_CODES && cleanCodeB != cleanAuthorB
 
-            // 1. Direct shortcode match
-            if (validCodeA && validCodeB && cleanCodeA.equals(cleanCodeB, ignoreCase = true)) {
-                return true
+            // 1. Direct shortcode match: if both have valid shortcodes, they ONLY match if identical
+            if (validCodeA && validCodeB) {
+                return cleanCodeA.equals(cleanCodeB, ignoreCase = true)
             }
 
-            // 2. Same author matching
+            // 2. Author placeholder matching (only when one or both codes are placeholders, and author + caption match)
             if (cleanAuthorA.isNotBlank() && cleanAuthorA == cleanAuthorB) {
                 val normA = normalizeCaption(captionA)
                 val normB = normalizeCaption(captionB)
-                if (normA.isNotBlank() && normB.isNotBlank()) {
-                    val prefixLen = minOf(normA.length, normB.length, 30)
-                    if (prefixLen >= 8 && normA.take(prefixLen) == normB.take(prefixLen)) {
-                        return true
-                    }
-                }
-                // Author placeholder matching (only when captions match, never blindly merge different reels)
                 val isAuthorCodeA = cleanCodeA == cleanAuthorA || !validCodeA
                 val isAuthorCodeB = cleanCodeB == cleanAuthorB || !validCodeB
-                if (isAuthorCodeA && isAuthorCodeB) {
-                    if (normA.isNotBlank() && normB.isNotBlank() && normA.take(15) == normB.take(15)) {
-                        return true
+                if (isAuthorCodeA || isAuthorCodeB) {
+                    if (normA.isNotBlank() && normB.isNotBlank()) {
+                        val prefixLen = minOf(normA.length, normB.length, 30)
+                        if (prefixLen >= 8 && normA.take(prefixLen) == normB.take(prefixLen)) {
+                            return true
+                        }
                     }
                 }
             }
@@ -178,7 +177,14 @@ class ReelHistory(private val file: File) {
         }
 
         val maxPriorViews = matchingEntries.maxOfOrNull { it.views } ?: 0
-        val newViews = maxOf(maxPriorViews, matchingEntries.size) + 1
+        val lastSeenTimestamp = matchingEntries.maxOfOrNull { it.lastSeen } ?: 0L
+        val now = System.currentTimeMillis()
+        val isCooldown = minRewatchIntervalMs > 0L && matchingEntries.isNotEmpty() && (now - lastSeenTimestamp < minRewatchIntervalMs)
+        val newViews = if (isCooldown) {
+            maxOf(maxPriorViews, 1)
+        } else {
+            maxOf(maxPriorViews, matchingEntries.size) + 1
+        }
 
         val updated = ReelEntry(
             code = bestCode,

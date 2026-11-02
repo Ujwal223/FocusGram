@@ -26,6 +26,7 @@ import com.ujwal.focusgram.core.datastore.SettingsRepository
 import com.ujwal.focusgram.core.model.FocusSettings
 import com.ujwal.focusgram.core.security.EncryptedStorage
 import com.ujwal.focusgram.core.ui.components.FocusGramTopBar
+import com.ujwal.focusgram.core.ui.components.IOSBg
 import com.ujwal.focusgram.core.ui.components.IOSGroupedCard
 import com.ujwal.focusgram.core.ui.components.IOSSectionTitle
 import com.ujwal.focusgram.core.ui.components.IOSSettingsRow
@@ -45,8 +46,8 @@ fun AppLockSettingsPage(
     encryptedStorage: EncryptedStorage,
     onBack: () -> Unit,
     onChangePin: () -> Unit,
-    onChangeChatPin: () -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onChangeChatPin: () -> Unit = {}
 ) {
     val settings by repository.settingsFlow.collectAsState(initial = FocusSettings())
     val scope = rememberCoroutineScope()
@@ -58,7 +59,7 @@ fun AppLockSettingsPage(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(PureBlack)
+            .background(IOSBg)
             .padding(WindowInsets.statusBars.asPaddingValues())
     ) {
         FocusGramTopBar(
@@ -109,14 +110,25 @@ fun AppLockSettingsPage(
                                 }
                             }
                         )
+                        val hasSeparateChatPin = settings.useSeparateChatPin || encryptedStorage.hasChatPin()
                         IOSSettingsRow(
                             title = if (encryptedStorage.hasPin()) "Change 4-Digit PIN" else "Set 4-Digit PIN",
                             subtitle = "Update master passcode for app entry",
                             icon = Icons.Default.Lock,
                             iconBgColor = IOSOrange,
                             onClick = onChangePin,
-                            showDivider = false
+                            showDivider = hasSeparateChatPin
                         )
+                        if (hasSeparateChatPin) {
+                            IOSSettingsRow(
+                                title = if (encryptedStorage.hasChatPin()) "Change Chat PIN" else "Set Chat PIN",
+                                subtitle = "Update dedicated passcode for protected conversations",
+                                icon = Icons.Default.Lock,
+                                iconBgColor = Color(0xFF9D4EDD),
+                                onClick = onChangeChatPin,
+                                showDivider = false
+                            )
+                        }
                     }
                 }
 

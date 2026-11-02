@@ -2,6 +2,7 @@ package com.ujwal.focusgram
 
 import com.ujwal.focusgram.core.model.FocusSettings
 import com.ujwal.focusgram.feature.settings.SettingsSubpage
+import com.ujwal.focusgram.feature.wellness.isSingleCharOrDelete
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -99,6 +100,22 @@ class FocusFeaturesEnhancementsTest {
     }
 
     @Test
+    fun testHomeFeedBlurUsesTheSharedRevealMode() {
+        val hiderScript = getFile("src/main/assets/scripts/content_hider.js").readText()
+        val extensionScript = getFile("src/main/assets/extensions/ublock/focusgram_content.js").readText()
+
+        for (script in listOf(hiderScript, extensionScript)) {
+            assertTrue("Home-feed reveal must not reject an entire section containing reaction controls",
+                !script.contains("section:has(svg[aria-label=\"Like\"]), section:has"))
+            assertTrue("Home-feed reveal must expose nested media wrappers",
+                script.contains("const markRevealed") && script.contains("let ancestor = target.parentElement"))
+        }
+
+        val settingsScreen = getFile("src/main/kotlin/com/ujwal/focusgram/feature/settings/SettingsScreen.kt").readText()
+        assertTrue("Blur Reels setting must be presented as Blur Videos", settingsScreen.contains("title = \"Blur Videos\""))
+    }
+
+    @Test
     fun testCupertinoWheelPickerUsesModernNonDeprecatedVibrator() {
         val source = getFile("src/main/kotlin/com/ujwal/focusgram/core/ui/components/CupertinoWheelPicker.kt").readText()
         assertFalse("Must not use deprecated Context.VIBRATOR_SERVICE", source.contains("Context.VIBRATOR_SERVICE"))
@@ -172,8 +189,6 @@ class FocusFeaturesEnhancementsTest {
             source.contains("AppDestination.APP_LOCK_SETTINGS") &&
             source.contains("AppDestination.SCREEN_TIME") &&
             source.contains("AppDestination.REELS_HISTORY") &&
-            source.contains("AppDestination.SNAPSHOTS") &&
-            source.contains("AppDestination.GUARDRAILS") &&
             source.contains("destination = AppDestination.SETTINGS")
         )
     }
@@ -514,8 +529,10 @@ class FocusFeaturesEnhancementsTest {
     @Test
     fun testPersistentNotificationTitleUsesSessionTimer() {
         val serviceSource = getFile("src/main/kotlin/com/ujwal/focusgram/feature/screentime/ScreenTimeService.kt").readText()
-        assertTrue("ScreenTimeService must format title as 'Session Timer: ...'",
-            serviceSource.contains("\"Session Timer: \$timeStr\""))
+        assertTrue("ScreenTimeService must format active title as 'Session Timer'",
+            serviceSource.contains("val title = \"Session Timer\"") || serviceSource.contains("val initialTitle = \"Session Timer\""))
+        assertFalse("ScreenTimeService must NOT include \$timeStr in active title so system chronometer renders cleanly",
+            serviceSource.contains("val title = \"Session Timer: \$timeStr\""))
         assertFalse("ScreenTimeService must NOT toggle between Reels Focus and Instagram Focus in title",
             serviceSource.contains("if (isReelsSession) \"Reels Focus: \$timeStr\" else \"Instagram Focus: \$timeStr\""))
     }
@@ -705,6 +722,26 @@ class FocusFeaturesEnhancementsTest {
                 debugSource.contains("Set Total Duration") &&
                 debugSource.contains("Set Remaining")
         )
+        assertTrue(
+            "DebugMenuScreen must support onTestGestureGuide and launcher button",
+            debugSource.contains("onTestGestureGuide") &&
+                debugSource.contains("Test Gesture Guide (Tooltips)")
+        )
+    }
+
+    @Test
+    fun testSessionTimerPausesOnAppBackgroundingToPreventReset() {
+        val appSource = getFile("src/main/kotlin/com/ujwal/focusgram/ui/FocusGramApp.kt").readText()
+        val mainActivitySource = getFile("src/main/kotlin/com/ujwal/focusgram/MainActivity.kt").readText()
+
+        assertTrue(
+            "FocusGramApp must pause session on ON_STOP instead of destroying it",
+            appSource.contains("ScreenTimeService.pauseSession(context, currentTotalElapsedSeconds, currentSessionDurationMinutes)")
+        )
+        assertTrue(
+            "MainActivity must pause session on onStop() instead of destroying it",
+            mainActivitySource.contains("ScreenTimeService.pauseSession(this)")
+        )
     }
 
     @Test
@@ -751,6 +788,117 @@ class FocusFeaturesEnhancementsTest {
         assertTrue(
             "ScreenTimeScreen Mindful Insights must provide friendly message when daily limit is off",
             screenTimeSource.contains("dailyLimitMinutes <= 0 -> \"You have no daily limit set.")
+        )
+    }
+
+    @Test
+    fun testEffortFrictionWordCountDefaultIs10() {
+        val settings = FocusSettings()
+        assertEquals("Effort friction default word challenge count must be 10", 10, settings.wordChallengeCount)
+    }
+
+    @Test
+    fun testDisciplineMantraRepositoryAllWordCountPools() {
+        val repo = com.ujwal.focusgram.feature.wellness.DisciplineMantraRepository
+
+        // 10 words
+        assertTrue("Pool of 10-word mantras must contain at least 60 items", repo.mantras10.size >= 60)
+        for ((index, item) in repo.mantras10.withIndex()) {
+            val count = item.trim().split(Regex("\\s+")).size
+            assertEquals("10-word mantra at index $index must have 10 words: \"$item\"", 10, count)
+        }
+
+        // 15 words
+        assertTrue("Pool of 15-word mantras must contain at least 50 items", repo.mantras15.size >= 50)
+        for ((index, item) in repo.mantras15.withIndex()) {
+            val count = item.trim().split(Regex("\\s+")).size
+            assertEquals("15-word mantra at index $index must have 15 words: \"$item\"", 15, count)
+        }
+
+        // 20 words
+        assertTrue("Pool of 20-word mantras must contain at least 45 items", repo.mantras20.size >= 45)
+        for ((index, item) in repo.mantras20.withIndex()) {
+            val count = item.trim().split(Regex("\\s+")).size
+            assertEquals("20-word mantra at index $index must have 20 words: \"$item\"", 20, count)
+        }
+
+        // 30 words
+        assertTrue("Pool of 30-word mantras must contain at least 35 items", repo.mantras30.size >= 35)
+        for ((index, item) in repo.mantras30.withIndex()) {
+            val count = item.trim().split(Regex("\\s+")).size
+            assertEquals("30-word mantra at index $index must have 30 words: \"$item\"", 30, count)
+        }
+
+        // 50 words
+        assertTrue("Pool of 50-word mantras must contain at least 35 items", repo.mantras50.size >= 35)
+        for ((index, item) in repo.mantras50.withIndex()) {
+            val count = item.trim().split(Regex("\\s+")).size
+            assertEquals("50-word mantra at index $index must have 50 words: \"$item\"", 50, count)
+        }
+    }
+
+    @Test
+    fun testEffortFrictionAntiPasteSingleCharOrDelete() {
+        val checker = ::isSingleCharOrDelete
+
+        // Typing single char additions
+        assertTrue("Appending single character should be allowed", checker("", "a"))
+        assertTrue("Appending single character should be allowed", checker("hello", "hello "))
+        assertTrue("Inserting character in middle should be allowed", checker("helo", "hello"))
+
+        // Single character deletions
+        assertTrue("Single character backspace should be allowed", checker("hello", "hell"))
+        assertTrue("Deleting selected word should be allowed", checker("hello world", "hello"))
+
+        // Pasting / injecting multiple characters at once
+        assertFalse("Pasting word should be rejected", checker("", "hello"))
+        assertFalse("Pasting mantra should be rejected", checker("", "I control my attention"))
+        assertFalse("External force-push insertion of chunk should be rejected", checker("hello ", "hello world"))
+        assertFalse("Replacing single character with multiple characters should be rejected", checker("a", "abc"))
+    }
+
+    @Test
+    fun testSettingsAndScreenTimeThemeColorIntegrity() {
+        val settingsFile = getFile("src/main/kotlin/com/ujwal/focusgram/feature/settings/SettingsScreen.kt")
+        val settingsSource = settingsFile.readText()
+
+        // Verify stats card numbers adapt to light mode and don't hardcode Color.White
+        assertFalse(
+            "appTimeText must not use hardcoded Color.White",
+            settingsSource.contains("Text(text = appTimeText, color = Color.White")
+        )
+        assertFalse(
+            "reelsTimeText must not use hardcoded Color.White",
+            settingsSource.contains("Text(text = reelsTimeText, color = Color.White")
+        )
+        assertFalse(
+            "todayReelsWatched must not use hardcoded Color.White",
+            settingsSource.contains("Text(text = \"\$todayReelsWatched\", color = Color.White")
+        )
+        assertTrue(
+            "appTimeText must use IOSTextPrimary",
+            settingsSource.contains("Text(text = appTimeText, color = IOSTextPrimary")
+        )
+        assertTrue(
+            "reelsTimeText must use IOSTextPrimary",
+            settingsSource.contains("Text(text = reelsTimeText, color = IOSTextPrimary")
+        )
+        assertTrue(
+            "todayReelsWatched must use IOSTextPrimary",
+            settingsSource.contains("Text(text = \"\$todayReelsWatched\", color = IOSTextPrimary")
+        )
+
+        val screenTimeFile = getFile("src/main/kotlin/com/ujwal/focusgram/feature/screentime/ScreenTimeScreen.kt")
+        val screenTimeSource = screenTimeFile.readText()
+
+        // Verify progress bar and proportion tracks use dynamic colors instead of hardcoded 0xFF2C2C2E
+        assertFalse(
+            "ScreenTime progress bar track must not be hardcoded to 0xFF2C2C2E",
+            screenTimeSource.contains("trackColor = Color(0xFF2C2C2E)")
+        )
+        assertTrue(
+            "ScreenTime progress bar track must adapt to isDark",
+            screenTimeSource.contains("trackColor = if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)")
         )
     }
 }

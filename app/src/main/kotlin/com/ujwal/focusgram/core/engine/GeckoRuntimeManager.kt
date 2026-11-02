@@ -22,12 +22,12 @@ class GeckoRuntimeManager private constructor(context: Context) {
         val appContext = context.applicationContext
 
         val contentBlockingSettings = ContentBlocking.Settings.Builder()
-            .enhancedTrackingProtectionLevel(ContentBlocking.EtpLevel.STRICT)
-            .antiTracking(ContentBlocking.AntiTracking.STRICT)
-            .strictSocialTrackingProtection(true)
-            .cookieBehavior(ContentBlocking.CookieBehavior.ACCEPT_FIRST_PARTY)
-            .queryParameterStrippingEnabled(true)
-            .queryParameterStrippingPrivateBrowsingEnabled(true)
+            .enhancedTrackingProtectionLevel(ContentBlocking.EtpLevel.DEFAULT)
+            .antiTracking(ContentBlocking.AntiTracking.DEFAULT)
+            .strictSocialTrackingProtection(false)
+            .cookieBehavior(ContentBlocking.CookieBehavior.ACCEPT_FIRST_PARTY_AND_ISOLATE_OTHERS)
+            .queryParameterStrippingEnabled(false)
+            .queryParameterStrippingPrivateBrowsingEnabled(false)
             .build()
 
         val runtimeSettings = GeckoRuntimeSettings.Builder()
@@ -42,7 +42,10 @@ class GeckoRuntimeManager private constructor(context: Context) {
         Log.i(TAG, "Initializing Mozilla GeckoRuntime with strict privacy & WebExtension runtime...")
         runtime = GeckoRuntime.create(appContext, runtimeSettings)
         extensionManager = ExtensionManager(runtime)
-        reelHistory = com.ujwal.focusgram.feature.history.ReelHistory(java.io.File(appContext.filesDir, "reel_history.json"))
+        reelHistory = com.ujwal.focusgram.feature.history.ReelHistory(
+            file = java.io.File(appContext.filesDir, "reel_history.json"),
+            minRewatchIntervalMs = 30_000L
+        )
 
         runtime.webExtensionController
             .ensureBuiltIn("resource://android/assets/reellock/", "reellock@focusgram.app")
@@ -55,7 +58,12 @@ class GeckoRuntimeManager private constructor(context: Context) {
             .ensureBuiltIn("resource://android/assets/reelhistory/", "reelhistory@focusgram.app")
             .accept(
                 { ext ->
-                    ext?.setMessageDelegate(com.ujwal.focusgram.feature.history.ReelMessageDelegate(reelHistory), "reelhistory")
+                    if (ext != null) {
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            runtime.webExtensionController.enable(ext, org.mozilla.geckoview.WebExtensionController.EnableSource.USER)
+                            ext.setMessageDelegate(com.ujwal.focusgram.feature.history.ReelMessageDelegate(reelHistory), "reelhistory")
+                        }
+                    }
                     Log.d(TAG, "✓ Reel history WebExtension installed and delegate registered")
                 },
                 { e -> Log.e(TAG, "Reel history WebExtension installation failed", e) }

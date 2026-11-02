@@ -7,6 +7,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import com.ujwal.focusgram.core.ui.theme.DarkCard
 import com.ujwal.focusgram.core.ui.theme.DarkCardElevated
 import com.ujwal.focusgram.core.ui.theme.PureBlack
+import com.ujwal.focusgram.core.ui.theme.PureWhite
 
 enum class SkeletonType {
     FEED, REELS, EXPLORE, MESSAGES, PROFILE, GENERIC
@@ -48,7 +50,10 @@ fun getSkeletonTypeFromUrl(url: String): SkeletonType {
 }
 
 @Composable
-fun ShimmerBrush(): Brush {
+fun shimmerBrush(): Brush {
+    val isDark = isSystemInDarkTheme()
+    val base = if (isDark) DarkCard else Color(0xFFE5E5EA)
+    val highlight = if (isDark) DarkCardElevated else Color(0xFFF2F2F7)
     val transition = rememberInfiniteTransition(label = "shimmerTransition")
     val translateAnim by transition.animateFloat(
         initialValue = 0f,
@@ -62,9 +67,9 @@ fun ShimmerBrush(): Brush {
 
     return Brush.linearGradient(
         colors = listOf(
-            DarkCard,
-            DarkCardElevated,
-            DarkCard
+            base,
+            highlight,
+            base
         ),
         start = Offset(translateAnim - 500f, translateAnim - 500f),
         end = Offset(translateAnim, translateAnim)
@@ -76,15 +81,16 @@ fun ShimmerBrush(): Brush {
  */
 @Composable
 fun SkeletonScreen(
-    type: SkeletonType = SkeletonType.FEED,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    type: SkeletonType = SkeletonType.FEED
 ) {
-    val brush = ShimmerBrush()
+    val isDark = isSystemInDarkTheme()
+    val brush = shimmerBrush()
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(PureBlack)
+            .background(if (isDark) PureBlack else PureWhite)
             .padding(top = 16.dp)
     ) {
         when (type) {

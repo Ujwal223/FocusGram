@@ -43,6 +43,7 @@ class SettingsRepository(private val context: Context) {
             hideLikeCounts = prefs[KEY_HIDE_LIKE_COUNTS] ?: false,
             hideFollowerCounts = prefs[KEY_HIDE_FOLLOWER_COUNTS] ?: false,
             hideShopTab = prefs[KEY_HIDE_SHOP_TAB] ?: true,
+            hideNotesTray = prefs[KEY_HIDE_NOTES_TRAY] ?: false,
             minimalModeEnabled = prefs[KEY_MINIMAL_MODE_ENABLED] ?: false,
             hideFeedPosts = prefs[KEY_HIDE_FEED_POSTS] ?: false,
             blockDmReelsSwiping = prefs[KEY_BLOCK_DM_REELS_SWIPING] ?: true,
@@ -50,7 +51,7 @@ class SettingsRepository(private val context: Context) {
             showBreathGate = prefs[KEY_SHOW_BREATH_GATE] ?: true,
             breathGateSeconds = prefs[KEY_BREATH_GATE_SECONDS] ?: 10,
             requireWordChallenge = prefs[KEY_REQUIRE_WORD_CHALLENGE] ?: true,
-            wordChallengeCount = prefs[KEY_WORD_CHALLENGE_COUNT] ?: 30,
+            wordChallengeCount = prefs[KEY_WORD_CHALLENGE_COUNT] ?: 10,
             effortFrictionEnabled = prefs[KEY_EFFORT_FRICTION_ENABLED] ?: true,
             cooldownMinutes = prefs[KEY_COOLDOWN_MINUTES] ?: 5,
             dailyLimitMinutes = prefs[KEY_DAILY_LIMIT_MINUTES] ?: 60,
@@ -99,7 +100,17 @@ class SettingsRepository(private val context: Context) {
             activeSessionElapsedSeconds = prefs[KEY_ACTIVE_SESSION_ELAPSED_SECONDS] ?: 0,
             activeSessionReelsWatched = prefs[KEY_ACTIVE_SESSION_REELS_WATCHED] ?: 0,
             activeSessionReelCodes = prefs[KEY_ACTIVE_SESSION_REEL_CODES] ?: emptySet(),
-            activeSessionIsActive = prefs[KEY_ACTIVE_SESSION_IS_ACTIVE] ?: false
+            activeSessionIsActive = prefs[KEY_ACTIVE_SESSION_IS_ACTIVE] ?: false,
+
+            hasSeenGestureGuide = prefs[KEY_HAS_SEEN_GESTURE_GUIDE] ?: false,
+            isMigrationCompleted = prefs[KEY_IS_MIGRATION_COMPLETED] ?: false,
+            isMigrationDeclined = prefs[KEY_IS_MIGRATION_DECLINED] ?: false,
+            grayscaleSchedules = prefs[KEY_GRAYSCALE_SCHEDULES] ?: "[]",
+            lastKnownVersionCode = prefs[KEY_LAST_KNOWN_VERSION_CODE] ?: 0,
+
+            dmNotificationsEnabled = prefs[KEY_DM_NOTIFICATIONS_ENABLED] ?: false,
+            dmNotificationPreview = prefs[KEY_DM_NOTIFICATION_PREVIEW] ?: false,
+            dmRecentMessageHashes = prefs[KEY_DM_RECENT_MESSAGE_HASHES] ?: "[]"
         )
     }
 
@@ -133,7 +144,34 @@ class SettingsRepository(private val context: Context) {
     suspend fun setNoStories(enabled: Boolean) = setBoolean(KEY_NO_STORIES, enabled)
     suspend fun setNoReels(enabled: Boolean) = setBoolean(KEY_NO_REELS, enabled)
     suspend fun setNoAutoplay(enabled: Boolean) = setBoolean(KEY_NO_AUTOPLAY, enabled)
-    suspend fun setNoDMs(enabled: Boolean) = setBoolean(KEY_NO_DMS, enabled)
+    suspend fun setNoDMs(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_NO_DMS] = enabled
+            if (enabled) {
+                // When blocking DMs, save current notification state and auto-disable Message Notifications
+                val currentDmNotifications = prefs[KEY_DM_NOTIFICATIONS_ENABLED] ?: false
+                prefs[KEY_SAVED_DM_NOTIFICATIONS_STATE] = currentDmNotifications
+                prefs[KEY_DM_NOTIFICATIONS_ENABLED] = false
+                prefs[KEY_DM_NOTIFICATION_PREVIEW] = false
+            } else {
+                // When unblocking DMs, restore previous notification state
+                val savedDmNotifications = prefs[KEY_SAVED_DM_NOTIFICATIONS_STATE] ?: false
+                if (savedDmNotifications) {
+                    prefs[KEY_DM_NOTIFICATIONS_ENABLED] = true
+                    prefs[KEY_DM_NOTIFICATION_PREVIEW] = true
+                }
+            }
+        }
+        if (enabled) {
+            com.ujwal.focusgram.feature.notifications.DmNotificationService.stop(context)
+        } else {
+            val prefs = context.dataStore.data.first()
+            if (prefs[KEY_DM_NOTIFICATIONS_ENABLED] == true) {
+                com.ujwal.focusgram.feature.notifications.DmNotificationService.start(context)
+            }
+        }
+    }
+    suspend fun setHideNotesTray(enabled: Boolean) = setBoolean(KEY_HIDE_NOTES_TRAY, enabled)
     suspend fun setBlurExplore(enabled: Boolean) = setBoolean(KEY_BLUR_EXPLORE, enabled)
     suspend fun setBlurReels(enabled: Boolean) = setBoolean(KEY_BLUR_REELS, enabled)
     suspend fun setBlurFeed(enabled: Boolean) = setBoolean(KEY_BLUR_FEED, enabled)
@@ -234,6 +272,13 @@ class SettingsRepository(private val context: Context) {
     suspend fun setGhostHideStorySeen(enabled: Boolean) = setBoolean(KEY_GHOST_HIDE_STORY_SEEN, enabled)
     suspend fun setGhostHideDirectSeen(enabled: Boolean) = setBoolean(KEY_GHOST_HIDE_DIRECT_SEEN, enabled)
     suspend fun setGhostHideTypingIndicator(enabled: Boolean) = setBoolean(KEY_GHOST_HIDE_TYPING, enabled)
+
+    suspend fun setHasSeenGestureGuide(seen: Boolean) = setBoolean(KEY_HAS_SEEN_GESTURE_GUIDE, seen)
+    suspend fun setMigrationCompleted(completed: Boolean) = setBoolean(KEY_IS_MIGRATION_COMPLETED, completed)
+    suspend fun setMigrationDeclined(declined: Boolean) = setBoolean(KEY_IS_MIGRATION_DECLINED, declined)
+    suspend fun setGrayscaleSchedules(schedulesJson: String) = setString(KEY_GRAYSCALE_SCHEDULES, schedulesJson)
+    suspend fun setLastKnownVersionCode(code: Int) = setInt(KEY_LAST_KNOWN_VERSION_CODE, code)
+    suspend fun setReelsHistoryEnabled(enabled: Boolean) = setBoolean(KEY_REELS_HISTORY_ENABLED, enabled)
 
     private suspend fun setBoolean(key: Preferences.Key<Boolean>, value: Boolean) {
         context.dataStore.edit { it[key] = value }
@@ -367,6 +412,10 @@ class SettingsRepository(private val context: Context) {
     suspend fun setStorySearchEnabled(enabled: Boolean) = setBoolean(KEY_STORY_SEARCH_ENABLED, enabled)
     suspend fun setCustomBioFontsEnabled(enabled: Boolean) = setBoolean(KEY_CUSTOM_BIO_FONTS_ENABLED, enabled)
 
+    suspend fun setDmNotificationsEnabled(enabled: Boolean) = setBoolean(KEY_DM_NOTIFICATIONS_ENABLED, enabled)
+    suspend fun setDmNotificationPreview(enabled: Boolean) = setBoolean(KEY_DM_NOTIFICATION_PREVIEW, enabled)
+    suspend fun setDmRecentMessageHashes(hashesJson: String) = setString(KEY_DM_RECENT_MESSAGE_HASHES, hashesJson)
+
     suspend fun getDismissedUpdateVersion(): String? {
         val prefs = context.dataStore.data.first()
         return prefs[KEY_LAST_DISMISSED_UPDATE]
@@ -388,6 +437,8 @@ class SettingsRepository(private val context: Context) {
         val KEY_HIDE_LIKE_COUNTS = booleanPreferencesKey("hide_like_counts")
         val KEY_HIDE_FOLLOWER_COUNTS = booleanPreferencesKey("hide_follower_counts")
         val KEY_HIDE_SHOP_TAB = booleanPreferencesKey("hide_shop_tab")
+        val KEY_HIDE_NOTES_TRAY = booleanPreferencesKey("hide_notes_tray")
+        val KEY_SAVED_DM_NOTIFICATIONS_STATE = booleanPreferencesKey("saved_dm_notifications_state")
         val KEY_MINIMAL_MODE_ENABLED = booleanPreferencesKey("minimal_mode_enabled")
         val KEY_HIDE_FEED_POSTS = booleanPreferencesKey("content_posts")
         val KEY_BLOCK_DM_REELS_SWIPING = booleanPreferencesKey("block_dm_reels_swiping")
@@ -447,5 +498,15 @@ class SettingsRepository(private val context: Context) {
         val KEY_LOCKED_CHAT_USERNAMES = stringPreferencesKey("locked_chat_usernames")
         val KEY_USE_SEPARATE_CHAT_PIN = booleanPreferencesKey("use_separate_chat_pin")
         val KEY_CHAT_BIOMETRIC_ENABLED = booleanPreferencesKey("chat_biometric_enabled")
+
+        val KEY_HAS_SEEN_GESTURE_GUIDE = booleanPreferencesKey("has_seen_gesture_guide")
+        val KEY_IS_MIGRATION_COMPLETED = booleanPreferencesKey("is_migration_completed")
+        val KEY_IS_MIGRATION_DECLINED = booleanPreferencesKey("is_migration_declined")
+        val KEY_GRAYSCALE_SCHEDULES = stringPreferencesKey("grayscale_schedules")
+        val KEY_LAST_KNOWN_VERSION_CODE = intPreferencesKey("last_known_version_code")
+
+        val KEY_DM_NOTIFICATIONS_ENABLED = booleanPreferencesKey("dm_notifications_enabled")
+        val KEY_DM_NOTIFICATION_PREVIEW = booleanPreferencesKey("dm_notification_preview")
+        val KEY_DM_RECENT_MESSAGE_HASHES = stringPreferencesKey("dm_recent_message_hashes")
     }
 }

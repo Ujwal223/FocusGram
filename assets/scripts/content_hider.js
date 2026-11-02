@@ -297,7 +297,7 @@
   if (hideSuggested) removeSuggested();
   if (hideReels)     removeReels();
 
-  // Signal ready — Flutter will call applyAll() with stored prefs
+  // Signal ready : call applyAll() with stored prefs
   if (window.ContentChannel) {
     window.ContentChannel.postMessage(JSON.stringify({ type: 'ready' }));
   }

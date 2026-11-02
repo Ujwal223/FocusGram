@@ -62,4 +62,54 @@ class AppLockSecurityTest {
         val remainingSeconds = (lockoutUntil - 1_000_000L) / 1000L
         assertEquals(30L, remainingSeconds)
     }
+
+    @Test
+    fun testChatPinVsAppPinDifferentiation() {
+        val appPinHash = hashPin("1234")
+        val chatPinHash = hashPin("chat_1234")
+
+        // Chat PIN hash must differ from App PIN hash even when same 4-digit code is chosen
+        assertNotEquals(appPinHash, chatPinHash)
+    }
+
+    @Test
+    fun testPinChangeVerificationLogic() {
+        var currentPin = "2468"
+        var isCurrentPinVerified = false
+        var attempts = 0
+        var isLockedOut = false
+
+        fun submitVerification(entered: String): Boolean {
+            if (isLockedOut) return false
+            val valid = (entered == currentPin)
+            if (valid) {
+                isCurrentPinVerified = true
+            } else {
+                attempts++
+                if (attempts >= 5) {
+                    isLockedOut = true
+                }
+            }
+            return valid
+        }
+
+        // Test 1: Incorrect PIN attempt
+        assertFalse(submitVerification("1111"))
+        assertFalse(isCurrentPinVerified)
+        assertEquals(1, attempts)
+
+        // Test 2: Correct PIN verification
+        assertTrue(submitVerification("2468"))
+        assertTrue(isCurrentPinVerified)
+
+        // Test 3: Lockout on 5 consecutive failures
+        attempts = 0
+        isLockedOut = false
+        isCurrentPinVerified = false
+        repeat(5) {
+            submitVerification("0000")
+        }
+        assertTrue(isLockedOut)
+        assertFalse(submitVerification("2468")) // Even correct PIN blocked during lockout
+    }
 }

@@ -10,10 +10,15 @@
 (function () {
     function isAuthPage() {
         try {
+            var host = (window.location.hostname || '').toLowerCase();
+            if (host.includes('facebook.com') || host.includes('accountscenter.') || host.includes('meta.com')) return true;
             var path = (window.location.pathname || '').toLowerCase();
             if (path.includes('/accounts/edit')) return false;
-            if (path.startsWith('/accounts') || path.startsWith('/login') || path.startsWith('/signup') || path.startsWith('/two_factor') || path.startsWith('/challenge')) return true;
-            if (document.getElementById('loginForm') || document.querySelector('form[action*="login"], form input[type="password"]')) return true;
+            if (path.startsWith('/accounts') || path.startsWith('/login') || path.startsWith('/signup') ||
+                path.startsWith('/two_factor') || path.startsWith('/challenge') || path.startsWith('/onetap') ||
+                path.startsWith('/privacy')) return true;
+            if (document.getElementById('loginForm') ||
+                document.querySelector('form[action*="login"], form[action*="signup"], form input[type="password"], input[name="password"]')) return true;
         } catch (_) {}
         return false;
     }
@@ -34,9 +39,22 @@
         }
     }
 
+    function isHomeFeed() {
+        try {
+            const path = (window.location.pathname || '').toLowerCase();
+            return path === '/' || path === '' || document.documentElement.hasAttribute('data-fg-feed');
+        } catch (_) {
+            return false;
+        }
+    }
+
     function shouldBlock() {
         if (isReelVideo()) return false;
         const config = window.__FOCUSGRAM_CONFIG__ || {};
+        // If "Block Reels & Short Videos" is active, block autoplay for home feed videos
+        if (isHomeFeed() && (config.hideReels || config.noReels)) {
+            return true;
+        }
         return config.blockAutoplay !== false;
     }
 
@@ -99,6 +117,11 @@
             if (!e.isTrusted) return;
             // Ignore interaction when tapping surrounding action buttons or comments.
             if (e.target.closest('button[aria-label="Like"], button[aria-label="Comment"], button[aria-label="Share"], a[role="link"]:not(:has(video))')) {
+                return;
+            }
+            // If "Block Reels & Short Videos" is on, do not permit manual tap-to-play on feed videos
+            const config = window.__FOCUSGRAM_CONFIG__ || {};
+            if (isHomeFeed() && (config.hideReels || config.noReels)) {
                 return;
             }
             const video = findVideoInTarget(e.target);

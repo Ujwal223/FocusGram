@@ -12,6 +12,7 @@
         <domain includeSubdomains="true">cdninstagram.com</domain>
         <domain includeSubdomains="true">fbcdn.net</domain>
         <domain includeSubdomains="true">github.com</domain>
+        <domain includeSubdomains="true">githubusercontent.com</domain>
         <!-- Adsterra Rewarded Ad Slots (Used only in isolated AdsterraAdScreen container) -->
         <domain includeSubdomains="true">adsterra.com</domain>
         <domain includeSubdomains="true">effectivecpmnetwork.com</domain>

@@ -3,6 +3,7 @@ package com.ujwal.focusgram.feature.history
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,18 +47,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ujwal.focusgram.core.ui.components.FocusGramCard
 import com.ujwal.focusgram.core.ui.components.FocusGramTopBar
+import com.ujwal.focusgram.core.ui.components.IOSBg
 import com.ujwal.focusgram.core.ui.theme.AlertRed
 import com.ujwal.focusgram.core.ui.theme.DarkBorder
 import com.ujwal.focusgram.core.ui.theme.DarkCard
 import com.ujwal.focusgram.core.ui.theme.DarkCardElevated
 import com.ujwal.focusgram.core.ui.theme.InstagramBlue
+import com.ujwal.focusgram.core.ui.theme.LightBorder
 import com.ujwal.focusgram.core.ui.theme.PureBlack
+import com.ujwal.focusgram.core.ui.theme.PureWhite
 import com.ujwal.focusgram.core.ui.theme.TextMuted
 import com.ujwal.focusgram.core.ui.theme.TextPrimary
 import com.ujwal.focusgram.core.ui.theme.TextSecondary
@@ -119,7 +124,7 @@ fun ReelsHistoryScreen(
             } else if (cleanAuthor.isNotBlank() && cleanCaption.isNotBlank()) {
                 "meta_${cleanAuthor}___${cleanCaption.take(80)}"
             } else {
-                "url_${item.url.trim().substringBefore("?").trimEnd('/')}"
+                "item_${item.code}_${item.lastSeen}"
             }
             groups.getOrPut(key) { mutableListOf() }.add(item)
         }
@@ -127,7 +132,7 @@ fun ReelsHistoryScreen(
         val deduplicated = groups.values.map { list ->
             val latestSeen = list.maxOf { it.lastSeen }
             val maxViews = list.maxOf { it.views }
-            val totalRewatchCount = maxOf(maxViews, list.size)
+            val totalRewatchCount = maxViews
             val bestAuthor = list.firstOrNull { it.author.isNotBlank() }?.author ?: list.first().author
             val bestCaption = list.firstOrNull { it.caption.isNotBlank() }?.caption ?: list.first().caption
             val bestCode = list.firstOrNull {
@@ -160,10 +165,12 @@ fun ReelsHistoryScreen(
         }
     }
 
+    val isDark = isSystemInDarkTheme()
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(PureBlack)
+            .background(IOSBg)
             .padding(WindowInsets.statusBars.asPaddingValues())
     ) {
         FocusGramTopBar(
@@ -201,12 +208,12 @@ fun ReelsHistoryScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = DarkCard,
-                unfocusedContainerColor = DarkCard,
+                focusedContainerColor = if (isDark) DarkCard else PureWhite,
+                unfocusedContainerColor = if (isDark) DarkCard else PureWhite,
                 focusedBorderColor = InstagramBlue,
-                unfocusedBorderColor = DarkBorder,
-                focusedTextColor = TextPrimary,
-                unfocusedTextColor = TextPrimary
+                unfocusedBorderColor = if (isDark) DarkBorder else LightBorder,
+                focusedTextColor = if (isDark) TextPrimary else PureBlack,
+                unfocusedTextColor = if (isDark) TextPrimary else PureBlack
             ),
             shape = RoundedCornerShape(12.dp)
         )
@@ -260,12 +267,13 @@ fun ReelsHistoryScreen(
     }
 
     if (showClearDialog) {
+        val isDark = isSystemInDarkTheme()
         AlertDialog(
             onDismissRequest = { showClearDialog = false },
             title = {
                 Text(
                     text = "Clear Reels History",
-                    color = TextPrimary,
+                    color = if (isDark) TextPrimary else PureBlack,
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp
                 )
@@ -277,7 +285,7 @@ fun ReelsHistoryScreen(
                 ) {
                     Text(
                         text = "Choose the timeframe you would like to clear:",
-                        color = TextSecondary,
+                        color = if (isDark) TextSecondary else Color(0xFF6C6C70),
                         fontSize = 13.sp,
                         lineHeight = 18.sp
                     )
@@ -330,11 +338,11 @@ fun ReelsHistoryScreen(
                     )
                 }
             },
-            containerColor = DarkCardElevated,
+            containerColor = if (isDark) DarkCardElevated else PureWhite,
             confirmButton = {},
             dismissButton = {
                 TextButton(onClick = { showClearDialog = false }) {
-                    Text("Cancel", color = TextSecondary)
+                    Text("Cancel", color = if (isDark) TextSecondary else Color(0xFF6C6C70))
                 }
             }
         )
@@ -348,14 +356,15 @@ private fun ClearOptionRow(
     isDestructive: Boolean = false,
     onClick: () -> Unit
 ) {
+    val isDark = isSystemInDarkTheme()
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(if (isDestructive) AlertRed.copy(alpha = 0.12f) else DarkCard)
+            .background(if (isDestructive) AlertRed.copy(alpha = 0.12f) else (if (isDark) DarkCard else Color(0xFFF2F2F7)))
             .border(
                 width = 1.dp,
-                color = if (isDestructive) AlertRed.copy(alpha = 0.4f) else DarkBorder,
+                color = if (isDestructive) AlertRed.copy(alpha = 0.4f) else (if (isDark) DarkBorder else LightBorder),
                 shape = RoundedCornerShape(10.dp)
             )
             .clickable(onClick = onClick)
@@ -369,20 +378,20 @@ private fun ClearOptionRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = label,
-                    color = if (isDestructive) AlertRed else TextPrimary,
+                    color = if (isDestructive) AlertRed else (if (isDark) TextPrimary else PureBlack),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
                     text = subtitle,
-                    color = TextMuted,
+                    color = if (isDark) TextMuted else Color(0xFF8E8E93),
                     fontSize = 11.sp
                 )
             }
             Icon(
                 imageVector = Icons.Default.Delete,
                 contentDescription = null,
-                tint = if (isDestructive) AlertRed else TextMuted,
+                tint = if (isDestructive) AlertRed else (if (isDark) TextMuted else Color(0xFF8E8E93)),
                 modifier = Modifier.size(16.dp)
             )
         }
@@ -395,6 +404,7 @@ private fun ReelHistoryCard(
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val isDark = isSystemInDarkTheme()
     FocusGramCard(
         modifier = Modifier.fillMaxWidth(),
         onClick = onClick
@@ -409,7 +419,7 @@ private fun ReelHistoryCard(
                 modifier = Modifier
                     .size(52.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(DarkCardElevated),
+                    .background(if (isDark) DarkCardElevated else Color(0xFFF2F2F7)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -436,7 +446,7 @@ private fun ReelHistoryCard(
                 Text(
                     text = if (item.entry.caption.isNotBlank()) item.entry.caption else "Reel /${item.entry.code}",
                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Normal),
-                    color = TextPrimary,
+                    color = if (isDark) TextPrimary else PureBlack,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )

@@ -6,6 +6,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.keyframes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +29,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -51,8 +53,10 @@ import androidx.fragment.app.FragmentActivity
 import com.ujwal.focusgram.core.security.EncryptedStorage
 import com.ujwal.focusgram.core.ui.theme.AlertRed
 import com.ujwal.focusgram.core.ui.theme.DarkCard
+import com.ujwal.focusgram.core.ui.theme.FocusGold
 import com.ujwal.focusgram.core.ui.theme.InstagramBlue
 import com.ujwal.focusgram.core.ui.theme.PureBlack
+import com.ujwal.focusgram.core.ui.theme.PureWhite
 import com.ujwal.focusgram.core.ui.theme.TextMuted
 import com.ujwal.focusgram.core.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
@@ -197,9 +201,11 @@ fun AppLockScreen(
         }
     }
 
+    val isDark = isSystemInDarkTheme()
+
     Surface(
         modifier = Modifier.fillMaxSize(),
-        color = PureBlack
+        color = if (isDark) PureBlack else PureWhite
     ) {
         Column(
             modifier = Modifier
@@ -250,7 +256,7 @@ fun AppLockScreen(
             Text(
                 text = title,
                 style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-                color = Color.White
+                color = if (isDark) Color.White else Color(0xFF111115)
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -258,7 +264,7 @@ fun AppLockScreen(
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary
+                color = if (isDark) TextSecondary else Color(0xFF6C6C70)
             )
 
             Spacer(modifier = Modifier.height(36.dp))
@@ -276,7 +282,7 @@ fun AppLockScreen(
                             .size(18.dp)
                             .clip(CircleShape)
                             .background(
-                                if (isFilled) InstagramBlue else Color.White.copy(alpha = 0.2f)
+                                if (isFilled) InstagramBlue else (if (isDark) Color.White.copy(alpha = 0.2f) else Color.Black.copy(alpha = 0.12f))
                             )
                     )
                 }
@@ -326,6 +332,21 @@ fun AppLockScreen(
                         }
                     }
                 }
+
+                if (com.ujwal.focusgram.BuildConfig.DEBUG) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextButton(
+                        onClick = onUnlockSuccess,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "⚡ Skip App Lock (Debug)",
+                            color = FocusGold,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
             }
         }
     }
@@ -338,11 +359,14 @@ private fun KeypadButton(
     onBackspace: () -> Unit,
     onBiometric: () -> Unit
 ) {
+    val isDark = isSystemInDarkTheme()
+    val cellBg = if (key.isNotBlank()) (if (isDark) DarkCard else Color(0xFFE5E5EA)) else Color.Transparent
+
     Box(
         modifier = Modifier
             .size(76.dp)
             .clip(CircleShape)
-            .background(if (key.isNotBlank()) DarkCard else Color.Transparent)
+            .background(cellBg)
             .clickable(enabled = key.isNotBlank()) {
                 when (key) {
                     "DEL" -> onBackspace()
@@ -356,7 +380,7 @@ private fun KeypadButton(
             "DEL" -> Icon(
                 imageVector = Icons.AutoMirrored.Filled.Backspace,
                 contentDescription = "Delete",
-                tint = Color.White.copy(alpha = 0.7f),
+                tint = if (isDark) Color.White.copy(alpha = 0.7f) else Color.Black.copy(alpha = 0.7f),
                 modifier = Modifier.size(24.dp)
             )
             "BIO" -> Icon(
@@ -370,7 +394,7 @@ private fun KeypadButton(
                 text = key,
                 fontSize = 26.sp,
                 fontWeight = FontWeight.Medium,
-                color = Color.White
+                color = if (isDark) Color.White else Color(0xFF111115)
             )
         }
     }

@@ -18,6 +18,7 @@ Thumbs.db
 *.bak
 *.class
 *.pyc
+.gradle-user-home/
 
 # IDEs
 .idea/

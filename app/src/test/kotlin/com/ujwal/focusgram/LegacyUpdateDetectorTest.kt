@@ -1,14 +1,14 @@
 package com.ujwal.focusgram
 
+import com.ujwal.focusgram.core.datastore.LegacyUpdateDetector
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * LegacyMigrationLogicTest
- * Validates key prefixes and schema mappings from Flutter SharedPreferences to FocusSettings.
+ * Validates detection of legacy Flutter SharedPreferences keys and storage constants.
  */
-class LegacyMigrationLogicTest {
+class LegacyUpdateDetectorTest {
 
     private fun key(raw: String): String = "flutter.$raw"
 
@@ -20,6 +20,12 @@ class LegacyMigrationLogicTest {
         assertEquals("flutter.set_blur_explore", key("set_blur_explore"))
         assertEquals("flutter.set_show_breath_gate", key("set_show_breath_gate"))
         assertEquals("flutter.breath_gate_seconds", key("breath_gate_seconds"))
+    }
+
+    @Test
+    fun testLegacyConstants() {
+        assertEquals("FlutterSharedPreferences", LegacyUpdateDetector.FLUTTER_SHARED_PREFS_NAME)
+        assertEquals("flutter_migrated_v2", LegacyUpdateDetector.KEY_LEGACY_MARKER)
     }
 
     @Test

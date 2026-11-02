@@ -97,20 +97,3 @@ interface SessionRecordDao {
     suspend fun update(record: SessionRecord)
 }
 
-@Dao
-interface SnapshotDao {
-    @Query("SELECT * FROM saved_snapshots ORDER BY savedAt DESC")
-    fun getAll(): Flow<List<SnapshotItem>>
-
-    @Query("SELECT * FROM saved_snapshots WHERE id = :id LIMIT 1")
-    fun getById(id: String): Flow<SnapshotItem?>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insert(item: SnapshotItem)
-
-    @Query("DELETE FROM saved_snapshots WHERE id = :id")
-    suspend fun deleteById(id: String)
-
-    @Query("DELETE FROM saved_snapshots")
-    suspend fun clearAll()
-}

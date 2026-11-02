@@ -14,6 +14,7 @@ let cachedSettings = {
     hideFollowerCounts: false,
     hideSuggestedPosts: false,
     hideShopTab: false,
+    hideNotesTray: false,
     noAutoplay: false,
     grayscale: false,
     minimalMode: false,
@@ -75,14 +76,16 @@ const GHOST_BLOCKED_URL_PATTERNS = [
 if (typeof browser !== 'undefined' && browser.webRequest && browser.webRequest.onBeforeRequest) {
     browser.webRequest.onBeforeRequest.addListener(
         function (details) {
+            // Strictly do nothing until authentication has succeeded and user is in the app.
             if (cachedSettings.noAds === false || !userIsAuthenticated) {
                 return { cancel: false };
             }
             const url = (details.url || '').toLowerCase();
-            // Preserve auth flows and challenge endpoints without interception.
+            // Preserve all auth flows, login scripts, Facebook SDKs, telemetry, and challenge endpoints without interception.
             if (url.includes('/accounts/') || url.includes('/login') || url.includes('/signup') ||
-                url.includes('facebook.net') || url.includes('facebook.com') || url.includes('/ajax/bz') ||
-                url.includes('/api/v1/web/accounts/') || url.includes('/api/v1/accounts/')) {
+                url.includes('/two_factor') || url.includes('/challenge') || url.includes('/onetap') ||
+                url.includes('facebook.net') || url.includes('facebook.com') || url.includes('accountscenter.') ||
+                url.includes('/ajax/bz') || url.includes('/api/v1/web/accounts/') || url.includes('/api/v1/accounts/')) {
                 return { cancel: false };
             }
             console.log('[Content Blocker] Intercepted and blocked network ad request:', details.url);
@@ -95,8 +98,11 @@ if (typeof browser !== 'undefined' && browser.webRequest && browser.webRequest.o
 
     browser.webRequest.onBeforeRequest.addListener(
         function (details) {
-            if (!cachedSettings.ghostModeEnabled) return { cancel: false };
+            if (!userIsAuthenticated || !cachedSettings.ghostModeEnabled) return { cancel: false };
             const url = (details.url || '').toLowerCase();
+            if (url.includes('/accounts/') || url.includes('/login') || url.includes('/signup')) {
+                return { cancel: false };
+            }
             if (url.includes('/broadcast/text') || url.includes('/broadcast/media')) {
                 return { cancel: false };
             }
@@ -118,11 +124,46 @@ if (typeof browser !== 'undefined' && browser.webRequest && browser.webRequest.o
         ["blocking"]
     );
 
+    // Suppress heavy subresources (images, video streams, audio, and web fonts)
+    // exclusively for the background headless DM notification session to preserve battery and RAM.
+    const bgDmTabIds = new Set();
+
+    if (typeof browser !== 'undefined' && browser.tabs && browser.tabs.onRemoved) {
+        browser.tabs.onRemoved.addListener((tabId) => {
+            bgDmTabIds.delete(tabId);
+        });
+    }
+
+    browser.webRequest.onBeforeRequest.addListener(
+        function (details) {
+            const origin = (details.originUrl || details.documentUrl || '').toLowerCase();
+            const targetUrl = (details.url || '').toLowerCase();
+            const hasValidTab = typeof details.tabId === 'number' && details.tabId >= 0;
+            const isBgDmSession = (hasValidTab && bgDmTabIds.has(details.tabId)) ||
+                origin.includes('focusgram_bg_dm=1') ||
+                targetUrl.includes('focusgram_bg_dm=1');
+
+            if (isBgDmSession) {
+                if (hasValidTab) {
+                    bgDmTabIds.add(details.tabId);
+                }
+                const type = details.type;
+                if (type === 'image' || type === 'media' || type === 'font') {
+                    return { cancel: true };
+                }
+            }
+            return { cancel: false };
+        },
+        { urls: ["<all_urls>"] },
+        ["blocking"]
+    );
+
     // Passively capture viewers list responses without issuing external requests.
     const storyViewersCache = new Map();
 
     browser.webRequest.onBeforeRequest.addListener(
         function (details) {
+            if (!userIsAuthenticated) return;
             const url = details.url || '';
             const match = url.match(/\/api\/v1\/media\/(\d+)\/list_reel_media_viewer\//);
             if (!match) return;
@@ -225,7 +266,7 @@ function sendToNative(msg) {
     if (nativePort) {
         try {
             nativePort.postMessage(msg);
-            console.log('[FocusGram Background] Forwarded to native host:', JSON.stringify(msg));
+            console.log('[FocusGram Background] Forwarded action to native host:', msg.action || msg.type || 'unknown');
             return;
         } catch (e) {
             console.warn('[FocusGram Background] postMessage failed, queueing message:', e);
@@ -237,27 +278,32 @@ function sendToNative(msg) {
     connectNativePort();
 }
 
+let isConnectingPort = false;
+
 function flushPendingMessages() {
     if (!nativePort) return;
     while (pendingNativeMessages.length > 0) {
         const msg = pendingNativeMessages.shift();
         try {
             nativePort.postMessage(msg);
-            console.log('[FocusGram Background] Flushed queued message to native host:', JSON.stringify(msg));
+            console.log('[FocusGram Background] Flushed queued action to native host:', msg.action || msg.type || 'unknown');
         } catch (e) {
-            console.error('[FocusGram Background] Error flushing queued message:', e);
-            pendingNativeMessages.unshift(msg);
+            console.error('[FocusGram Background] Error flushing queued message, discarding poisoned entry:', e);
+            nativePort = null;
+            setTimeout(connectNativePort, 3000);
             break;
         }
     }
 }
 
 function connectNativePort() {
+    if (isConnectingPort || nativePort) return;
+    isConnectingPort = true;
     try {
         if (typeof browser !== 'undefined' && browser.runtime && browser.runtime.connectNative) {
-            if (nativePort) return;
             nativePort = browser.runtime.connectNative("focusgram");
             console.log('[FocusGram Background] Connected to native host "focusgram"');
+            isConnectingPort = false;
 
             nativePort.onMessage.addListener((msg) => {
                 console.log('[FocusGram Background] Message from Android host:', msg);
@@ -275,59 +321,100 @@ function connectNativePort() {
             nativePort.onDisconnect.addListener((p) => {
                 console.warn('[FocusGram Background] Native port disconnected, will retry...');
                 nativePort = null;
+                isConnectingPort = false;
                 setTimeout(connectNativePort, 3000);
             });
 
             flushPendingMessages();
+        } else {
+            isConnectingPort = false;
         }
     } catch (e) {
         console.error('[FocusGram Background] Error connecting native port:', e);
+        nativePort = null;
+        isConnectingPort = false;
         setTimeout(connectNativePort, 3000);
     }
 }
 
 connectNativePort();
 
+const connectedContentPorts = new Set();
+if (typeof browser !== 'undefined' && browser.runtime && browser.runtime.onConnect) {
+    browser.runtime.onConnect.addListener((port) => {
+        if (port.name === 'focusgram-content') {
+            connectedContentPorts.add(port);
+            // Immediately send current cached settings to the connected content script
+            try {
+                port.postMessage({
+                    action: 'updateSettings',
+                    settings: cachedSettings,
+                    revealMode: cachedSettings.unblurMode
+                });
+            } catch (_) {}
+            port.onDisconnect.addListener(() => {
+                connectedContentPorts.delete(port);
+            });
+        }
+    });
+}
+
 function broadcastToTabs(message) {
+    // 1. Dispatch directly to connected content script ports (reliable in GeckoView)
+    for (const port of connectedContentPorts) {
+        try {
+            port.postMessage(message);
+        } catch (_) {}
+    }
+    // 2. Also attempt browser.tabs query as fallback
     if (typeof browser !== 'undefined' && browser.tabs && browser.tabs.query) {
-        browser.tabs.query({}, (tabs) => {
-            if (tabs && tabs.length > 0) {
-                for (const tab of tabs) {
-                    try {
-                        browser.tabs.sendMessage(tab.id, message).catch(() => {});
-                    } catch (_) {}
+        try {
+            browser.tabs.query({}, (tabs) => {
+                if (tabs && tabs.length > 0) {
+                    for (const tab of tabs) {
+                        try {
+                            browser.tabs.sendMessage(tab.id, message).catch(() => {});
+                        } catch (_) {}
+                    }
                 }
-            }
-        });
+            });
+        } catch (_) {}
     }
 }
 
 if (typeof browser !== 'undefined' && browser.runtime && browser.runtime.onMessage) {
     browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-        if (!message) return;
+        if (!message) return false;
 
         if (message.action === 'authStateChanged') {
-            userIsAuthenticated = !!message.isAuthenticated;
+            const senderUrl = (sender && sender.url) || '';
+            if (!senderUrl.includes('focusgram_bg_dm=1')) {
+                userIsAuthenticated = !!message.isAuthenticated;
+            }
         }
 
         if (message.action === 'getSettings') {
             if (typeof sendResponse === 'function') {
                 sendResponse({ settings: cachedSettings });
             }
-            return Promise.resolve({ settings: cachedSettings });
+            return false;
         }
 
         if (message.action === 'getStoryViewers') {
             const mediaId = message.mediaId;
             const viewers = mediaId ? (storyViewersCache.get(mediaId) || []) : [];
-            sendResponse({ viewers: viewers });
-            return true;
+            if (typeof sendResponse === 'function') {
+                sendResponse({ viewers: viewers });
+            }
+            return false;
         }
 
         if (message.action === 'broadcastToTabs' && message.payload) {
             broadcastToTabs(message.payload);
-            sendResponse({ status: 'broadcasted' });
-            return true;
+            if (typeof sendResponse === 'function') {
+                sendResponse({ status: 'broadcasted' });
+            }
+            return false;
         }
 
         if (message.type === 'ReelMetadata' || message.action === 'reelViewed' || message.action === 'reelWatched') {
@@ -346,8 +433,10 @@ if (typeof browser !== 'undefined' && browser.runtime && browser.runtime.onMessa
             sendToNative(message);
         }
 
-        sendResponse({ status: 'forwarded' });
-        return true;
+        if (typeof sendResponse === 'function') {
+            sendResponse({ status: 'forwarded' });
+        }
+        return false;
     });
 }
 

@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -37,6 +38,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.Image
@@ -48,10 +50,17 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-val IOSBg = Color(0xFF000000)
-val IOSGroupBg = Color(0xFF1C1C1E)
-val IOSDivider = Color(0xFF2C2C2E)
-val IOSTextPrimary = Color(0xFFFFFFFF)
+val IOSBg: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF000000) else Color(0xFFF2F2F7)
+
+val IOSGroupBg: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF1C1C1E) else Color(0xFFFFFFFF)
+
+val IOSDivider: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)
+
+val IOSTextPrimary: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFFFFFFFF) else Color(0xFF000000)
 
 /**
  * Loads project and brand icons from remote URLs to keep base APK install size low.
@@ -112,8 +121,12 @@ fun DynamicNetworkIcon(
         }
     }
 }
-val IOSTextSecondary = Color(0xFF8E8E93)
-val IOSTextSection = Color(0xFF8E8E93)
+val IOSTextSecondary: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF8E8E93) else Color(0xFF6C6C70)
+
+val IOSTextSection: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF8E8E93) else Color(0xFF6C6C70)
+
 val IOSGreen = Color(0xFF34C759)
 val IOSBlue = Color(0xFF007AFF)
 val IOSPurple = Color(0xFFAF52DE)
@@ -144,18 +157,33 @@ fun IOSGroupedCard(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
+    val isDark = isSystemInDarkTheme()
     val shape = RoundedCornerShape(14.dp)
     val glassBorderBrush = Brush.verticalGradient(
-        colors = listOf(
-            Color(0x2DFFFFFF),
-            Color(0x0DFFFFFF)
-        )
+        colors = if (isDark) {
+            listOf(
+                Color(0x2DFFFFFF),
+                Color(0x0DFFFFFF)
+            )
+        } else {
+            listOf(
+                Color(0x1F000000),
+                Color(0x0D000000)
+            )
+        }
     )
     val glassBgBrush = Brush.verticalGradient(
-        colors = listOf(
-            Color(0xF01E1E22),
-            Color(0xE0161619)
-        )
+        colors = if (isDark) {
+            listOf(
+                Color(0xF01E1E22),
+                Color(0xE0161619)
+            )
+        } else {
+            listOf(
+                Color(0xFFFFFFFF),
+                Color(0xFFFAFAFC)
+            )
+        }
     )
     Column(
         modifier = modifier
@@ -177,8 +205,10 @@ fun IOSSwitch(
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isDark = isSystemInDarkTheme()
+    val offTrackColor = if (isDark) Color(0xFF39393D) else Color(0xFFE5E5EA)
     val trackColor by animateColorAsState(
-        targetValue = if (checked) IOSGreen else Color(0xFF39393D),
+        targetValue = if (checked) IOSGreen else offTrackColor,
         animationSpec = tween(durationMillis = 200),
         label = "ios_switch_track"
     )
@@ -201,7 +231,7 @@ fun IOSSwitch(
     ) {
         Box(
             modifier = Modifier
-                .offset(x = thumbOffset)
+                .offset { IntOffset(x = thumbOffset.roundToPx(), y = 0) }
                 .size(27.dp)
                 .shadow(elevation = 2.dp, shape = CircleShape)
                 .clip(CircleShape)
@@ -228,7 +258,10 @@ fun IOSSettingsRow(
     showDivider: Boolean = true,
     isDependent: Boolean = false
 ) {
-    val baseModifier = if (isDependent) Modifier.background(Color(0x0AFFFFFF)) else Modifier
+    val isDark = isSystemInDarkTheme()
+    val baseModifier = if (isDependent) {
+        Modifier.background(if (isDark) Color(0x0AFFFFFF) else Color(0x08000000))
+    } else Modifier
     val rowModifier = if (onClick != null && checked == null) {
         Modifier
             .fillMaxWidth()
@@ -351,7 +384,7 @@ fun IOSSettingsRow(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
                             contentDescription = null,
-                            tint = Color(0xFF636366),
+                            tint = if (isDark) Color(0xFF636366) else Color(0xFFC7C7CC),
                             modifier = Modifier.size(13.dp)
                         )
                     }

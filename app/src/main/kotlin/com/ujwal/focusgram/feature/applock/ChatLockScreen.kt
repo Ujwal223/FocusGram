@@ -7,6 +7,7 @@ import androidx.compose.animation.core.keyframes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +34,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -58,7 +60,9 @@ import androidx.fragment.app.FragmentActivity
 import com.ujwal.focusgram.core.security.EncryptedStorage
 import com.ujwal.focusgram.core.ui.theme.AlertRed
 import com.ujwal.focusgram.core.ui.theme.DarkCard
+import com.ujwal.focusgram.core.ui.theme.FocusGold
 import com.ujwal.focusgram.core.ui.theme.PureBlack
+import com.ujwal.focusgram.core.ui.theme.PureWhite
 import com.ujwal.focusgram.core.ui.theme.TextMuted
 import com.ujwal.focusgram.core.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
@@ -66,7 +70,8 @@ import kotlin.math.roundToInt
 
 private val ChatLockAccent = Color(0xFF9D4EDD)
 private val ChatLockAccentGlow = Color(0xFFC77DFF)
-private val KeypadCardBg = Color(0xFF16161A)
+private val KeypadCardBg: Color
+    @Composable get() = if (isSystemInDarkTheme()) Color(0xFF16161A) else Color(0xFFE5E5EA)
 
 /**
  * PIN and biometric authentication gate for locked Direct Messages.
@@ -79,6 +84,7 @@ fun ChatLockScreen(
     subtitle: String = "Enter 4-digit PIN to view conversation",
     customVerifyPin: ((String) -> Boolean)? = null,
     onCancel: (() -> Unit)? = null,
+    onSetupPin: (() -> Unit)? = null,
     onUnlockSuccess: () -> Unit
 ) {
     val context = LocalContext.current
@@ -88,6 +94,7 @@ fun ChatLockScreen(
     var enteredPin by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     val shakeOffset = remember { Animatable(0f) }
+    val hasConfiguredPin = remember { (customVerifyPin != null) || encryptedStorage.hasPin() || encryptedStorage.hasChatPin() }
 
     fun triggerBiometricPrompt() {
         if (!isBiometricAllowed) return
@@ -210,22 +217,34 @@ fun ChatLockScreen(
         }
     }
 
+    val isDark = isSystemInDarkTheme()
+
     Surface(
         modifier = Modifier.fillMaxSize(),
-        color = PureBlack
+        color = if (isDark) PureBlack else PureWhite
     ) {
+        val bgGradient = if (isDark) {
+            Brush.verticalGradient(
+                colors = listOf(
+                    Color(0xFF0F0B17),
+                    Color(0xFF060608),
+                    PureBlack
+                )
+            )
+        } else {
+            Brush.verticalGradient(
+                colors = listOf(
+                    Color(0xFFF9F5FF),
+                    Color(0xFFF2EFF7),
+                    PureWhite
+                )
+            )
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color(0xFF0F0B17),
-                            Color(0xFF060608),
-                            PureBlack
-                        )
-                    )
-                )
+                .background(bgGradient)
         ) {
             Column(
                 modifier = Modifier
@@ -247,12 +266,12 @@ fun ChatLockScreen(
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.08f))
+                                .background((if (isDark) Color.White else PureBlack).copy(alpha = 0.08f))
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "Back to inbox",
-                                tint = Color.White,
+                                tint = if (isDark) Color.White else PureBlack,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -317,18 +336,34 @@ fun ChatLockScreen(
                 Text(
                     text = title,
                     style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                    color = Color.White,
+                    color = if (isDark) Color.White else Color(0xFF111115),
                     textAlign = TextAlign.Center
                 )
 
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
-                    text = subtitle,
+                    text = if (!hasConfiguredPin) "No PIN configured on this device" else subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary,
+                    color = if (isDark) TextSecondary else Color(0xFF6C6C70),
                     textAlign = TextAlign.Center
                 )
+
+                if (!hasConfiguredPin && onSetupPin != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    androidx.compose.material3.TextButton(
+                        onClick = onSetupPin,
+                        colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                            contentColor = ChatLockAccentGlow
+                        )
+                    ) {
+                        Text(
+                            text = "Set Up PIN to Unlock",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(28.dp))
 
@@ -345,11 +380,11 @@ fun ChatLockScreen(
                                 .size(16.dp)
                                 .clip(CircleShape)
                                 .background(
-                                    if (isFilled) ChatLockAccentGlow else Color.White.copy(alpha = 0.18f)
+                                    if (isFilled) ChatLockAccentGlow else (if (isDark) Color.White.copy(alpha = 0.18f) else Color.Black.copy(alpha = 0.12f))
                                 )
                                 .border(
                                     width = if (isFilled) 1.5.dp else 1.dp,
-                                    color = if (isFilled) Color.White else Color.White.copy(alpha = 0.1f),
+                                    color = if (isFilled) (if (isDark) Color.White else PureBlack) else (if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.08f)),
                                     shape = CircleShape
                                 )
                         )
@@ -400,6 +435,21 @@ fun ChatLockScreen(
                             }
                         }
                     }
+
+                    if (com.ujwal.focusgram.BuildConfig.DEBUG) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        TextButton(
+                            onClick = onUnlockSuccess,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "⚡ Skip Chat Lock (Debug)",
+                                color = FocusGold,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -413,6 +463,8 @@ private fun KeypadCell(
     onBackspace: () -> Unit,
     onBiometric: () -> Unit
 ) {
+    val isDark = isSystemInDarkTheme()
+
     Box(
         modifier = Modifier
             .size(72.dp)
@@ -431,7 +483,7 @@ private fun KeypadCell(
             "DEL" -> Icon(
                 imageVector = Icons.AutoMirrored.Filled.Backspace,
                 contentDescription = "Delete",
-                tint = Color.White.copy(alpha = 0.75f),
+                tint = if (isDark) Color.White.copy(alpha = 0.75f) else Color.Black.copy(alpha = 0.75f),
                 modifier = Modifier.size(22.dp)
             )
             "BIO" -> Icon(
@@ -447,7 +499,7 @@ private fun KeypadCell(
                 text = key,
                 fontSize = 25.sp,
                 fontWeight = FontWeight.Medium,
-                color = Color.White
+                color = if (isDark) Color.White else Color(0xFF111115)
             )
         }
     }

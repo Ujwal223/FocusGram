@@ -1,6 +1,7 @@
 package com.ujwal.focusgram.feature.diagnostics
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -46,6 +47,7 @@ import com.ujwal.focusgram.core.model.FocusSettings
 import com.ujwal.focusgram.core.ui.components.FocusGramCard
 import com.ujwal.focusgram.core.ui.components.FocusGramSectionHeader
 import com.ujwal.focusgram.core.ui.components.FocusGramTopBar
+import com.ujwal.focusgram.core.ui.components.IOSBg
 import com.ujwal.focusgram.core.ui.theme.AlertRed
 import com.ujwal.focusgram.core.ui.theme.DarkCard
 import com.ujwal.focusgram.core.ui.theme.DarkCardElevated
@@ -53,6 +55,7 @@ import com.ujwal.focusgram.core.ui.theme.FocusGold
 import com.ujwal.focusgram.core.ui.theme.FocusGreen
 import com.ujwal.focusgram.core.ui.theme.InstagramBlue
 import com.ujwal.focusgram.core.ui.theme.PureBlack
+import com.ujwal.focusgram.core.ui.theme.PureWhite
 import com.ujwal.focusgram.core.ui.theme.TextMuted
 import com.ujwal.focusgram.core.ui.theme.TextPrimary
 import com.ujwal.focusgram.core.ui.theme.TextSecondary
@@ -66,6 +69,7 @@ import com.ujwal.focusgram.core.ui.theme.TextSecondary
 fun DebugMenuScreen(
     repository: SettingsRepository,
     onBack: () -> Unit,
+    modifier: Modifier = Modifier,
     onSimulateUpdate: () -> Unit = {},
     onSimulateNotice: () -> Unit = {},
     onResetLimits: () -> Unit = {},
@@ -75,15 +79,16 @@ fun DebugMenuScreen(
     currentSessionRemainingSeconds: Int = 15 * 60,
     currentSessionElapsedSeconds: Int = 0,
     onAdjustSessionTime: (newDurationMinutes: Int, newRemainingSeconds: Int, newElapsedSeconds: Int) -> Unit = { _, _, _ -> },
-    modifier: Modifier = Modifier
+    onTestGestureGuide: () -> Unit = {}
 ) {
     val settings by repository.settingsFlow.collectAsState(initial = FocusSettings())
+    val isDark = isSystemInDarkTheme()
     var customMinutesInput by remember { mutableStateOf(currentSessionDurationMinutes.toString()) }
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(PureBlack)
+            .background(IOSBg)
             .padding(WindowInsets.statusBars.asPaddingValues())
     ) {
         FocusGramTopBar(
@@ -100,7 +105,7 @@ fun DebugMenuScreen(
             item {
                 FocusGramCard(
                     modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = DarkCardElevated
+                    backgroundColor = if (isDark) DarkCardElevated else PureWhite
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
@@ -113,7 +118,7 @@ fun DebugMenuScreen(
                             text = "AppLock: ${settings.appLockEnabled} · Daily Limit: ${settings.dailyLimitMinutes}m\n" +
                                     "Cooldown: ${settings.cooldownMinutes}m · FirstRun: ${settings.isFirstRun}",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = TextPrimary
+                            color = if (isDark) TextPrimary else PureBlack
                         )
                     }
                 }
@@ -126,7 +131,7 @@ fun DebugMenuScreen(
             item {
                 FocusGramCard(
                     modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = DarkCardElevated
+                    backgroundColor = if (isDark) DarkCardElevated else PureWhite
                 ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
@@ -141,7 +146,7 @@ fun DebugMenuScreen(
                         Text(
                             text = "Duration: ${currentSessionDurationMinutes}m · Remaining: ${currentSessionRemainingSeconds / 60}m ${currentSessionRemainingSeconds % 60}s · Elapsed: ${currentSessionElapsedSeconds / 60}m ${currentSessionElapsedSeconds % 60}s",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = TextPrimary
+                            color = if (isDark) TextPrimary else PureBlack
                         )
 
                         // Quick +/- adjustments
@@ -235,8 +240,8 @@ fun DebugMenuScreen(
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = FocusGold,
                                 focusedLabelColor = FocusGold,
-                                focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary
+                                focusedTextColor = if (isDark) TextPrimary else PureBlack,
+                                unfocusedTextColor = if (isDark) TextPrimary else PureBlack
                             )
                         )
 
@@ -289,7 +294,7 @@ fun DebugMenuScreen(
             item {
                 FocusGramCard(
                     modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = DarkCardElevated
+                    backgroundColor = if (isDark) DarkCardElevated else PureWhite
                 ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
@@ -319,6 +324,19 @@ fun DebugMenuScreen(
                         ) {
                             Text(
                                 text = if (isLimitsBypassed) "Don't Skip Cooldowns & Daily Limits" else "Skip Cooldowns & Daily Limits",
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Button(
+                            onClick = onTestGestureGuide,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = FocusGold,
+                                contentColor = PureBlack
+                            )
+                        ) {
+                            Text(
+                                text = "Test Gesture Guide (Tooltips)",
                                 fontWeight = FontWeight.Bold
                             )
                         }

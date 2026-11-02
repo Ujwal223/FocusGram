@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "FocusGram Content Engine",
-  "version": "3.0.0",
+  "version": "3.4.1",
   "description": "Privacy-preserving network-level content blocking, stealth protection, and cosmetic filtering for FocusGram.",
   "author": "FocusGram Project",
   "homepage_url": "https://github.com/Ujwal223/FocusGram",
@@ -12,6 +12,7 @@
     "storage",
     "tabs",
     "geckoViewAddons",
+    "clipboardWrite",
     "nativeMessaging",
     "nativeMessagingFromContent"
   ],
@@ -29,7 +30,8 @@
       "js": [
         "content.js",
         "focusgram_content.js",
-        "media_downloader.js"
+        "media_downloader.js",
+        "dm_watcher.js"
       ],
       "run_at": "document_start",
       "all_frames": true
