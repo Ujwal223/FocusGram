@@ -175,13 +175,13 @@
         if (!text) return true;
         const trimmed = text.trim();
         if (trimmed.length === 0) return true;
-        if (/^(?:[·•\u00B7\u2022\s-]*\d+\s*[smhdw]|now|just now|yesterday)$/i.test(trimmed)) {
+        if (/^(?:[·•\s-]*\d+\s*[smhdw]|now|just now|yesterday)$/i.test(trimmed)) {
             return true;
         }
         if (/^active(?:\s+now|\s+\d+[smhdw]|\s+today|\s+yesterday)?$/i.test(trimmed)) {
             return true;
         }
-        if (/^[·•\u00B7\u2022\s\-_–—|]+$/.test(trimmed)) {
+        if (/^[·•\s\-_–—|]+$/.test(trimmed)) {
             return true;
         }
         return false;
@@ -191,7 +191,7 @@
         if (!text) return false;
         const trimmed = text.trim();
         // Exact outgoing status words (seen, visto, vu, etc.) with optional timestamp
-        if (/^(?:seen|visto|vu|gesehen|visualizzato|既読)(?:\s+[·•\u00B7\u2022\s\dsmhdw]+)?$/i.test(trimmed)) {
+        if (/^(?:seen|visto|vu|gesehen|visualizzato|既読)(?:\s+[·•\s\dsmhdw]+)?$/i.test(trimmed)) {
             return true;
         }
         // Multi-lingual outgoing message prefixes (You:, Tú:, Tu:, Vous:, Du:, Você:, Вы:, Ty:, Jij:, أنت:, 你:, あなた:, 회원님이)
@@ -397,8 +397,8 @@
             for (let i = 0; i < timeLeaves.length; i++) {
                 if (timeLeaves[i].children.length === 0) {
                     const txt = (timeLeaves[i].textContent || '').trim();
-                    if (/^(?:[·•\u00B7\u2022\s-]*\d+\s*[smhdw]|now|just now|yesterday)$/i.test(txt)) {
-                        messageTime = txt.replace(/^[·•\u00B7\u2022\s-]+/, '').trim();
+                    if (/^(?:[·•\s-]*\d+\s*[smhdw]|now|just now|yesterday)$/i.test(txt)) {
+                        messageTime = txt.replace(/^[·•\s-]+/, '').trim();
                         break;
                     }
                 }
@@ -527,8 +527,8 @@
 
         // Clean snippet: remove international relative timestamps (min, std, h, d, etc.)
         if (snippet) {
-            snippet = snippet.replace(/\s*(?:[·•\u00B7\u2022\-_–—|]|\s-\s)\s*\d+\s*(?:[smhdw]|min|std|ч|г|d|m|h|j|seg|分|초|시간|일).*$/is, '').trim();
-            snippet = snippet.replace(/[·•\u00B7\u2022\s\-_–—|]+$/, '').trim();
+            snippet = snippet.replace(/\s*(?:[·•\-_–—|]|\s-\s)\s*\d+\s*(?:[smhdw]|min|std|ч|г|d|m|h|j|seg|分|초|시간|일).*$/is, '').trim();
+            snippet = snippet.replace(/[·•\s\-_–—|]+$/, '').trim();
         }
 
         // Format snippet according to unread count

@@ -4,7 +4,7 @@
 **Document ID:** FG-SEC-2026-AUDIT  
 **Target Application:** FocusGram Android Client  
 **Package Identifier:** `com.ujwal.focusgram` (Standard Edition) / `com.instagram.android` (Uncloned Edition)  
-**Target Commit:** `current local code. will add commit hash once pushed`  
+**Target Commit:** `739533d09e17721076a26283e8f0bf5311d98394`  
 **Target Codebase:** 100% Native Kotlin, Jetpack Compose and Mozilla GeckoView Omni  
 **Target Engine Version:** Mozilla GeckoView Omni `157.0.20260924084938`  
 **Tooling Environment:** Android Gradle Plugin `8.8.2`, Kotlin `2.0.21`, JDK 21  
@@ -21,7 +21,7 @@
 
 FocusGram is an Android client engineered for digital wellness and intentional media consumption. The application embeds a browser runtime (Mozilla GeckoView Omni `157.0.20260924084938`) combined with uBlock Origin and specialized client-side user scripts. The system enforces usage constraints, content blurring, session timers, and biometric authentication directly on the client device without utilizing reverse-engineered Meta private APIs or binary modifications of the Instagram APK.
 
-An independent white-box security assessment was conducted across the FocusGram codebase at commit `current local code. will add commit hash once pushed`. The review encompassed all native Kotlin source components, embedded WebExtensions, content injection scripts, cryptographic storage mechanisms, inter-component communication boundaries, and platform manifest declarations. Special analytical focus was directed toward the trust boundaries separating untrusted web content from privileged Android operating system primitives.
+An independent white-box security assessment was conducted across the FocusGram codebase at commit `739533d09e17721076a26283e8f0bf5311d98394`. The review encompassed all native Kotlin source components, embedded WebExtensions, content injection scripts, cryptographic storage mechanisms, inter-component communication boundaries, and platform manifest declarations. Special analytical focus was directed toward the trust boundaries separating untrusted web content from privileged Android operating system primitives.
 
 ### 1.1 Summary of Findings and Verification Status
 
@@ -590,6 +590,6 @@ The production debug artifact was assembled to confirm DEX packaging, asset incl
 
 ## 7. Attestation and Final Audit Conclusion
 
-The FocusGram Android application at commit `current local code. will add commit hash once pushed` demonstrates a robust, defense-in-depth security architecture. By embedding Mozilla GeckoView Omni as an isolated runtime, the application provides digital wellness controls, content filtering, and direct message alerting without intercepting account credentials, inspecting private direct messages, or transmitting telemetry data off-device.
+The FocusGram Android application at commit `739533d09e17721076a26283e8f0bf5311d98394` demonstrates a robust, defense-in-depth security architecture. By embedding Mozilla GeckoView Omni as an isolated runtime, the application provides digital wellness controls, content filtering, and direct message alerting without intercepting account credentials, inspecting private direct messages, or transmitting telemetry data off-device.
 
 Following the verification of remediations across the 8 reported security findings and the documentation of operational boundaries and residual risks, **FocusGram satisfies the verification criteria of the OWASP Mobile Application Security Verification Standard (MASVS v2.0) within the defined Scope of Work.**

@@ -159,8 +159,6 @@ fun ScreenTimeScreen(
         max(maxDayMinutes, if (dailyLimitMinutes in 1..180) dailyLimitMinutes else maxDayMinutes)
     }
 
-    val weeklyTotalMinutes = last7Days.sumOf { it.second }
-
     val last7DaysRawSeconds = remember(records) {
         var totalSec = 0
         for (i in 6 downTo 0) {
