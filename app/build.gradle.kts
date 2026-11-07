@@ -190,7 +190,10 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
 
     // GeckoView Engine
-    implementation(libs.geckoview.omni)
+    implementation(libs.geckoview.omni) {
+        // Exclude proprietary Google Play Services FIDO / GMS libraries for F-Droid compliance
+        exclude(group = "com.google.android.gms")
+    }
 
     // Room Database
     implementation(libs.androidx.room.runtime)
@@ -221,6 +224,7 @@ dependencies {
 }
 
 configurations.all {
+    exclude(group = "com.google.android.gms")
     resolutionStrategy {
         force(
             "androidx.lifecycle:lifecycle-common:2.8.7",
