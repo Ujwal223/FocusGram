@@ -1,4 +1,7 @@
 import java.util.Properties
+import java.net.URI
+import java.nio.file.FileSystems
+import java.nio.file.Files
 
 plugins {
     alias(libs.plugins.android.application)
@@ -255,3 +258,37 @@ configurations.all {
 tasks.matching { it.name.contains("AarMetadata") }.configureEach {
     enabled = false
 }
+
+val stripGeckoViewNonFreeClasses by tasks.registering {
+    description = "Strips proprietary WebAuthn/GMS classes from GeckoView artifacts for F-Droid compliance"
+    doLast {
+        val searchDirs = listOf(
+            gradle.gradleUserHomeDir.resolve("caches"),
+            rootProject.layout.buildDirectory.asFile.get(),
+            project.layout.buildDirectory.asFile.get()
+        )
+        for (baseDir in searchDirs) {
+            if (!baseDir.exists()) continue
+            baseDir.walkTopDown()
+                .filter { it.isFile && it.name.startsWith("geckoview-omni") && (it.name.endsWith(".jar") || it.name.endsWith(".aar")) }
+                .forEach { file ->
+                    try {
+                        val uri = URI.create("jar:" + file.toURI())
+                        FileSystems.newFileSystem(uri, emptyMap<String, Any>()).use { fs ->
+                            val classPath = fs.getPath("org/mozilla/geckoview/WebAuthnTokenManager.class")
+                            if (Files.exists(classPath)) {
+                                Files.delete(classPath)
+                                logger.lifecycle("FocusGram: Stripped WebAuthnTokenManager from ${file.name}")
+                            }
+                        }
+                    } catch (_: Exception) {
+                    }
+                }
+        }
+    }
+}
+
+tasks.matching { it.name.startsWith("minify") && it.name.endsWith("WithR8") }.configureEach {
+    dependsOn(stripGeckoViewNonFreeClasses)
+}
+
