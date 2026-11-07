@@ -88,3 +88,8 @@ codeql scan report.xml
 .agents/
 system/
 Documents/
+
+# ------------------------------------------------------------------------------
+# 5. F-Droid Listing Metadata (Draft recipe for fdroiddata repository)
+# ------------------------------------------------------------------------------
+/metadata/

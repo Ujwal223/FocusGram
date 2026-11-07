@@ -1,0 +1,8 @@
+FocusGram 3.0.0:
+- Built-in uBlock Origin ad blocker for sponsored posts and ads
+- Timed Reel sessions and autoplay video blocker
+- Biometric and PIN lock for the entire app and individual chats
+- Hide stories tray and notes tray
+- Link sanitizer stripping tracking parameters
+- Dynamic custom app icons and complete UI revamp
+- Offline local reels history and session tracking

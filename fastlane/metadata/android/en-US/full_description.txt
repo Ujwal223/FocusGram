@@ -1,0 +1,23 @@
+<p><b>FocusGram</b> is a digital wellness and intentionality client that lets you browse Instagram on your own terms.</p>
+
+<p><b>The Problem:</b> Instagram is designed to hook your attention with endless recommendation feeds, intrusive ads, and autoplay reels. Most people just want to connect with friends, check stories, and share moments without falling into mindless scrolling loops.</p>
+
+<p><b>The Solution:</b> FocusGram loads the mobile web version of Instagram inside a hardened Mozilla GeckoView engine with embedded uBlock Origin. Ads and sponsored posts are blocked, feeds and reels can be restricted or blurred, and strict screen time limits keep you focused. Everything runs locally on your device with zero tracking.</p>
+
+<p><b>Key Features:</b></p>
+<ul>
+  <li><b>Built-in Ad Blocker:</b> Bundled uBlock Origin eliminates sponsored posts, promotional banners, and feed advertisements.</li>
+  <li><b>Focus Guardrails & Reel Limits:</b> Set timed Reel sessions (1 to 30 minutes) or block Reels entirely.</li>
+  <li><b>Feed & Explore Control:</b> Blur recommendation grids, hide story and notes trays, or toggle minimal viewing modes.</li>
+  <li><b>Autoplay Blocker:</b> Stops video feeds from playing automatically so you choose what to watch.</li>
+  <li><b>Privacy & App Lock:</b> Protect your application or lock sensitive individual chats using PIN or Biometric / Fingerprint authentication.</li>
+  <li><b>Link Sanitizer:</b> Automatically strips tracking parameters (like <code>fbclid</code> and <code>igsh</code>) before opening or sharing links.</li>
+  <li><b>100% On-Device & Private:</b> No proprietary SDKs, no Google Firebase, no telemetry, no analytics, and zero background tracking.</li>
+</ul>
+
+<p><b>Permissions:</b></p>
+<ul>
+  <li><b>Internet:</b> Required to load Instagram web pages and direct messages via GeckoView.</li>
+  <li><b>Biometric / Fingerprint:</b> Authenticates user identity locally on-device for PIN and app locks.</li>
+  <li><b>Post Notifications:</b> Optional permission to show session timers and message alerts.</li>
+</ul>

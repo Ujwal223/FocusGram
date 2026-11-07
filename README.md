@@ -16,6 +16,7 @@
 [![Uptodown](https://img.shields.io/badge/Uptodown-Download-00A859?style=for-the-badge&logo=android&logoColor=white)](https://focusgram.en.uptodown.com/android)
 [![Support](https://img.shields.io/badge/Support-BuyMeMomo-FFDD00.svg?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://buymemomo.com/ujwal)
 [![Security Audit](https://img.shields.io/badge/Security_Audit-Passed_(MASVS)-success?style=for-the-badge&logo=shield)](Reports/SECURITY_REPORT.md)
+<!-- [![F-Droid](https://img.shields.io/badge/F--Droid-Download-0085FF?style=for-the-badge&logo=f-droid&logoColor=white)](https://f-droid.org/packages/com.ujwal.focusgram) -->
 
 <br/>
 </div>
@@ -103,6 +104,7 @@ FocusGram fixes this without modifying Instagram's app or using private APIs. It
 
 - **Direct APK**: Download the latest release from [GitHub Releases](https://github.com/Ujwal223/FocusGram/releases). Available in architecture splits (`arm64-v8a`, `armeabi-v7a`, `x86_64`) and Universal APK.
 - **Uptodown**: Download verified builds on [FocusGram on Uptodown](https://focusgram.en.uptodown.com/android).
+- <!-- **F-Droid**: Download verified builds on [F-Droid](https://f-droid.org/packages/com.ujwal.focusgram). -->
 - **Uncloned Edition (`com.instagram.android`)**: Replace the official Instagram app directly on your device via our [Uncloned Distribution Channel](https://focusgram.blogspot.com/).
 
 ---
