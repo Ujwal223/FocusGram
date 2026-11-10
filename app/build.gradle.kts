@@ -163,6 +163,22 @@ android {
         unitTests.isReturnDefaultValues = true
     }
 
+    val abiVersionCodes = mapOf("armeabi-v7a" to 1, "arm64-v8a" to 2, "x86_64" to 3)
+
+    androidComponents {
+        onVariants { variant ->
+            variant.outputs.forEach { output ->
+                val abi = output.filters.find {
+                    it.filterType == com.android.build.api.variant.FilterConfiguration.FilterType.ABI
+                }?.identifier
+                val suffix = abiVersionCodes[abi]
+                if (suffix != null) {
+                    output.versionCode.set((defaultConfig.versionCode ?: 300) * 10 + suffix)
+                }
+            }
+        }
+    }
+
     applicationVariants.all {
         val variant = this
         outputs.all {
