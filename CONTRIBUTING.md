@@ -4,6 +4,22 @@ Thank you for your interest in contributing to FocusGram! FocusGram is a free, o
 
 ---
 
+## Pull Request Scope & Restrictions
+
+Merge requests containing only the following changes will **NOT** be accepted:
+
+1. **README or other supporting docs changes:** Edits, additions, deletions, or typo fixes in documentation, guides, or Markdown files.
+2. **Code comments changes:** Additions, edits, deletions, or rephrasing of source code comments.
+3. **Test changes:** Adding, editing, or deleting unit, UI, or integration tests without accompanying functional implementation or bug fixes.
+4. **License changes:** Edits to license files, terms, or copyright headers.
+5. **Cosmetic formatting & whitespace:** Reformatting, linting adjustments, import reordering, or whitespace edits that introduce no functional or behavioral difference.
+6. **Trivial refactoring & churn:** Variable renaming, minor syntactic restructuring, or automated/bot-generated PRs without clear performance or correctness justification.
+7. **Unsolicited dependency updates:** Version bumps or build dependency updates without prior discussion or security advisory backing.
+
+It is strongly recommended to **open an issue instead** to report typos, documentation gaps, missing test scenarios, or suggestions. Pull requests should focus on substantive bug fixes, core architectural improvements, or approved feature additions.
+
+---
+
 ## Architecture Principles
 
 Every pull request must uphold these non-negotiable rules:
@@ -70,3 +86,4 @@ cd FocusGram
 2. Run `./gradlew :app:testDebugUnitTest` to ensure all tests pass.
 3. Keep diffs minimal, focused, and free of drive-by refactors.
 4. Open a Pull Request referencing any relevant issues.
+5. If using an AI coding assistant or autonomous agent, ensure it strictly adheres to the protocol, interrogation requirements, and scope checks defined in **[AGENTS.md](AGENTS.md)**.
