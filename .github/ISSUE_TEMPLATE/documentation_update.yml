@@ -1,0 +1,52 @@
+name: Documentation Update
+description: Suggest corrections or improvements for documentation, README, code comments, or tests
+title: "[Docs]: "
+labels: ["documentation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please note: As stated in `AGENTS.md` and `CONTRIBUTING.md`, FocusGram does not accept pull requests that contain solely documentation fixes, comment cleanups, cosmetic reformatting, or test additions without implementation. Please submit your observations here instead so they can be reviewed and applied.
+  - type: dropdown
+    id: category
+    attributes:
+      label: Target Category
+      options:
+        - README or Markdown Documentation
+        - In-code Comments / Typos
+        - Architecture or Sandboxing Guidelines
+        - Fastlane Metadata / Store Listings
+        - Unit / Integration Test Additions
+    validations:
+      required: true
+  - type: input
+    id: affected_files
+    attributes:
+      label: Affected File(s) and Line Number(s)
+      description: Provide the specific file paths and line ranges.
+      placeholder: "e.g., README.md (lines 40-45)"
+    validations:
+      required: true
+  - type: textarea
+    id: proposed_changes
+    attributes:
+      label: Proposed Changes
+      description: Provide the exact suggested wording or diff.
+    validations:
+      required: true
+  - type: textarea
+    id: justification
+    attributes:
+      label: Reason for Change
+      description: Explain why this clarification, correction, or test addition is necessary.
+    validations:
+      required: true
+  - type: checkboxes
+    id: mandatory_checks
+    attributes:
+      label: Mandatory Confirmations
+      options:
+        - label: I am a human, I know what I am creating this issue for, and I am not filing this issue blindly based on an AI agent.
+          required: true
+        - label: I understand that documentation-only and comment-only PRs are automatically rejected, and I will wait for maintainer review on this issue.
+          required: true

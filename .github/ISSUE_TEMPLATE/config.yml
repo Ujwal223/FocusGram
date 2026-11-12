@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability Report
+    url: https://github.com/Ujwal223/FocusGram/security/policy
+    about: For reporting security vulnerabilities privately under our security policy.

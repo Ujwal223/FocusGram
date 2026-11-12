@@ -1,0 +1,43 @@
+name: Question or Clarification
+description: Ask a question about FocusGram architecture, privacy boundaries, or configuration
+title: "[Question]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before submitting a question, please review the README, SECURITY.md, and the in-app Welcome & Privacy Guide to see if your question is already answered.
+  - type: input
+    id: topic
+    attributes:
+      label: Topic Summary
+      description: A concise summary of what you are asking about.
+      placeholder: "e.g., How does Chat Lock handle multi-account logins?"
+    validations:
+      required: true
+  - type: textarea
+    id: question_details
+    attributes:
+      label: Question Details
+      description: Provide clear context and describe what you are trying to understand.
+    validations:
+      required: true
+  - type: textarea
+    id: sources_checked
+    attributes:
+      label: Resources Checked
+      description: Which files or settings screens have you already inspected?
+      placeholder: "e.g., Read README.md, SECURITY.md, and checked Settings -> Security"
+    validations:
+      required: true
+  - type: checkboxes
+    id: mandatory_checks
+    attributes:
+      label: Mandatory Confirmations
+      options:
+        - label: I am a human, I know what I am creating this issue for, and I am not filing this issue blindly based on an AI agent.
+          required: true
+        - label: I am sure the language of my Instagram account is set to English and nothing else.
+          required: true
+        - label: I checked existing documentation and issues to verify this question was not already answered.
+          required: true

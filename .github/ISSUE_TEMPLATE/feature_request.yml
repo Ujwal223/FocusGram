@@ -1,0 +1,43 @@
+name: Feature Request
+description: Propose a new digital wellness, intentionality, or focus feature
+title: "[Feature]: "
+labels: ["feature-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        FocusGram is a distraction-free client designed to encourage intentional use of Instagram. All features must be client-side only, operate 100% locally on-device, and never automate user actions.
+  - type: textarea
+    id: problem_statement
+    attributes:
+      label: Problem Statement
+      description: What challenge, distraction loop, or user friction are you trying to address?
+    validations:
+      required: true
+  - type: textarea
+    id: proposed_feature
+    attributes:
+      label: Proposed Feature Concept
+      description: Describe the new feature and how a user interacts with it.
+    validations:
+      required: true
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Settings & User Control
+      description: Where and how should this feature be toggled or configured in the Settings menu?
+    validations:
+      required: true
+  - type: checkboxes
+    id: mandatory_checks
+    attributes:
+      label: Mandatory Confirmations
+      options:
+        - label: I am a human, I know what I am creating this issue for, and I am not filing this issue blindly based on an AI agent.
+          required: true
+        - label: This feature operates 100% locally on-device and requires zero off-device telemetry or cloud services.
+          required: true
+        - label: This feature does NOT automate Instagram interactions (no auto-liking, auto-scrolling, or bots).
+          required: true
+        - label: I searched open and closed issues and confirmed this feature has not already been requested.
+          required: true

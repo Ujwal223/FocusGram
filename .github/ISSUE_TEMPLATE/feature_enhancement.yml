@@ -1,0 +1,51 @@
+name: Feature Enhancement
+description: Suggest an improvement, refinement, or tweak to an existing FocusGram feature
+title: "[Enhancement]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template to suggest enhancements to features that already exist in FocusGram.
+  - type: input
+    id: target_feature
+    attributes:
+      label: Target Feature
+      description: Which existing feature needs improvement? (e.g., Breath Gate, Cooldown Timer, Bio Stylist, App Lock)
+      placeholder: "e.g., Daily Limit Gate"
+    validations:
+      required: true
+  - type: textarea
+    id: current_limitation
+    attributes:
+      label: Current Limitation
+      description: What is currently lacking, inconvenient, or could work better?
+    validations:
+      required: true
+  - type: textarea
+    id: proposed_improvement
+    attributes:
+      label: Proposed Enhancement
+      description: Describe your proposed change in clear detail.
+    validations:
+      required: true
+  - type: textarea
+    id: user_benefit
+    attributes:
+      label: Practical Wellness Value
+      description: How does this change help users maintain digital wellness or improve focus?
+    validations:
+      required: true
+  - type: checkboxes
+    id: mandatory_checks
+    attributes:
+      label: Mandatory Confirmations
+      options:
+        - label: I am a human, I know what I am creating this issue for, and I am not filing this issue blindly based on an AI agent.
+          required: true
+        - label: I am sure the language of my Instagram account is set to English and nothing else.
+          required: true
+        - label: This improvement operates 100% locally on-device without telemetry or off-device network calls.
+          required: true
+        - label: I searched open and closed issues and confirmed this enhancement has not already been proposed.
+          required: true
