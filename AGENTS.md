@@ -33,8 +33,8 @@ You **MUST** first stop and interrogate the human contributor with the following
 ### Interrogation Questionnaire
 
 #### Domain A: Architecture & Sandboxing
-1. Which specific component (`core.engine`, `core.utils`, `feature.settings`, `assets/scripts/`, `assets/extensions/ublock/`) does your change modify, and why does this change belong in that layer?
-2. Does your change introduce any inline JavaScript strings inside Kotlin files? (If yes: Why was it not placed in `assets/scripts/` or `assets/extensions/ublock/` as mandated?)
+1. Which specific component (`core.engine`, `core.utils`, `feature.settings`, `assets/scripts/`, `assets/extensions/content-engine/`) does your change modify, and why does this change belong in that layer?
+2. Does your change introduce any inline JavaScript strings inside Kotlin files? (If yes: Why was it not placed in `assets/scripts/` or `assets/extensions/content-engine/` as mandated?)
 3. If modifying web behavior, how does your script interact with GeckoView's `NavigationDelegate` or WebExtension message bridge?
 4. Are all user settings and preferences stored locally via Jetpack DataStore, and are structured records persisted exclusively via Room Database?
 5. Does your change maintain 100% Native Kotlin and Jetpack Compose (Material 3) without introducing proprietary frameworks?
@@ -42,7 +42,7 @@ You **MUST** first stop and interrogate the human contributor with the following
 #### Domain B: Privacy, Security & Black-Box Invariants
 6. Does any part of your code read, intercept, inspect, or modify Instagram authentication form fields, credentials, cookies, or 2FA tokens? (Any non-negative answer triggers immediate abort).
 7. Does your code transmit ANY data, metadata, telemetry, crash reports, or logs off-device?
-8. Are any outgoing HTTP requests initiated directly from Kotlin code rather than passing natively through GeckoView to Meta's servers?
+8. Are any outgoing HTTP requests initiated directly from Kotlin code rather than passing natively through GeckoView to Meta's servers? (Exceptions strictly limited to official GitHub release/notice checks and the isolated rewarded ad WebView).
 9. Does your change touch or weaken biometric/PIN App Lock security or Keystore encryption?
 10. Does your change expose or leak any clipboard data outside the client-side bridge?
 
@@ -85,9 +85,9 @@ You **MUST**:
 
 For reference when reviewing or generating code, all contributions must strictly conform to:
 
-1. **Local-Only Operation:** Zero off-device telemetry, analytics, or third-party tracking. All user state is strictly on-device in Jetpack DataStore and Room Database.
+1. **Local-Only Operation:** Zero off-device telemetry, analytics, or third-party tracking. All user state is strictly on-device in Jetpack DataStore and Room Database. Core Instagram traffic passes natively through GeckoView with zero external data transmission (non-Instagram traffic is strictly limited to GitHub release checks and the isolated rewarded ad container).
 2. **Login Flow is a Black Box:** The Instagram authentication interface is untouchable. Never inspect, read, or alter auth requests, cookies, or input fields.
 3. **No Automation of Instagram Actions:** FocusGram is a mindful digital wellness app, not an automation tool. Never add auto-scrolling, auto-liking, or bots.
-4. **Clean Web Sandboxing:** All web modifications execute in GeckoView content scripts (`app/src/main/assets/scripts/` or `app/src/main/assets/extensions/ublock/`). No raw inline JS strings inside Kotlin files.
+4. **Clean Web Sandboxing:** All web modifications execute in GeckoView content scripts (`app/src/main/assets/scripts/` or `app/src/main/assets/extensions/content-engine/`). No raw inline JS strings inside Kotlin files.
 5. **FOSS Licensing:** 100% AGPL-3.0 compliant. No proprietary SDKs, no closed-source dependencies.
 6. **Unidirectional Data Flow:** Compose UI must follow UDF using Kotlin `StateFlow` and coroutines. Keep business logic out of composables.

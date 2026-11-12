@@ -231,11 +231,13 @@ fun FocusGramApp() {
         if (settings.lastKnownVersionCode != currentVersionCode) {
             settingsRepository.setLastKnownVersionCode(currentVersionCode)
         }
-        when (val res = updateCheckerService.checkForUpdates(ignoreDismissed = false)) {
-            is UpdateCheckResult.Available -> {
-                activeUpdateInfo = res.updateInfo
+        if (!settings.disableAutoUpdateCheck) {
+            when (val res = updateCheckerService.checkForUpdates(ignoreDismissed = false)) {
+                is UpdateCheckResult.Available -> {
+                    activeUpdateInfo = res.updateInfo
+                }
+                else -> {}
             }
-            else -> {}
         }
         val notice = remoteNoticeService.fetchNotice()
         if (notice != null && remoteNoticeService.shouldShow(notice)) {
@@ -1072,7 +1074,7 @@ fun FocusGramApp() {
     LaunchedEffect(settings) {
         sessionManager.updateSettings(settings)
         extensionManager.setRevealMode(settings.unblurMode)
-        extensionManager.setUBlockEnabled(settings.noAds)
+        extensionManager.setContentBlockerEnabled(settings.noAds)
 
         val prev = previousReloadSettings
         if (prev != null) {
@@ -1797,50 +1799,54 @@ fun FocusGramApp() {
                         }
 
                         AppDestination.ADSTERRA_REWARDED -> {
-                            AdsterraAdScreen(
-                                sessionType = when {
-                                    adRewardAction != null -> "setting_toggle"
-                                    isDailyLimitExhausted || isSessionExhausted -> "session_extend"
-                                    else -> "voluntary"
-                                },
-                                onRewardClaimed = {
-                                    val pendingAction = adRewardAction
-                                    adRewardAction = null
-                                    if (pendingAction != null) {
-                                        scope.launch {
-                                            try {
-                                                pendingAction.invoke()
-                                            } catch (e: Exception) {
-                                                Log.e("FocusGramApp", "Failed to apply rewarded setting action", e)
-                                            } finally {
-                                                destination = AppDestination.SETTINGS
+                            if (!settings.adRewardsEnabled) {
+                                destination = if (isDailyLimitExhausted || isSessionExhausted) AppDestination.MAIN_WEBVIEW else AppDestination.SETTINGS
+                            } else {
+                                AdsterraAdScreen(
+                                    sessionType = when {
+                                        adRewardAction != null -> "setting_toggle"
+                                        isDailyLimitExhausted || isSessionExhausted -> "session_extend"
+                                        else -> "voluntary"
+                                    },
+                                    onRewardClaimed = {
+                                        val pendingAction = adRewardAction
+                                        adRewardAction = null
+                                        if (pendingAction != null) {
+                                            scope.launch {
+                                                try {
+                                                    pendingAction.invoke()
+                                                } catch (e: Exception) {
+                                                    Log.e("FocusGramApp", "Failed to apply rewarded setting action", e)
+                                                } finally {
+                                                    destination = AppDestination.SETTINGS
+                                                }
                                             }
+                                        } else if (isDailyLimitExhausted) {
+                                            scope.launch { settingsRepository.extendDailyLimit5Minutes(today) }
+                                            sessionRemainingSeconds += 5 * 60
+                                            sessionDurationMinutes += 5
+                                            isSessionExhausted = false
+                                            destination = AppDestination.MAIN_WEBVIEW
+                                        } else if (isSessionExhausted) {
+                                            sessionExtensionsUsed += 1
+                                            sessionRemainingSeconds += 3 * 60
+                                            sessionDurationMinutes += 3
+                                            isSessionExhausted = false
+                                            destination = AppDestination.MAIN_WEBVIEW
+                                        } else {
+                                            destination = AppDestination.SETTINGS
                                         }
-                                    } else if (isDailyLimitExhausted) {
-                                        scope.launch { settingsRepository.extendDailyLimit5Minutes(today) }
-                                        sessionRemainingSeconds += 5 * 60
-                                        sessionDurationMinutes += 5
-                                        isSessionExhausted = false
-                                        destination = AppDestination.MAIN_WEBVIEW
-                                    } else if (isSessionExhausted) {
-                                        sessionExtensionsUsed += 1
-                                        sessionRemainingSeconds += 3 * 60
-                                        sessionDurationMinutes += 3
-                                        isSessionExhausted = false
-                                        destination = AppDestination.MAIN_WEBVIEW
-                                    } else {
-                                        destination = AppDestination.SETTINGS
+                                    },
+                                    onCancel = {
+                                        adRewardAction = null
+                                        if (isDailyLimitExhausted || isSessionExhausted) {
+                                            destination = AppDestination.MAIN_WEBVIEW
+                                        } else {
+                                            destination = AppDestination.SETTINGS
+                                        }
                                     }
-                                },
-                                onCancel = {
-                                    adRewardAction = null
-                                    if (isDailyLimitExhausted || isSessionExhausted) {
-                                        destination = AppDestination.MAIN_WEBVIEW
-                                    } else {
-                                        destination = AppDestination.SETTINGS
-                                    }
-                                }
-                            )
+                                )
+                            }
                         }
 
                         AppDestination.ONBOARDING -> {
@@ -1876,9 +1882,10 @@ fun FocusGramApp() {
                             dailyLimitMinutes = settings.dailyLimitMinutes,
                             todayMinutesUsed = (todayDailySeconds + 59) / 60,
                             extensionsRemaining = dailyExtensionsRemaining,
+                            adRewardsEnabled = settings.adRewardsEnabled,
                             onExit = { activity?.finish() },
                             onWatchAdToExtend = {
-                                if (dailyExtensionsRemaining > 0) {
+                                if (settings.adRewardsEnabled && dailyExtensionsRemaining > 0) {
                                     destination = AppDestination.ADSTERRA_REWARDED
                                 }
                             },
@@ -1891,6 +1898,7 @@ fun FocusGramApp() {
                         SessionExhaustedScreen(
                             elapsedMinutes = elapsedMins,
                             extensionsRemaining = sessionExtensionsRemaining,
+                            adRewardsEnabled = settings.adRewardsEnabled,
                             onExit = {
                                 isSessionExhausted = false
                                 hasPassedSessionPicker = false
@@ -1903,7 +1911,7 @@ fun FocusGramApp() {
                                 activity?.finish()
                             },
                             onWatchAdToExtend = {
-                                if (sessionExtensionsRemaining > 0) {
+                                if (settings.adRewardsEnabled && sessionExtensionsRemaining > 0) {
                                     destination = AppDestination.ADSTERRA_REWARDED
                                 }
                             },

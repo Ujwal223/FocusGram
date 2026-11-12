@@ -667,7 +667,7 @@
                 if (firstKey) lastReportedThreadStates.delete(firstKey);
             }
 
-            console.log('[FocusGram DM Watcher] Detected unread direct message event from ' + info.sender);
+            console.log('[FocusGram DM Watcher] Detected unread direct message event');
 
             postToNative({
                 action: 'dmReceived',

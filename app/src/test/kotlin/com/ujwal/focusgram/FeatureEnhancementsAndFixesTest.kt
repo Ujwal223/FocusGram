@@ -45,18 +45,18 @@ class FeatureEnhancementsAndFixesTest {
         assertTrue("native_feel.js must dispatch focusgram-clipboard scheme",
             nativeFeelJs.contains("focusgram-clipboard://copy?text="))
 
-        val ublockContentJs = getFile("src/main/assets/extensions/ublock/focusgram_content.js").readText()
+        val contentEngineJs = getFile("src/main/assets/extensions/content-engine/focusgram_content.js").readText()
         assertTrue("focusgram_content.js must provide focusgram-clipboard bridge",
-            ublockContentJs.contains("focusgram-clipboard://copy?text="))
+            contentEngineJs.contains("focusgram-clipboard://copy?text="))
         assertTrue("focusgram_content.js must send clipboard text directly to Android",
-            ublockContentJs.contains("sendNativeMessage('focusgram', message)"))
+            contentEngineJs.contains("sendNativeMessage('focusgram', message)"))
         val focusGramApp = getFile("src/main/kotlin/com/ujwal/focusgram/ui/FocusGramApp.kt").readText()
         assertTrue("Main GeckoSession must install the native message delegate before loading Instagram",
             focusGramApp.contains("attachContentMessageDelegate(sessionManager.session)"))
         assertTrue("focusgram_content.js must bridge Clipboard API calls made by Instagram's page world",
-            ublockContentJs.contains("installPageClipboardBridge") &&
-                ublockContentJs.contains("focusgram:page-clipboard-copy") &&
-                ublockContentJs.contains("clipboard.writeText"))
+            contentEngineJs.contains("installPageClipboardBridge") &&
+                contentEngineJs.contains("focusgram:page-clipboard-copy") &&
+                contentEngineJs.contains("clipboard.writeText"))
     }
 
     @Test
@@ -121,19 +121,19 @@ class FeatureEnhancementsAndFixesTest {
             contentHiderJs.contains("startsWith('/direct')") &&
             contentHiderJs.contains("startsWith('/stories/')"))
 
-        val ublockContentJs = getFile("src/main/assets/extensions/ublock/focusgram_content.js").readText()
+        val contentEngineJs = getFile("src/main/assets/extensions/content-engine/focusgram_content.js").readText()
         assertTrue("focusgram_content.js must intercept link clicks for blocked routes",
-            ublockContentJs.contains("startsWith('/reel/')") &&
-            ublockContentJs.contains("startsWith('/direct')") &&
-            ublockContentJs.contains("startsWith('/stories/')"))
+            contentEngineJs.contains("startsWith('/reel/')") &&
+            contentEngineJs.contains("startsWith('/direct')") &&
+            contentEngineJs.contains("startsWith('/stories/')"))
     }
 
     @Test
     fun testHomeFeedUnblurSpecificityAndContainerRules() {
         val contentHiderJs = getFile("src/main/assets/scripts/content_hider.js").readText()
-        val ublockContentJs = getFile("src/main/assets/extensions/ublock/focusgram_content.js").readText()
+        val contentEngineJs = getFile("src/main/assets/extensions/content-engine/focusgram_content.js").readText()
 
-        listOf(contentHiderJs, ublockContentJs).forEach { script ->
+        listOf(contentHiderJs, contentEngineJs).forEach { script ->
             assertTrue("Script must exclude revealed elements in feed blur selector",
                 script.contains(":not([data-fg-reveal]):not(.fg-unblurred)"))
             assertTrue("Script must include high-specificity unblur rules for articles and feed",
@@ -219,10 +219,10 @@ class FeatureEnhancementsAndFixesTest {
     @Test
     fun testFeedVideosPermanentlyBlurredAndAutoplayBlockedWhenNoReels() {
         val contentHiderJs = getFile("src/main/assets/scripts/content_hider.js").readText()
-        val ublockContentJs = getFile("src/main/assets/extensions/ublock/focusgram_content.js").readText()
+        val contentEngineJs = getFile("src/main/assets/extensions/content-engine/focusgram_content.js").readText()
         val autoplayBlockerJs = getFile("src/main/assets/scripts/autoplay_blocker.js").readText()
 
-        listOf(contentHiderJs, ublockContentJs).forEach { script ->
+        listOf(contentHiderJs, contentEngineJs).forEach { script ->
             assertTrue("Script must apply blur to feed videos when noReels is active",
                 script.contains("html[data-fg-feed] article video") &&
                 script.contains("pointer-events: none !important"))
@@ -236,7 +236,7 @@ class FeatureEnhancementsAndFixesTest {
 
     @Test
     fun testDmWatcherContinuousScanningAndNotificationServiceSafety() {
-        val dmWatcherJs = getFile("src/main/assets/extensions/ublock/dm_watcher.js").readText()
+        val dmWatcherJs = getFile("src/main/assets/extensions/content-engine/dm_watcher.js").readText()
         assertFalse("dm_watcher must not abort early on isInboxPage without running title and badge fallbacks",
             dmWatcherJs.contains("if (hasUnreadInbox || hasToast || isInboxPage) return;"))
         assertTrue("dm_watcher must run scanTitleBadge",
@@ -285,7 +285,7 @@ class FeatureEnhancementsAndFixesTest {
 
     @Test
     fun testDmWatcherExcludesViewerAndHeaderAndStrictlyScansDirect() {
-        val dmWatcherJs = getFile("src/main/assets/extensions/ublock/dm_watcher.js").readText()
+        val dmWatcherJs = getFile("src/main/assets/extensions/content-engine/dm_watcher.js").readText()
 
         assertTrue("dm_watcher must detect viewer username",
             dmWatcherJs.contains("getViewerUsername") && dmWatcherJs.contains("isViewer"))
@@ -305,7 +305,7 @@ class FeatureEnhancementsAndFixesTest {
 
     @Test
     fun testDmNotificationDismissalOnReadAndInstantObservation() {
-        val dmWatcherJs = getFile("src/main/assets/extensions/ublock/dm_watcher.js").readText()
+        val dmWatcherJs = getFile("src/main/assets/extensions/content-engine/dm_watcher.js").readText()
 
         assertTrue("dm_watcher must report dmThreadRead when thread in inbox is read",
             dmWatcherJs.contains("action: 'dmThreadRead'"))
@@ -357,16 +357,16 @@ class FeatureEnhancementsAndFixesTest {
         assertTrue("native_feel.js must define compact modal styling",
             nativeFeelJs.contains("max-width: 320px !important") && nativeFeelJs.contains("width: 88% !important"))
 
-        val ublockContentJs = getFile("src/main/assets/extensions/ublock/focusgram_content.js").readText()
+        val contentEngineJs = getFile("src/main/assets/extensions/content-engine/focusgram_content.js").readText()
         assertTrue("focusgram_content.js must whitelist modals, DMs, and Bio captions",
-            ublockContentJs.contains("header section [dir=\"auto\"]") &&
-                ublockContentJs.contains("[role=\"listitem\"] [dir=\"auto\"]") &&
-                ublockContentJs.contains("user-select: text !important"))
+            contentEngineJs.contains("header section [dir=\"auto\"]") &&
+                contentEngineJs.contains("[role=\"listitem\"] [dir=\"auto\"]") &&
+                contentEngineJs.contains("user-select: text !important"))
         assertTrue("focusgram_content.js must define compact modal styling",
-            ublockContentJs.contains("max-width: 320px !important") && ublockContentJs.contains("width: 88% !important"))
+            contentEngineJs.contains("max-width: 320px !important") && contentEngineJs.contains("width: 88% !important"))
         assertTrue("focusgram_content.js must handle Select text button and forward to native",
-            ublockContentJs.contains("label.includes('select text')") &&
-                ublockContentJs.contains("forwardToNative(foundUrl)"))
+            contentEngineJs.contains("label.includes('select text')") &&
+                contentEngineJs.contains("forwardToNative(foundUrl)"))
     }
 
     @Test
@@ -399,20 +399,20 @@ class FeatureEnhancementsAndFixesTest {
         val pureDmText = "Meet me at 5pm at the cafe"
         assertEquals(pureDmText, com.ujwal.focusgram.core.utils.NetworkUtils.sanitizeText(pureDmText))
 
-        val ublockContentJs = getFile("src/main/assets/extensions/ublock/focusgram_content.js").readText()
+        val contentEngineJs = getFile("src/main/assets/extensions/content-engine/focusgram_content.js").readText()
         assertTrue("focusgram_content.js must define sanitizeUrlsInText",
-            ublockContentJs.contains("function sanitizeUrlsInText"))
+            contentEngineJs.contains("function sanitizeUrlsInText"))
         assertTrue("focusgram_content.js must hook DataTransfer setData",
-            ublockContentJs.contains("hookDataTransfer") && ublockContentJs.contains("DataTransfer.prototype"))
+            contentEngineJs.contains("hookDataTransfer") && contentEngineJs.contains("DataTransfer.prototype"))
         assertTrue("focusgram_content.js must track lastActiveDmText",
-            ublockContentJs.contains("lastActiveDmText"))
+            contentEngineJs.contains("lastActiveDmText"))
         assertTrue("focusgram_content.js must handle cleanLabel === 'copy'",
-            ublockContentJs.contains("cleanLabel === 'copy'"))
+            contentEngineJs.contains("cleanLabel === 'copy'"))
         assertTrue("focusgram_content.js must transform Link modal button to Copy and elevate z-index",
-            ublockContentJs.contains("transformLinkModal") &&
-                ublockContentJs.contains("btn.textContent = 'Copy'") &&
-                ublockContentJs.contains("z-index") &&
-                ublockContentJs.contains("2147483647"))
+            contentEngineJs.contains("transformLinkModal") &&
+                contentEngineJs.contains("btn.textContent = 'Copy'") &&
+                contentEngineJs.contains("z-index") &&
+                contentEngineJs.contains("2147483647"))
 
         val extensionManagerKt = getFile("src/main/kotlin/com/ujwal/focusgram/core/engine/ExtensionManager.kt").readText()
         val networkUtilsKt = getFile("src/main/kotlin/com/ujwal/focusgram/core/utils/NetworkUtils.kt").readText()
@@ -454,9 +454,9 @@ class FeatureEnhancementsAndFixesTest {
             nativeFeelJs.contains("function extractUrlFromDialog") &&
             nativeFeelJs.contains("isBareInstagramRootUrl"))
 
-        val ublockContentJs = getFile("src/main/assets/extensions/ublock/focusgram_content.js").readText()
+        val contentEngineJs = getFile("src/main/assets/extensions/content-engine/focusgram_content.js").readText()
         assertTrue("focusgram_content.js must extract URLs from dialogs and reject bare root URLs",
-            ublockContentJs.contains("function extractUrlFromDialog") &&
-            ublockContentJs.contains("isBareInstagramRootUrl"))
+            contentEngineJs.contains("function extractUrlFromDialog") &&
+            contentEngineJs.contains("isBareInstagramRootUrl"))
     }
 }

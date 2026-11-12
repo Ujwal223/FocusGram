@@ -36,7 +36,7 @@ class TwoTierLimitsAndEnhancementsTest {
 
     @Test
     fun testReelsWatchedCounterStartsAtZeroAndUpdatesInstantlyOnScroll() {
-        val contentScript = getFile("src/main/assets/extensions/ublock/focusgram_content.js").readText()
+        val contentScript = getFile("src/main/assets/extensions/content-engine/focusgram_content.js").readText()
         val reelsScript = getFile("src/main/assets/reelhistory/reels.js").readText()
 
         assertTrue("focusgram_content.js must track isInitialReelOnTabEntry",
@@ -56,8 +56,8 @@ class TwoTierLimitsAndEnhancementsTest {
 
     @Test
     fun testReelsAdBlockingSelectorsAndRules() {
-        val contentJs = getFile("src/main/assets/extensions/ublock/content.js").readText()
-        val focusgramJs = getFile("src/main/assets/extensions/ublock/focusgram_content.js").readText()
+        val contentJs = getFile("src/main/assets/extensions/content-engine/content.js").readText()
+        val focusgramJs = getFile("src/main/assets/extensions/content-engine/focusgram_content.js").readText()
 
         assertTrue("content.js must check strict ad CTAs including 'shop now', 'install now', 'learn more'",
             contentJs.contains("shop now") && contentJs.contains("install now") && contentJs.contains("learn more"))
@@ -187,8 +187,8 @@ class TwoTierLimitsAndEnhancementsTest {
 
     @Test
     fun testReelsAdBlockingDoesNotTargetFeedContainersOrSetZeroHeight() {
-        val contentJs = getFile("src/main/assets/extensions/ublock/content.js").readText()
-        val focusgramJs = getFile("src/main/assets/extensions/ublock/focusgram_content.js").readText()
+        val contentJs = getFile("src/main/assets/extensions/content-engine/content.js").readText()
+        val focusgramJs = getFile("src/main/assets/extensions/content-engine/focusgram_content.js").readText()
 
         // Card should NOT target section, main, or parent divs > 0.4
         assertFalse("content.js findReelCardForVideo must NOT select section or container div",
@@ -278,7 +278,7 @@ class TwoTierLimitsAndEnhancementsTest {
     fun testScriptsStrictFeatureDeactivation() {
         val fetchJs = getFile("src/main/assets/scripts/fetch_interceptor.js").readText()
         val nativeFeelJs = getFile("src/main/assets/scripts/native_feel.js").readText()
-        val contentJs = getFile("src/main/assets/extensions/ublock/focusgram_content.js").readText()
+        val contentJs = getFile("src/main/assets/extensions/content-engine/focusgram_content.js").readText()
 
         assertTrue("fetch_interceptor.js must define cleanupStorySearch",
             fetchJs.contains("function cleanupStorySearch()"))

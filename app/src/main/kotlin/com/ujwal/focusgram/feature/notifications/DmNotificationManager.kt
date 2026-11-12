@@ -437,7 +437,7 @@ class DmNotificationManager private constructor(private val context: Context) {
             try {
                 NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID_GENERIC_BADGE)
             } catch (_: Exception) {}
-            Log.i(TAG, "Dispatched DM notification for $title ($body)")
+            Log.i(TAG, "Dispatched DM notification (id=$notificationId)")
         } catch (e: SecurityException) {
             Log.w(TAG, "POST_NOTIFICATIONS permission not granted: ${e.message}")
         } catch (e: Exception) {

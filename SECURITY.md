@@ -34,10 +34,13 @@ Users often ask why FocusGram shows a login screen requesting their primary Inst
 
 ## Core Security Invariants
 
-1. **Zero External Data Transmission:**
-   FocusGram contains no analytics SDKs, no tracking beacons, no crash reporting services, and no developer telemetry. Android Kotlin code makes zero network requests to external servers. All web traffic flows strictly through GeckoView to Meta's official domains.
+1. **Zero User Telemetry & Instagram Session Sandboxing:**
+   FocusGram contains no analytics SDKs, no tracking beacons, no crash reporting services, and no developer telemetry. Core Instagram browsing, credentials, and session cookies flow strictly through GeckoView to Meta's official domains and never leave your device.
+   Non-Instagram external network interactions are transparently limited to:
+   - **GitHub Updates & Notices:** The app queries official GitHub endpoints (`api.github.com` and `raw.githubusercontent.com`) via standard unauthenticated GET requests to check for app updates and broadcast notices.
+   - **Isolated Rewarded Ad Container:** To allow users to unlock extra credits or features without paying money, an isolated Android system WebView loads third-party rewarded ads (Adsterra). This WebView is completely sandboxed from GeckoView, operates with a clean cookie jar, and has zero access to Instagram credentials or browsing data.
 2. **Client-Side Scripting Boundaries:**
-   Content modifications (such as hiding Explore or blurring Reels) occur via strictly scoped client-side user scripts and WebExtensions (bundled uBlock Origin). Content scripts are strictly restricted to layout and presentation adjustments; they never touch password inputs, authentication headers, or private user credentials.
+   Content modifications (such as hiding Explore or blurring Reels) occur via strictly scoped client-side user scripts and WebExtensions (FocusGram Content Engine and Ghostify). Content scripts are strictly restricted to layout and presentation adjustments; they never touch password inputs, authentication headers, or private user credentials.
 3. **Hardware-Backed Local Storage:**
    Biometric credentials and PINs configured for App Lock and Chat Lock are verified locally using AndroidX BiometricPrompt and Android Keystore (AES-256-GCM). PIN hashes never leave the device.
 4. **Link Sanitization:**

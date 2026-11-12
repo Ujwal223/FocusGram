@@ -25,13 +25,13 @@ It is strongly recommended to **open an issue instead** to report typos, documen
 Every pull request must uphold these non-negotiable rules:
 
 1. **Local-Only Operation:**
-   FocusGram never sends user data off-device. No telemetry, no analytics, no third-party network SDKs, and no remote crash loggers.
+   FocusGram never sends user data off-device. No user telemetry, no tracking analytics, and no remote crash loggers. Core Instagram traffic is strictly sandboxed. The only permitted external network calls are official GitHub release/notice checks and the isolated, user-initiated rewarded ad WebView.
 2. **The Login Flow is a Black Box:**
    Never write code or content scripts that read, intercept, or modify authentication form fields, credentials, cookies, or 2FA tokens.
 3. **No Automation of Instagram Actions:**
    FocusGram is an intentionality tool, not an automation bot. Do not contribute auto-likers, auto-followers, auto-scrollers, or mass-DM tools.
 4. **Clean Web Sandboxing:**
-   Web content manipulation is strictly client-side via Mozilla GeckoView content scripts (`app/src/main/assets/scripts/` or `app/src/main/assets/extensions/ublock/`). Never inline large raw JavaScript strings directly in Kotlin source files.
+   Web content manipulation is strictly client-side via Mozilla GeckoView content scripts (`app/src/main/assets/scripts/` or `app/src/main/assets/extensions/content-engine/`). Never inline large raw JavaScript strings directly in Kotlin source files.
 5. **FOSS Dependency Licensing:**
    All dependencies must be compatible with AGPL-3.0 (e.g. Apache 2.0, MIT, BSD, MPL 2.0, LGPL/GPL).
 

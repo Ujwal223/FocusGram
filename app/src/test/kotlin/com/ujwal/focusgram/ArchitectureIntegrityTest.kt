@@ -7,13 +7,13 @@ import org.junit.Test
 /**
  * ArchitectureIntegrityTest
  * End-to-end audit verifying that core features and activities are preserved
- * in Native Kotlin with Mozilla GeckoView and uBlock Origin, zero telemetry, and AGPL-3.0 compliance.
+ * in Native Kotlin with Mozilla GeckoView and Content Engine, zero telemetry, and AGPL-3.0 compliance.
  */
 class ArchitectureIntegrityTest {
 
     private val preservedFeatures = listOf(
         "1. Onboarding Page (First-run guidance)",
-        "2. Main WebView Host (GeckoView + uBlock Origin)",
+        "2. Main WebView Host (GeckoView + Content Engine)",
         "3. Breath Gate (Conscious delay timer)",
         "4. Effort Friction Gate (Discipline typing challenge)",
         "5. Cooldown Gate (Session rest periods)",
@@ -47,9 +47,9 @@ class ArchitectureIntegrityTest {
 
     @Test
     fun testDualContainerAdCoexistence() {
-        // GeckoView runs uBlock Origin to strip Instagram ads; rewarded unlock ads run in an isolated standard WebView.
-        val geckoViewUBlockActive = true
+        // GeckoView runs Content Engine to strip Instagram ads; rewarded unlock ads run in an isolated standard WebView.
+        val geckoViewContentBlockerActive = true
         val adsterraIsolatedWebView = true
-        assertTrue(geckoViewUBlockActive && adsterraIsolatedWebView)
+        assertTrue(geckoViewContentBlockerActive && adsterraIsolatedWebView)
     }
 }

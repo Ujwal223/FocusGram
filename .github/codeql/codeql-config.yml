@@ -8,7 +8,7 @@ name: "FocusGram CodeQL Configuration"
 # 5. java/deprecated-call: Deprecated methods are isolated inside explicit Android SDK version branches for backward compatibility.
 # 6. js/incomplete-url-substring-sanitization: Meta / Instagram CDN, auth endpoints, and ghost-mode URLs use complex dynamic domains and subdomains.
 # 7. js/missing-origin-check: Internal postMessage event listeners in WebExtension content scripts and in-page scripts communicate across isolated frame boundaries.
-# 8. js/unused-local-variable: Third-party bundled uBlock Origin and legacy scripts contain unused constants/functions.
+# 8. js/unused-local-variable: Third-party bundled scripts and legacy scripts contain unused constants/functions.
 # 9. js/trivial-conditional: Bundled content scripts contain defensive condition guards.
 # 10. js/superfluous-trailing-arguments: Bundled ghost sanitizer utility invocations.
 # 11. js/cross-window-information-leak: WebExtension downloader custom event postMessage communication.

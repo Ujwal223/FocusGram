@@ -164,10 +164,10 @@ class ChatLockAndAppIconTest {
 
     @Test
     fun testPreRenderBlockingInExtensionAssets() {
-        val baseDir = java.io.File("src/main/assets/extensions/ublock")
-        val altDir = java.io.File("app/src/main/assets/extensions/ublock")
-        val uBlockDir = if (baseDir.exists()) baseDir else altDir
-        val fgFile = java.io.File(uBlockDir, "focusgram_content.js")
+        val baseDir = java.io.File("src/main/assets/extensions/content-engine")
+        val altDir = java.io.File("app/src/main/assets/extensions/content-engine")
+        val contentEngineDir = if (baseDir.exists()) baseDir else altDir
+        val fgFile = java.io.File(contentEngineDir, "focusgram_content.js")
         assertTrue("focusgram_content.js must exist", fgFile.exists())
         val text = fgFile.readText()
 

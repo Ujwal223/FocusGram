@@ -31,7 +31,7 @@
 
 Instagram is designed to hook your attention with autoplay videos, endless feeds, and nonstop recommendations. Most people do not want to quit Instagram entirely. You just want to chat with friends, check stories, and share photos without losing hours down an endless Reels rabbit hole.
 
-FocusGram fixes this without modifying Instagram's app or using private APIs. It loads the clean mobile web version of Instagram inside a private, secure browser with built-in uBlock Origin. Ads get blocked, distractions stay hidden, and healthy timers keep you in control. Everything runs directly on your device, so your data and login stay completely private.
+FocusGram fixes this without modifying Instagram's app or using private APIs. It loads the clean mobile web version of Instagram inside a private, secure browser with a built-in content and ad blocker. Ads get blocked, distractions stay hidden, and healthy timers keep you in control. Everything runs directly on your device, so your data and login stay completely private.
 
 ---
 
@@ -39,7 +39,7 @@ FocusGram fixes this without modifying Instagram's app or using private APIs. It
 
 | Feature | Official Instagram | FocusGram |
 | :--- | :---: | :---: |
-| **Ads & Sponsored Content** | Everywhere in feeds & stories | Completely blocked (uBlock Origin) |
+| **Ads & Sponsored Content** | Everywhere in feeds & stories | Completely blocked (FocusGram Content Engine) |
 | **Reels** | Endless scrolling trap | Block entirely or set timed sessions (1-30 min) |
 | **Feed & Explore** | Constant recommendations | Option to blur or hide feeds until tapped |
 | **Video Autoplay** | Plays automatically | Blocked, videos only play when you tap them |

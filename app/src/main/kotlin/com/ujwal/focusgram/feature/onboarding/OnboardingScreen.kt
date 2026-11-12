@@ -429,7 +429,7 @@ private fun WelcomeSlide() {
                 icon = Icons.Default.Shield,
                 tint = FocusGreen,
                 title = "100% Client-Side Privacy",
-                subtitle = "Zero external servers, zero telemetry, zero credential interception."
+                subtitle = "Zero user telemetry, zero tracking, zero credential interception."
             )
         }
     }

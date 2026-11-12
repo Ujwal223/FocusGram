@@ -96,16 +96,16 @@ class AuthNavBarSuppressionTest {
 
     @Test
     fun testEngineScriptsGuardedByAuthentication() {
-        val ublockBg = getFile("src/main/assets/extensions/ublock/background.js").readText()
+        val engineBg = getFile("src/main/assets/extensions/content-engine/background.js").readText()
         assertTrue(
             "background.js must strictly check userIsAuthenticated before blocking web requests",
-            ublockBg.contains("!userIsAuthenticated")
+            engineBg.contains("!userIsAuthenticated")
         )
 
-        val ublockContent = getFile("src/main/assets/extensions/ublock/focusgram_content.js").readText()
+        val engineContent = getFile("src/main/assets/extensions/content-engine/focusgram_content.js").readText()
         assertTrue(
             "focusgram_content.js must guard authentication state via isAuthPage and authStateChanged",
-            ublockContent.contains("isAuthPage") && ublockContent.contains("authStateChanged")
+            engineContent.contains("isAuthPage") && engineContent.contains("authStateChanged")
         )
 
         val sessionMgr = getFile("src/main/kotlin/com/ujwal/focusgram/core/engine/GeckoSessionManager.kt").readText()

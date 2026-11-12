@@ -54,6 +54,7 @@ import com.ujwal.focusgram.core.security.EncryptedStorage
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Edit
@@ -81,6 +82,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.Image
@@ -142,7 +145,8 @@ enum class SettingsSubpage {
     NOTIFICATIONS,
     GHOST,
     LICENSES,
-    CHAT_SECURITY
+    CHAT_SECURITY,
+    DEVELOPER
 }
 
 /**
@@ -194,9 +198,37 @@ fun SettingsScreen(
     var availableUpdate by remember { mutableStateOf<UpdateInfo?>(null) }
 
     val onRequestAdReward: (action: suspend () -> Unit, reason: String) -> Unit = { action, reason ->
-        pendingRewardAction = action
-        adDialogReason = reason
-        showSupportAdDialog = true
+        if (settings.adRewardsEnabled) {
+            pendingRewardAction = action
+            adDialogReason = reason
+            showSupportAdDialog = true
+        } else {
+            scope.launch { action() }
+        }
+    }
+
+    var versionTapCount by remember { mutableIntStateOf(0) }
+    var lastVersionTapTime by remember { mutableStateOf(0L) }
+    val onVersionTap: () -> Unit = {
+        val now = System.currentTimeMillis()
+        if (now - lastVersionTapTime > 2500L) {
+            versionTapCount = 0
+        }
+        lastVersionTapTime = now
+        val next = versionTapCount + 1
+        versionTapCount = next
+        if (!settings.developerOptionsEnabled) {
+            if (next in 3..6) {
+                val remaining = 7 - next
+                Toast.makeText(context, "You are now $remaining steps away from being a developer", Toast.LENGTH_SHORT).show()
+            } else if (next >= 7) {
+                scope.launch { repository.setDeveloperOptionsEnabled(true) }
+                Toast.makeText(context, "Developer options unlocked!", Toast.LENGTH_SHORT).show()
+                versionTapCount = 0
+            }
+        } else {
+            Toast.makeText(context, "Developer options already enabled", Toast.LENGTH_SHORT).show()
+        }
     }
 
     BackHandler {
@@ -296,7 +328,8 @@ fun SettingsScreen(
                         text = "v${com.ujwal.focusgram.BuildConfig.VERSION_NAME}",
                         color = Color(0xFF8E8E93),
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.clickable { onVersionTap() }
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
@@ -534,6 +567,7 @@ fun SettingsScreen(
                     SettingsSubpage.GHOST -> "Ghost Mode"
                     SettingsSubpage.LICENSES -> "Open Source Licenses & Acknowledgements"
                     SettingsSubpage.CHAT_SECURITY -> "Chat/DM Lock"
+                    SettingsSubpage.DEVELOPER -> "Developer Options"
                 },
                 color = IOSTextPrimary,
                 fontSize = 17.sp,
@@ -576,6 +610,7 @@ fun SettingsScreen(
                             }
                         }
                     },
+                    onVersionTap = onVersionTap,
                     screenTimeDao = screenTimeDao,
                     reelHistory = reelHistory
                 )
@@ -633,6 +668,14 @@ fun SettingsScreen(
                     settings = settings,
                     encryptedStorage = encryptedStorage,
                     onNavigateChatPinSetup = onNavigateChatPinSetup
+                )
+            }
+            SettingsSubpage.DEVELOPER -> {
+                DeveloperSubpage(
+                    repository = repository,
+                    settings = settings,
+                    onNavigateDebugMenu = onNavigateDebugMenu,
+                    onWatchAd = onWatchAd
                 )
             }
         }
@@ -703,6 +746,7 @@ private fun MainSettingsContent(
     onNavigateOnboarding: () -> Unit,
     onNavigateDebugMenu: () -> Unit,
     onCheckUpdates: () -> Unit,
+    onVersionTap: () -> Unit = {},
     screenTimeDao: ScreenTimeDao? = null,
     reelHistory: ReelHistory? = null
 ) {
@@ -733,8 +777,9 @@ private fun MainSettingsContent(
             .fillMaxSize()
             .padding(horizontal = 16.dp)
     ) {
-        item {
-            IOSGroupedCard(modifier = Modifier.padding(top = 10.dp)) {
+        if (settings.adRewardsEnabled && !settings.hideSupportBanner) {
+            item {
+                IOSGroupedCard(modifier = Modifier.padding(top = 10.dp)) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -847,6 +892,7 @@ private fun MainSettingsContent(
                     }
                 }
             }
+        }
         }
 
         item {
@@ -997,7 +1043,10 @@ private fun MainSettingsContent(
                     icon = Icons.Default.Security,
                     iconBgColor = Color(0xFF3A3A3C),
                     trailingText = "v${com.ujwal.focusgram.BuildConfig.VERSION_NAME}",
-                    onClick = { onNavigateSubpage(SettingsSubpage.LICENSES) }
+                    onClick = {
+                        onVersionTap()
+                        onNavigateSubpage(SettingsSubpage.LICENSES)
+                    }
                 )
                 if (com.ujwal.focusgram.BuildConfig.DEBUG) {
                     IOSSettingsRow(
@@ -1008,18 +1057,30 @@ private fun MainSettingsContent(
                         onClick = onNavigateOnboarding
                     )
                 }
-                IOSSettingsRow(
-                    title = "Check for Updates",
-                    subtitle = "Look for newer FocusGram releases on GitHub",
-                    icon = Icons.Default.SystemUpdate,
-                    iconBgColor = Color(0xFF34C759),
-                    onClick = onCheckUpdates,
-                    showDivider = false
-                )
+                if (!settings.disableAutoUpdateCheck) {
+                    IOSSettingsRow(
+                        title = "Check for Updates",
+                        subtitle = "Look for newer FocusGram releases on GitHub",
+                        icon = Icons.Default.SystemUpdate,
+                        iconBgColor = Color(0xFF34C759),
+                        onClick = onCheckUpdates,
+                        showDivider = settings.developerOptionsEnabled
+                    )
+                }
+                if (settings.developerOptionsEnabled) {
+                    IOSSettingsRow(
+                        title = "Developer Options",
+                        subtitle = "Overrides, debug triggers, and engine controls",
+                        icon = Icons.Default.Build,
+                        iconBgColor = Color(0xFF5856D6),
+                        onClick = { onNavigateSubpage(SettingsSubpage.DEVELOPER) },
+                        showDivider = false
+                    )
+                }
             }
         }
 
-        if (com.ujwal.focusgram.BuildConfig.DEBUG) {
+        if (com.ujwal.focusgram.BuildConfig.DEBUG || settings.enableDebugMenu) {
             item {
                 IOSSectionTitle(title = "DEVELOPER DIAGNOSTICS")
                 IOSGroupedCard {
@@ -2426,16 +2487,6 @@ private fun LicensesSubpage() {
                     }
                 )
                 IOSSettingsRow(
-                    title = "uBlock Origin",
-                    subtitle = "GPLv3 · High-performance content filtering and declarative rule evaluation",
-                    iconRes = R.drawable.ic_credit_ublock,
-                    iconBgColor = Color(0xFF800000),
-                    onClick = {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/gorhill/uBlock"))
-                        context.startActivity(intent)
-                    }
-                )
-                IOSSettingsRow(
                     title = "Ghostify",
                     subtitle = "MIT License · Groundbreaking research & telemetry suppression architecture",
                     icon = Icons.Default.VisibilityOff,
@@ -2711,5 +2762,244 @@ private fun ChatSecuritySubpage(
             },
             labelProvider = { it.second }
         )
+    }
+}
+
+@Composable
+private fun DeveloperSubpage(
+    repository: SettingsRepository,
+    settings: FocusSettings,
+    onNavigateDebugMenu: () -> Unit,
+    onWatchAd: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val isDark = isSystemInDarkTheme()
+
+    var showWarningDialog by remember { mutableStateOf(false) }
+    var showOneLastAdDialog by remember { mutableStateOf(false) }
+
+    var warningCountdown by remember { mutableIntStateOf(10) }
+    var oneLastAdCountdown by remember { mutableIntStateOf(8) }
+
+    LaunchedEffect(showWarningDialog) {
+        if (showWarningDialog) {
+            warningCountdown = 10
+            while (warningCountdown > 0) {
+                delay(1000L)
+                warningCountdown--
+            }
+        }
+    }
+
+    LaunchedEffect(showOneLastAdDialog) {
+        if (showOneLastAdDialog) {
+            oneLastAdCountdown = 8
+            while (oneLastAdCountdown > 0) {
+                delay(1000L)
+                oneLastAdCountdown--
+            }
+        }
+    }
+
+    if (showWarningDialog) {
+        AlertDialog(
+            onDismissRequest = { showWarningDialog = false },
+            containerColor = if (isDark) Color(0xFF1C1C1E) else Color.White,
+            title = {
+                Text(
+                    text = "Withdraw Project Support?",
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDark) Color.White else Color.Black
+                )
+            },
+            text = {
+                Text(
+                    text = "This will completely turn off all ad engines, ad buttons, EVERYTHING. Time extensions in cooldowns will not be allowed and this will remove your support from the project.",
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    color = if (isDark) Color(0xFFC7C7CC) else Color(0xFF3C3C43)
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showWarningDialog = false
+                        showOneLastAdDialog = true
+                    },
+                    enabled = warningCountdown == 0,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFFF3B30),
+                        contentColor = Color.White
+                    )
+                ) {
+                    Text(
+                        text = if (warningCountdown > 0) "Turn Off Anyway (${warningCountdown}s)" else "Turn Off Anyway",
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showWarningDialog = false }) {
+                    Text("Keep Supported", color = if (isDark) Color(0xFF8E8E93) else Color(0xFF6C6C70))
+                }
+            }
+        )
+    }
+
+    if (showOneLastAdDialog) {
+        AlertDialog(
+            onDismissRequest = { /* forced choice */ },
+            containerColor = if (isDark) Color(0xFF1C1C1E) else Color.White,
+            title = {
+                Text(
+                    text = "One Last Favor",
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDark) Color.White else Color.Black
+                )
+            },
+            text = {
+                Text(
+                    text = "Please watch the ad one last time to turn this off completely 🤪",
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                    color = if (isDark) Color(0xFFC7C7CC) else Color(0xFF3C3C43)
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showOneLastAdDialog = false
+                        scope.launch { repository.setAdRewardsEnabled(false) }
+                        onWatchAd()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = IOSBlue,
+                        contentColor = Color.White
+                    )
+                ) {
+                    Text("OK", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        showOneLastAdDialog = false
+                        scope.launch { repository.setAdRewardsEnabled(false) }
+                    },
+                    enabled = oneLastAdCountdown == 0
+                ) {
+                    Text(
+                        text = if (oneLastAdCountdown > 0) "No (${oneLastAdCountdown}s)" else "No",
+                        color = if (oneLastAdCountdown == 0) Color(0xFFFF3B30) else Color(0xFF8E8E93)
+                    )
+                }
+            }
+        )
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp)
+    ) {
+        item {
+            IOSSectionTitle(title = "DEBUG & DIAGNOSTICS")
+            IOSGroupedCard {
+                IOSSettingsRow(
+                    title = "Enable Debug Diagnostics Menu",
+                    subtitle = "Expose simulation triggers and runtime state inspectors",
+                    icon = Icons.Default.BugReport,
+                    iconBgColor = IOSOrange,
+                    checked = settings.enableDebugMenu,
+                    onCheckedChange = { scope.launch { repository.setEnableDebugMenu(it) } },
+                    showDivider = settings.enableDebugMenu
+                )
+                if (settings.enableDebugMenu) {
+                    IOSSettingsRow(
+                        title = "Open Diagnostics Menu",
+                        subtitle = "Launch full-screen diagnostics dashboard",
+                        icon = Icons.Default.Settings,
+                        iconBgColor = Color(0xFF636366),
+                        onClick = onNavigateDebugMenu,
+                        showDivider = false,
+                        isDependent = true
+                    )
+                }
+            }
+        }
+
+        item {
+            IOSSectionTitle(title = "INTERFACE & UPDATES")
+            IOSGroupedCard {
+                IOSSettingsRow(
+                    title = "Remove Support Banner",
+                    subtitle = "Hide the voluntary support card in main settings",
+                    icon = Icons.Default.Favorite,
+                    iconBgColor = Color(0xFF8E8E93),
+                    checked = settings.hideSupportBanner,
+                    onCheckedChange = { scope.launch { repository.setHideSupportBanner(it) } }
+                )
+                IOSSettingsRow(
+                    title = "Disable Automatic Update Checks",
+                    subtitle = "Completely disable network requests to GitHub releases API",
+                    icon = Icons.Default.SystemUpdate,
+                    iconBgColor = Color(0xFF5856D6),
+                    checked = settings.disableAutoUpdateCheck,
+                    onCheckedChange = { scope.launch { repository.setDisableAutoUpdateCheck(it) } },
+                    showDivider = false
+                )
+            }
+        }
+
+        item {
+            IOSSectionTitle(title = "PROJECT SUPPORT & REWARD ENGINES")
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF141416), RoundedCornerShape(4.dp))
+                    .border(0.5.dp, Color(0xFF2C2C2E), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Sever Developer Support & Hard-Disable Reward Engines",
+                            color = Color(0xFF9E9E9E),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Normal,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                        )
+                        Text(
+                            text = "Completely suppress all ad engines, extension buttons, and voluntary support mechanisms. Removes your contribution to the project.",
+                            color = Color(0xFF616161),
+                            fontSize = 10.sp,
+                            lineHeight = 13.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Switch(
+                        checked = settings.adRewardsEnabled,
+                        onCheckedChange = { checked ->
+                            if (!checked) {
+                                showWarningDialog = true
+                            } else {
+                                scope.launch { repository.setAdRewardsEnabled(true) }
+                            }
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color(0xFF757575),
+                            checkedTrackColor = Color(0xFF303030),
+                            uncheckedThumbColor = Color(0xFF424242),
+                            uncheckedTrackColor = Color(0xFF212121)
+                        )
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(30.dp))
+        }
     }
 }

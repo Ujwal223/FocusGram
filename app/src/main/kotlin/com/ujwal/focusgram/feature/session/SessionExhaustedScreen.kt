@@ -57,6 +57,7 @@ fun SessionExhaustedScreen(
     onExit: () -> Unit,
     onWatchAdToExtend: () -> Unit,
     modifier: Modifier = Modifier,
+    adRewardsEnabled: Boolean = true,
     onDebugBypass: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
@@ -218,7 +219,7 @@ fun SessionExhaustedScreen(
                 )
             }
 
-            if (extensionsRemaining > 0) {
+            if (adRewardsEnabled && extensionsRemaining > 0) {
                 Spacer(modifier = Modifier.height(12.dp))
 
                 OutlinedButton(

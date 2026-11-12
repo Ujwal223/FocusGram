@@ -298,7 +298,7 @@ class DmNotificationService : Service() {
 
             newSession.progressDelegate = object : GeckoSession.ProgressDelegate {
                 override fun onPageStart(session: GeckoSession, url: String) {
-                    Log.d(TAG, "Headless DM session started loading: $url")
+                    Log.d(TAG, "Headless DM session started loading")
                 }
 
                 override fun onPageStop(session: GeckoSession, success: Boolean) {
@@ -332,7 +332,7 @@ class DmNotificationService : Service() {
                     return if (isInstagram || isSafeScheme) {
                         GeckoResult.fromValue(AllowOrDeny.ALLOW)
                     } else {
-                        Log.w(TAG, "Blocked external navigation in headless listener: $rawUri")
+                        Log.w(TAG, "Blocked external navigation in headless listener")
                         GeckoResult.fromValue(AllowOrDeny.DENY)
                     }
                 }
@@ -343,7 +343,7 @@ class DmNotificationService : Service() {
                     permissions: List<GeckoSession.PermissionDelegate.ContentPermission>,
                     hasUserGesture: Boolean
                 ) {
-                    Log.d(TAG, "Headless DM session location changed: $url")
+                    Log.d(TAG, "Headless DM session location changed")
                     if (url?.contains("/accounts/login") == true) {
                         Log.w(TAG, "Headless DM session redirected to login page. Session may need re-authentication.")
                     }

@@ -19,7 +19,7 @@
 
 ## 1. Executive Summary
 
-FocusGram is an Android client engineered for digital wellness and intentional media consumption. The application embeds a browser runtime (Mozilla GeckoView Omni `157.0.20260924084938`) combined with uBlock Origin and specialized client-side user scripts. The system enforces usage constraints, content blurring, session timers, and biometric authentication directly on the client device without utilizing reverse-engineered Meta private APIs or binary modifications of the Instagram APK.
+FocusGram is an Android client engineered for digital wellness and intentional media consumption. The application embeds a browser runtime (Mozilla GeckoView Omni `157.0.20260924084938`) combined with the FocusGram Content Engine and specialized client-side user scripts. The system enforces usage constraints, content blurring, session timers, and biometric authentication directly on the client device without utilizing reverse-engineered Meta private APIs or binary modifications of the Instagram APK.
 
 An independent white-box security assessment was conducted across the FocusGram codebase at commit `739533d09e17721076a26283e8f0bf5311d98394`. The review encompassed all native Kotlin source components, embedded WebExtensions, content injection scripts, cryptographic storage mechanisms, inter-component communication boundaries, and platform manifest declarations. Special analytical focus was directed toward the trust boundaries separating untrusted web content from privileged Android operating system primitives.
 
@@ -57,7 +57,7 @@ The evaluation encompassed the entire source tree, asset definitions, and platfo
 | **Application and Chat Lock** | `com.ujwal.focusgram.feature.applock` | 4 Kotlin source files | BiometricPrompt authentication, hardware crypto binding, thread-specific access gates |
 | **Digital Wellness and Session Gates** | `com.ujwal.focusgram.feature.wellness`, `feature.session` | 8 Kotlin source files | Breath friction gates, cognitive transcription challenges, cooldown enforcement, session quotas |
 | **Media Ingestion Pipeline** | `com.ujwal.focusgram.core.utils` | `MediaDownloadHelper.kt` | Direct stream-to-disk piping, MediaStore insertion, URL scheme validation |
-| **WebExtensions and Content Scripts** | `app/src/main/assets/extensions/` | uBlock Origin, `dm_watcher.js`, `reellock`, `reelhistory` | Request blocking, DOM observers, WebExtension isolation, native messaging |
+| **WebExtensions and Content Scripts** | `app/src/main/assets/extensions/` | Content Engine, `dm_watcher.js`, `reellock`, `reelhistory` | Request blocking, DOM observers, WebExtension isolation, native messaging |
 | **Client Injection Scripts** | `app/src/main/assets/scripts/` | 7 JavaScript assets | DOM elements hiding, media interception, video autoplay suppression, grayscale shaders |
 | **Third-Party Ad Container** | `com.ujwal.focusgram.feature.wellness` | `AdsterraAdScreen.kt` | Isolated WebView sandbox, external intent sanitization, disabled filesystem access |
 | **Platform Manifest and Resources** | `app/src/main/AndroidManifest.xml`, `res/xml/` | XML configuration trees | Exported components, intent filters, backup rules, network security policies |
@@ -76,7 +76,7 @@ flowchart TD
     subgraph Android OS Kernel and Single App Process com.ujwal.focusgram
         subgraph Embedded Browser Engine
             InstagramDOM["Instagram Web DOM (Untrusted User Content and Feeds)"]
-            ExtensionSandbox["WebExtension Runtime (uBlock Origin, dm_watcher.js)"]
+            ExtensionSandbox["WebExtension Runtime (Content Engine, dm_watcher.js)"]
             NativeMsgPort["Native Messaging Port (focusgram host)"]
         end
 
@@ -431,7 +431,7 @@ init {
 * **Target Files:**
   - `app/src/main/kotlin/com/ujwal/focusgram/feature/notifications/DmNotificationManager.kt` (Lines 145-193, 265-305, 375-430)
   - `app/src/main/kotlin/com/ujwal/focusgram/feature/notifications/DmNotificationService.kt` (Lines 324-338)
-  - `app/src/main/assets/extensions/ublock/dm_watcher.js` (Lines 30-56)
+  - `app/src/main/assets/extensions/content-engine/dm_watcher.js` (Lines 30-56)
 
 #### Vulnerability Description
 The Direct Message notification feature introduces a headless `GeckoSession` running in a foreground service (`DmNotificationService`) alongside a client content script (`dm_watcher.js`) to capture incoming message events. This subsystem presented potential security risks:
@@ -554,7 +554,7 @@ The complete automated regression and security test suite was executed against t
   - PIN constant-time equality and hash storage (`AppLockSecurityTest`)
   - Direct message notification deduplication, chat lock masking, and headless isolation (`DmNotificationTest`)
   - Media download scheme whitelisting and direct stream piping (`MediaDownloadTest`)
-  - WebExtension and user script integrity (`UBlockExtensionAssetsTest`, `UserScriptAssetsTest`, `ReelLockExtensionAssetsTest`)
+  - WebExtension and user script integrity (`ContentEngineExtensionAssetsTest`, `UserScriptAssetsTest`, `ReelLockExtensionAssetsTest`)
   - Navigation containment and domain whitelist parsing (`NavigationContainmentTest`)
   - Effort friction and breath gate cognitive barrier logic (`EffortFrictionGateTest`, `BreathGateTest`, `CooldownGateTest`)
   - Database entity isolation and DataStore state flow (`ReelsHistoryLogicTest`, `FocusSettingsTest`, `TwoTierLimitsAndEnhancementsTest`)
@@ -583,7 +583,7 @@ The production debug artifact was assembled to confirm DEX packaging, asset incl
   - `FocusGram-v3.0.0-universal-debug.apk` (267 MB)
 * **Verified Native Engine and Extension Inclusions:**
   - Mozilla GeckoView Omni engine (`libxul.so` 152.4 MB uncompressed, `libmozglue.so` 1.3 MB)
-  - Embedded uBlock Origin extension and content scripts (`assets/omni.ja`, `assets/extensions/ublock/`)
+  - Embedded Content Engine extension and content scripts (`assets/omni.ja`, `assets/extensions/content-engine/`)
   - Embedded Reels History and Reel Lock WebExtensions (`assets/reelhistory/`, `assets/reellock/`)
 
 ---

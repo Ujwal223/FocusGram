@@ -59,6 +59,7 @@ fun DailyLimitGateScreen(
     onExit: () -> Unit,
     onWatchAdToExtend: () -> Unit,
     modifier: Modifier = Modifier,
+    adRewardsEnabled: Boolean = true,
     onDebugBypass: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
@@ -252,7 +253,7 @@ fun DailyLimitGateScreen(
                 )
             }
 
-            if (!isBlockedForToday) {
+            if (adRewardsEnabled && !isBlockedForToday) {
                 Spacer(modifier = Modifier.height(12.dp))
 
                 OutlinedButton(

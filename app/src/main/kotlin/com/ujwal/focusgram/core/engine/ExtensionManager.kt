@@ -17,7 +17,7 @@ import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.WebExtension
 
 /**
- * Bridges between native Android settings and the bundled uBlock Origin / FocusGram
+ * Bridges between native Android settings and the bundled FocusGram Content Engine
  * content script over GeckoView WebExtension messaging ports.
  */
 class ExtensionManager(private val runtime: GeckoRuntime) {
@@ -156,7 +156,6 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
         }
     }
 
-    suspend fun initializeUBlockOrigin(): Result<WebExtension> = initializeContentBlocker()
 
     private fun setupMessageDelegate(extension: WebExtension) {
         extension.setMessageDelegate(nativeMessageDelegate, "focusgram")
@@ -200,7 +199,7 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                 val url = json.optString("url")
                 // Never let background DM listener session contaminate foreground Compose UI navigation
                 if (url.isNotEmpty() && !url.contains("focusgram_bg_dm=1")) {
-                    Log.d(TAG, "Received urlChanged from Instagram web: $url")
+                    Log.d(TAG, "Received urlChanged from Instagram web")
                     mainHandler.post { onUrlChanged?.invoke(url) }
                 }
             }
@@ -238,7 +237,7 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
 
                 if (url.isNotBlank()) {
                     val isMeta = json.optString("type") == "meta"
-                    Log.d(TAG, "Received reelWatched: code=$code, url=$url, author=$author, title=$title, isMeta=$isMeta")
+                    Log.d(TAG, "Received reelWatched: isMeta=$isMeta")
                     mainHandler.post {
                         if (isMeta) {
                             onReelMeta?.invoke(url, title, author)
@@ -258,7 +257,7 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
             "clipboardCopy" -> {
                 val text = json.optString("text")
                 if (text.isNotBlank()) {
-                    Log.i(TAG, "Received clipboardCopy from web: $text")
+                    Log.i(TAG, "Received clipboardCopy from web (${text.length} chars)")
                     mainHandler.post {
                         try {
                             val context = FocusGramApp.instance
@@ -269,7 +268,7 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                                 text
                             }
                             if (com.ujwal.focusgram.core.utils.NetworkUtils.isBareInstagramRootUrl(finalText)) {
-                                Log.w(TAG, "Suppressed bare Instagram root URL clipboard write: $finalText")
+                                Log.w(TAG, "Suppressed bare Instagram root URL clipboard write")
                                 return@post
                             }
                             // Suppress duplicate toasts when rapid sequential events fire for the same copy action
@@ -293,7 +292,7 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                 val mediaUrl = json.optString("url")
                 val filename = json.optString("filename")
                 val error = json.optString("error")
-                Log.d(TAG, "Received downloadMedia from web: url=$mediaUrl, filename=$filename, error=$error")
+                Log.d(TAG, "Received downloadMedia from web: filename=$filename, error=$error")
                 mainHandler.post {
                     if (mediaUrl.isNotBlank()) {
                         onDownloadRequested?.invoke(mediaUrl, filename)
@@ -331,7 +330,7 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                     list.add(displayName)
                 }
                 if (threadId.isNotBlank()) {
-                    Log.d(TAG, "Received threadUsernameMapped from web: threadId=$threadId, usernames=$list, displayName=$displayName")
+                    Log.d(TAG, "Received threadUsernameMapped from web")
                     mainHandler.post {
                         onThreadUsernameMapped?.invoke(threadId, list)
                     }
@@ -342,7 +341,7 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                 val username = json.optString("username").takeIf { it.isNotBlank() }
                 val targetUrl = json.optString("targetUrl").takeIf { it.isNotBlank() }
                 if (threadId.isNotBlank()) {
-                    Log.d(TAG, "Received requestUnlockChat from web: threadId=$threadId, username=$username, targetUrl=$targetUrl")
+                    Log.d(TAG, "Received requestUnlockChat from web")
                     mainHandler.post {
                         onRequestUnlockChat?.invoke(threadId, username, targetUrl)
                     }
@@ -352,7 +351,7 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
                 val threadId = json.optString("threadId")
                 val username = json.optString("username").takeIf { it.isNotBlank() }
                 if (threadId.isNotBlank()) {
-                    Log.d(TAG, "Received toggleChatLock from web: threadId=$threadId, username=$username")
+                    Log.d(TAG, "Received toggleChatLock from web")
                     mainHandler.post {
                         onToggleChatLock?.invoke(threadId, username)
                     }
@@ -644,44 +643,40 @@ class ExtensionManager(private val runtime: GeckoRuntime) {
         Log.i(TAG, "Content ad-blocker dynamic state updated: noAds=$enabled")
     }
 
-    suspend fun setUBlockEnabled(enabled: Boolean) = setContentBlockerEnabled(enabled)
-
     /**
      * Requests the content script to extract and report the active Reel video source URL.
      */
-    fun triggerReelDownload() {
-        try {
-            val msg = JSONObject().apply {
-                put("action", "requestReelDownload")
-            }
-            postToAllPorts(msg)
-            Log.d(TAG, "Sent requestReelDownload to WebExtension ports")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to send requestReelDownload to ports: ${e.message}", e)
-        }
-    }
+     fun triggerReelDownload() {
+         try {
+             val msg = JSONObject().apply {
+                 put("action", "requestReelDownload")
+             }
+             postToAllPorts(msg)
+             Log.d(TAG, "Sent requestReelDownload to WebExtension ports")
+         } catch (e: Exception) {
+             Log.e(TAG, "Failed to send requestReelDownload to ports: ${e.message}", e)
+         }
+     }
 
     /**
      * Sends the selected Unicode character style to the content script for in-place text styling.
      */
-    fun setBioStyle(style: String) {
-        try {
-            val msg = JSONObject().apply {
-                put("action", "setBioStyle")
-                put("style", style)
-            }
-            postToAllPorts(msg)
-            Log.d(TAG, "Sent setBioStyle ($style) to WebExtension ports")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to send setBioStyle to ports: ${e.message}", e)
-        }
-    }
+     fun setBioStyle(style: String) {
+         try {
+             val msg = JSONObject().apply {
+                 put("action", "setBioStyle")
+                 put("style", style)
+             }
+             postToAllPorts(msg)
+             Log.d(TAG, "Sent setBioStyle ($style) to WebExtension ports")
+         } catch (e: Exception) {
+             Log.e(TAG, "Failed to send setBioStyle to ports: ${e.message}", e)
+         }
+     }
 
     companion object {
         private const val TAG = "ExtensionManager"
-        const val CONTENT_BLOCKER_EXTENSION_ID = "uBlock0@raymondhill.net"
-        const val CONTENT_BLOCKER_ASSET_URI = "resource://android/assets/extensions/ublock/"
-        const val UBLOCK_EXTENSION_ID = CONTENT_BLOCKER_EXTENSION_ID
-        const val UBLOCK_ASSET_URI = CONTENT_BLOCKER_ASSET_URI
+        const val CONTENT_BLOCKER_EXTENSION_ID = "focusgram@ujwal.name.np"
+        const val CONTENT_BLOCKER_ASSET_URI = "resource://android/assets/extensions/content-engine/"
     }
 }

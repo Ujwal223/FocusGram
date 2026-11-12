@@ -155,7 +155,7 @@ class GeckoSessionManager(private val runtime: GeckoRuntime) {
     private fun setupProgressDelegate() {
         session.progressDelegate = object : GeckoSession.ProgressDelegate {
             override fun onPageStart(session: GeckoSession, url: String) {
-                Log.d(TAG, "Page started loading: $url")
+                Log.d(TAG, "Page started loading")
                 if (!url.startsWith("focusgram-download:") && !url.startsWith("focusgram-clipboard:") && !url.startsWith("javascript:")) {
                     _isLoading.value = true
                     _currentUrl.value = url

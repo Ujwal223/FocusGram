@@ -110,7 +110,13 @@ class SettingsRepository(private val context: Context) {
 
             dmNotificationsEnabled = prefs[KEY_DM_NOTIFICATIONS_ENABLED] ?: false,
             dmNotificationPreview = prefs[KEY_DM_NOTIFICATION_PREVIEW] ?: false,
-            dmRecentMessageHashes = prefs[KEY_DM_RECENT_MESSAGE_HASHES] ?: "[]"
+            dmRecentMessageHashes = prefs[KEY_DM_RECENT_MESSAGE_HASHES] ?: "[]",
+
+            developerOptionsEnabled = prefs[KEY_DEVELOPER_OPTIONS_ENABLED] ?: false,
+            enableDebugMenu = prefs[KEY_ENABLE_DEBUG_MENU] ?: false,
+            hideSupportBanner = prefs[KEY_HIDE_SUPPORT_BANNER] ?: false,
+            disableAutoUpdateCheck = prefs[KEY_DISABLE_AUTO_UPDATE_CHECK] ?: false,
+            adRewardsEnabled = prefs[KEY_AD_REWARDS_ENABLED] ?: true
         )
     }
 
@@ -416,6 +422,12 @@ class SettingsRepository(private val context: Context) {
     suspend fun setDmNotificationPreview(enabled: Boolean) = setBoolean(KEY_DM_NOTIFICATION_PREVIEW, enabled)
     suspend fun setDmRecentMessageHashes(hashesJson: String) = setString(KEY_DM_RECENT_MESSAGE_HASHES, hashesJson)
 
+    suspend fun setDeveloperOptionsEnabled(enabled: Boolean) = setBoolean(KEY_DEVELOPER_OPTIONS_ENABLED, enabled)
+    suspend fun setEnableDebugMenu(enabled: Boolean) = setBoolean(KEY_ENABLE_DEBUG_MENU, enabled)
+    suspend fun setHideSupportBanner(enabled: Boolean) = setBoolean(KEY_HIDE_SUPPORT_BANNER, enabled)
+    suspend fun setDisableAutoUpdateCheck(enabled: Boolean) = setBoolean(KEY_DISABLE_AUTO_UPDATE_CHECK, enabled)
+    suspend fun setAdRewardsEnabled(enabled: Boolean) = setBoolean(KEY_AD_REWARDS_ENABLED, enabled)
+
     suspend fun getDismissedUpdateVersion(): String? {
         val prefs = context.dataStore.data.first()
         return prefs[KEY_LAST_DISMISSED_UPDATE]
@@ -508,5 +520,11 @@ class SettingsRepository(private val context: Context) {
         val KEY_DM_NOTIFICATIONS_ENABLED = booleanPreferencesKey("dm_notifications_enabled")
         val KEY_DM_NOTIFICATION_PREVIEW = booleanPreferencesKey("dm_notification_preview")
         val KEY_DM_RECENT_MESSAGE_HASHES = stringPreferencesKey("dm_recent_message_hashes")
+
+        val KEY_DEVELOPER_OPTIONS_ENABLED = booleanPreferencesKey("developer_options_enabled")
+        val KEY_ENABLE_DEBUG_MENU = booleanPreferencesKey("enable_debug_menu")
+        val KEY_HIDE_SUPPORT_BANNER = booleanPreferencesKey("hide_support_banner")
+        val KEY_DISABLE_AUTO_UPDATE_CHECK = booleanPreferencesKey("disable_auto_update_check")
+        val KEY_AD_REWARDS_ENABLED = booleanPreferencesKey("ad_rewards_enabled")
     }
 }

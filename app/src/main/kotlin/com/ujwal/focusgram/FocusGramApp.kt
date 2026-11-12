@@ -51,12 +51,12 @@ class FocusGramApp : Application() {
         // The listener is started on app backgrounding (and by DmBootReceiver
         // after boot) instead.
 
-        // Pre-warming GeckoRuntime and mounting uBlock on Main avoids cold-start frame drops
+        // Pre-warming GeckoRuntime and mounting Content Engine on Main avoids cold-start frame drops
         // when the primary WebView composable binds to the session manager.
         applicationScope.launch(Dispatchers.Main) {
             try {
                 val manager = GeckoRuntimeManager.getInstance(this@FocusGramApp)
-                manager.extensionManager.initializeUBlockOrigin()
+                manager.extensionManager.initializeContentBlocker()
                 Log.i(TAG, "GeckoRuntime & Content Blocker initialized successfully.")
             } catch (e: Exception) {
                 Log.e(TAG, "Initialization error in background scope: ${e.message}", e)

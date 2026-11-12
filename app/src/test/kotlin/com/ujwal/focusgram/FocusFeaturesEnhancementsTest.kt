@@ -83,7 +83,7 @@ class FocusFeaturesEnhancementsTest {
     @Test
     fun testCarouselSlideIndependentBlurAndUnblurSelectors() {
         val hiderScript = getFile("src/main/assets/scripts/content_hider.js").readText()
-        val extensionScript = getFile("src/main/assets/extensions/ublock/focusgram_content.js").readText()
+        val extensionScript = getFile("src/main/assets/extensions/content-engine/focusgram_content.js").readText()
 
         for (script in listOf(hiderScript, extensionScript)) {
             assertTrue("Must blur media elements individually without blurring parent aspect-ratio containers",
@@ -102,7 +102,7 @@ class FocusFeaturesEnhancementsTest {
     @Test
     fun testHomeFeedBlurUsesTheSharedRevealMode() {
         val hiderScript = getFile("src/main/assets/scripts/content_hider.js").readText()
-        val extensionScript = getFile("src/main/assets/extensions/ublock/focusgram_content.js").readText()
+        val extensionScript = getFile("src/main/assets/extensions/content-engine/focusgram_content.js").readText()
 
         for (script in listOf(hiderScript, extensionScript)) {
             assertTrue("Home-feed reveal must not reject an entire section containing reaction controls",
@@ -425,7 +425,7 @@ class FocusFeaturesEnhancementsTest {
 
     @Test
     fun testFocusGramContentAntiFlashDoesNotCollapseFeed() {
-        val script = getFile("src/main/assets/extensions/ublock/focusgram_content.js").readText()
+        val script = getFile("src/main/assets/extensions/content-engine/focusgram_content.js").readText()
         assertFalse(
             "focusgram_content.js must NOT have overly broad div:has(> a[href='/']) that caused feed blanking",
             script.contains("div:has(> a[href=\"/\"]):has(a[href*=\"/explore/\"])")
@@ -494,34 +494,34 @@ class FocusFeaturesEnhancementsTest {
 
     @Test
     fun testCommentGifsExclusionFromExploreBlur() {
-        val ublockScript = getFile("src/main/assets/extensions/ublock/focusgram_content.js").readText()
+        val contentEngineScript = getFile("src/main/assets/extensions/content-engine/focusgram_content.js").readText()
         val contentHiderScript = getFile("src/main/assets/scripts/content_hider.js").readText()
 
         assertFalse("Explore blur must NOT blindly target all div[style*=\"grid\"]",
-            ublockScript.contains("div[style*=\"grid\"]:not([data-fg-reveal]):not(.fg-unblurred) img"))
+            contentEngineScript.contains("div[style*=\"grid\"]:not([data-fg-reveal]):not(.fg-unblurred) img"))
         assertFalse("Explore blur in content_hider must NOT blindly target all div[style*=\"grid\"]",
             contentHiderScript.contains("div[style*=\"grid\"]:not([data-fg-reveal]):not(.fg-unblurred) img"))
 
         assertTrue("Must include rule preserving Giphy and comment GIFs unblurred",
-            ublockScript.contains("img[src*=\"giphy\"]") && ublockScript.contains("filter: none !important;"))
+            contentEngineScript.contains("img[src*=\"giphy\"]") && contentEngineScript.contains("filter: none !important;"))
         assertTrue("content_hider must include rule preserving Giphy and comment GIFs unblurred",
             contentHiderScript.contains("img[src*=\"giphy\"]") && contentHiderScript.contains("filter: none !important;"))
 
         assertTrue("getBlurredTarget must ignore comment GIFs and comment inputs",
-            ublockScript.contains("el.closest('img[src*=\"giphy\"]"))
+            contentEngineScript.contains("el.closest('img[src*=\"giphy\"]"))
         assertTrue("getBlurredTarget in content_hider must ignore comment GIFs and comment inputs",
             contentHiderScript.contains("el.closest('img[src*=\"giphy\"]"))
     }
 
     @Test
     fun testReelsCounterStartsAtZeroWithInstantScrollUpdate() {
-        val ublockScript = getFile("src/main/assets/extensions/ublock/focusgram_content.js").readText()
+        val contentEngineScript = getFile("src/main/assets/extensions/content-engine/focusgram_content.js").readText()
         val reelsScript = getFile("src/main/assets/reelhistory/reels.js").readText()
 
         assertTrue("focusgram_content.js must track isInitialReelOnTabEntry",
-            ublockScript.contains("isInitialReelOnTabEntry"))
+            contentEngineScript.contains("isInitialReelOnTabEntry"))
         assertTrue("focusgram_content.js must not count initial landing reel as watched",
-            ublockScript.contains("action: 'reelWatched'") && ublockScript.contains("type: 'meta'"))
+            contentEngineScript.contains("action: 'reelWatched'") && contentEngineScript.contains("type: 'meta'"))
         assertTrue("reels.js must use responsive DWELL_MS <= 200ms",
             reelsScript.contains("const DWELL_MS = 200;"))
     }

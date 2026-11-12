@@ -241,7 +241,7 @@ object MediaDownloadHelper {
                     return
                 }
 
-                Log.i(TAG, "Download enqueued for $targetFilename (id=$downloadId) from $url")
+                Log.i(TAG, "Download enqueued for $targetFilename (id=$downloadId)")
 
                 _downloadProgressFlow.value = DownloadProgressState(
                     isDownloading = true,
@@ -343,7 +343,7 @@ object MediaDownloadHelper {
     private fun downloadDirectHttp(context: Context, url: String, targetFilename: String, isVideo: Boolean) {
         helperScope.launch {
             try {
-                Log.i(TAG, "Starting direct HTTP download for $targetFilename from $url")
+                Log.i(TAG, "Starting direct HTTP download for $targetFilename")
                 _downloadProgressFlow.value = DownloadProgressState(
                     isDownloading = true,
                     progress = 0.08f,

@@ -167,7 +167,7 @@ private const val AD_HTML = """
  * Isolated WebView container for opt-in rewarded ad viewing.
  *
  * Runs inside standard Android system WebView completely decoupled from GeckoView
- * to preserve uBlock Origin blocking in Instagram browsing sessions.
+ * to preserve Content Engine blocking in Instagram browsing sessions.
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -558,7 +558,7 @@ fun AdsterraAdScreen(
  * Pre-warms the Android system WebView and Chromium V8 runtime in the background using about:blank.
  *
  * Runs isolated from GeckoView to avoid cold-start latency when opening [AdsterraAdScreen],
- * without touching Instagram browsing sessions or uBlock Origin state.
+ * without touching Instagram browsing sessions or Content Engine state.
  */
 object AdPreloader {
     @Volatile

@@ -169,10 +169,10 @@ class DmNotificationTest {
 
     @Test
     fun testWebExtensionDmWatcherAssetIntegrity() {
-        val uBlockDir = getFile("src/main/assets/extensions/ublock")
-        assertTrue("uBlock extension directory must exist", uBlockDir.exists())
+        val contentEngineDir = getFile("src/main/assets/extensions/content-engine")
+        assertTrue("content-engine extension directory must exist", contentEngineDir.exists())
 
-        val watcherFile = File(uBlockDir, "dm_watcher.js")
+        val watcherFile = File(contentEngineDir, "dm_watcher.js")
         assertTrue("dm_watcher.js content script must exist", watcherFile.exists())
         val watcherCode = watcherFile.readText()
 
@@ -184,7 +184,7 @@ class DmNotificationTest {
         assertTrue("dm_watcher must contain cleanSenderName with i18n support", watcherCode.contains("cleanSenderName"))
         assertTrue("dm_watcher must use sliding deduplication TTL", watcherCode.contains("DUP_TTL_MS"))
 
-        val manifestFile = File(uBlockDir, "manifest.json")
+        val manifestFile = File(contentEngineDir, "manifest.json")
         assertTrue("manifest.json must exist", manifestFile.exists())
         val manifestCode = manifestFile.readText()
         assertTrue("manifest.json must include dm_watcher.js in content_scripts", manifestCode.contains("dm_watcher.js"))
@@ -193,12 +193,12 @@ class DmNotificationTest {
         assertFalse("dm_watcher.js must never read document.cookie", watcherCode.contains("document.cookie"))
 
         // Verify session isolation: focusgram_content.js skips execution for background session
-        val contentScriptFile = File(uBlockDir, "focusgram_content.js")
+        val contentScriptFile = File(contentEngineDir, "focusgram_content.js")
         assertTrue("focusgram_content.js must exist", contentScriptFile.exists())
         val contentScriptCode = contentScriptFile.readText()
         assertTrue("focusgram_content.js must isolate background session", contentScriptCode.contains("focusgram_bg_dm=1"))
 
-        val bgFile = File(uBlockDir, "background.js")
+        val bgFile = File(contentEngineDir, "background.js")
         assertTrue("background.js must exist", bgFile.exists())
         val bgCode = bgFile.readText()
         assertTrue("background.js must intercept focusgram_bg_dm=1", bgCode.contains("focusgram_bg_dm=1"))
@@ -312,8 +312,8 @@ class DmNotificationTest {
 
     @Test
     fun testInstagramStyleXUnreadAndOutgoingDetection() {
-        val uBlockDir = getFile("src/main/assets/extensions/ublock")
-        val watcherFile = File(uBlockDir, "dm_watcher.js")
+        val contentEngineDir = getFile("src/main/assets/extensions/content-engine")
+        val watcherFile = File(contentEngineDir, "dm_watcher.js")
         assertTrue("dm_watcher.js must exist", watcherFile.exists())
         val watcherCode = watcherFile.readText()
 
@@ -367,7 +367,7 @@ class DmNotificationTest {
 
     @Test
     fun testNotesExclusionAndSettingsIntegrity() {
-        val watcherFile = getFile("src/main/assets/extensions/ublock/dm_watcher.js")
+        val watcherFile = getFile("src/main/assets/extensions/content-engine/dm_watcher.js")
         assertTrue("dm_watcher.js must exist", watcherFile.exists())
         val watcherCode = watcherFile.readText()
         assertTrue("dm_watcher.js must define isNotesElement helper", watcherCode.contains("isNotesElement"))
@@ -441,8 +441,8 @@ class DmNotificationTest {
     @Test
     fun testMutedChatSuppressionAndNotificationFormatting() {
         // 1. Verify dm_watcher.js contains isChatMuted and checks muted SVG / aria attributes
-        val uBlockDir = getFile("src/main/assets/extensions/ublock")
-        val watcherFile = File(uBlockDir, "dm_watcher.js")
+        val contentEngineDir = getFile("src/main/assets/extensions/content-engine")
+        val watcherFile = File(contentEngineDir, "dm_watcher.js")
         assertTrue("dm_watcher.js must exist", watcherFile.exists())
         val code = watcherFile.readText()
 

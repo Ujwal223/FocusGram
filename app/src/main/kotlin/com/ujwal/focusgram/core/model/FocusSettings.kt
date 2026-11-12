@@ -89,7 +89,13 @@ data class FocusSettings(
 
     val dmNotificationsEnabled: Boolean = false,
     val dmNotificationPreview: Boolean = false,
-    val dmRecentMessageHashes: String = "[]"
+    val dmRecentMessageHashes: String = "[]",
+
+    val developerOptionsEnabled: Boolean = false,
+    val enableDebugMenu: Boolean = false,
+    val hideSupportBanner: Boolean = false,
+    val disableAutoUpdateCheck: Boolean = false,
+    val adRewardsEnabled: Boolean = true
 ) {
     /**
      * Evaluates whether grayscale is currently active, considering the manual toggle
