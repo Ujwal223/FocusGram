@@ -1,0 +1,31 @@
+name: Mirror to Codeberg
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["**"]
+  workflow_dispatch:
+
+jobs:
+  mirror-to-codeberg:
+    name: Sync Repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push mirror to Codeberg
+        env:
+          CODEBERG_TOKEN: ${{ secrets.CODEBERG_TOKEN }}
+          CODEBERG_USER: ${{ secrets.CODEBERG_USER || 'Ujwal' }}
+        run: |
+          if [ -z "$CODEBERG_TOKEN" ]; then
+            echo "::error::CODEBERG_TOKEN secret is not set in GitHub repository settings. Please create a token on Codeberg with 'repo' scope and add it under GitHub Repository Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+          git remote set-head origin -d 2>/dev/null || true
+          git remote add codeberg "https://${CODEBERG_USER}:${CODEBERG_TOKEN}@codeberg.org/Ujwal/FocusGram.git"
+          git push --prune codeberg "+refs/remotes/origin/*:refs/heads/*" "+refs/tags/*:refs/tags/*"
